@@ -13,11 +13,30 @@ def hoje_sp() -> date:
     return datetime.now(TZ_SP).date()
 
 
+def agora_sp() -> datetime:
+    """Agora em São Paulo, SEM fuso — para comparar com colunas `timestamp`
+
+    sem fuso (`SED.events.event_date`). Com `tzinfo` a comparação viraria
+    UTC do outro lado e deslocaria o corte em 3 horas.
+    """
+    return datetime.now(TZ_SP).replace(tzinfo=None)
+
+
 @dataclass(frozen=True)
 class Periodo:
-    granularidade: str  # "dia" | "mes" | "ano"
+    granularidade: str  # "dia" | "semana" | "mes" | "ano"
     inicio: date
     fim: date
+
+
+def semana_iso(d: date) -> str:
+    """Rótulo "AAAA-Wnn" da semana ISO em que `d` cai — o valor que o filtro de
+
+    semana manda na querystring. Vem do calendário ISO (não do ano civil): 31/12
+    pode pertencer à semana 1 do ano seguinte, e é assim que tem que ser gravado.
+    """
+    ano, semana, _ = d.isocalendar()
+    return f"{ano:04d}-W{semana:02d}"
 
 
 def resolver_periodo(granularidade: str, valor: str) -> Periodo:
@@ -41,6 +60,17 @@ def resolver_periodo(granularidade: str, valor: str) -> Periodo:
         fim = date(ano, mes, calendar.monthrange(ano, mes)[1])
         return Periodo("mes", inicio, fim)
 
+    if granularidade == "semana":
+        # Semana ISO (segunda a domingo), formato "AAAA-Wnn" — mesmo vocabulário
+        # do `<input type="week">` e do `isocalendar()` do Python.
+        try:
+            ano_str, semana_str = valor.upper().split("-W")
+            ano, semana = int(ano_str), int(semana_str)
+            inicio = date.fromisocalendar(ano, semana, 1)
+        except ValueError as exc:
+            raise ValueError("periodo inválido para granularidade 'semana': esperado AAAA-Wnn") from exc
+        return Periodo("semana", inicio, inicio + timedelta(days=6))
+
     if granularidade == "ano":
         try:
             ano = int(valor)
@@ -48,7 +78,7 @@ def resolver_periodo(granularidade: str, valor: str) -> Periodo:
             raise ValueError("periodo inválido para granularidade 'ano': esperado AAAA") from exc
         return Periodo("ano", date(ano, 1, 1), date(ano, 12, 31))
 
-    raise ValueError(f"granularidade inválida: '{granularidade}' (esperado dia, mes ou ano)")
+    raise ValueError(f"granularidade inválida: '{granularidade}' (esperado dia, semana, mes ou ano)")
 
 
 def dias_uteis_decorridos(inicio: date, fim: date, hoje: date | None = None) -> int:

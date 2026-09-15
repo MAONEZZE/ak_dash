@@ -13,8 +13,9 @@ router = APIRouter(tags=["pessoas"])
 @router.get("/pessoas")
 def get_pessoas(_usuario: dict = Depends(exigir_usuario)) -> list[dict]:
     pessoas = obter_ou_calcular(
-        "pessoas:ativas", settings.cache_ttl_historico_segundos, listar_ativas
+        "pessoas:ativas", settings.cache_ttl_pessoas_segundos, listar_ativas
     )
     return [
-        {"id": p.id, "nome": p.nome, "cargo": p.cargo, "email": p.email} for p in pessoas
+        {"id": p.id, "nome": p.nome, "cargo": p.cargo, "email": p.email, "imagem_url": p.imagem_url}
+        for p in pessoas
     ]

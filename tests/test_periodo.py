@@ -4,7 +4,7 @@ from datetime import date
 
 import pytest
 
-from app.periodo import dias_uteis_decorridos, resolver_periodo
+from app.periodo import dias_uteis_decorridos, resolver_periodo, semana_iso
 
 
 def test_resolver_periodo_dia():
@@ -47,3 +47,34 @@ def test_dias_uteis_decorridos_mes_inteiro_ja_passado():
 def test_dias_uteis_decorridos_periodo_futuro_e_zero():
     dias = dias_uteis_decorridos(date(2026, 5, 1), date(2026, 5, 31), hoje=date(2026, 4, 3))
     assert dias == 0
+
+
+# --- granularidade "semana" (segunda a domingo, ISO)
+
+
+def test_semana_iso_vai_de_segunda_a_domingo():
+    p = resolver_periodo("semana", "2026-W38")
+    assert (p.granularidade, p.inicio, p.fim) == ("semana", date(2026, 9, 14), date(2026, 9, 20))
+    assert p.inicio.weekday() == 0 and p.fim.weekday() == 6
+
+
+def test_semana_iso_do_dia_e_a_semana_que_contem_o_dia():
+    assert semana_iso(date(2026, 9, 15)) == "2026-W38"
+    p = resolver_periodo("semana", semana_iso(date(2026, 9, 15)))
+    assert p.inicio <= date(2026, 9, 15) <= p.fim
+
+
+def test_semana_virada_de_ano_usa_calendario_iso_nao_o_civil():
+    # 31/12/2025 cai na semana 1 de 2026 pelo ISO — o rótulo tem que dizer 2026.
+    assert semana_iso(date(2025, 12, 31)) == "2026-W01"
+
+
+def test_semana_com_formato_invalido_levanta_valueerror():
+    for valor in ("2026-38", "2026-W99", "abc", ""):
+        with pytest.raises(ValueError):
+            resolver_periodo("semana", valor)
+
+
+def test_semana_tem_5_dias_uteis():
+    p = resolver_periodo("semana", "2026-W38")
+    assert dias_uteis_decorridos(p.inicio, p.fim, hoje=p.fim) == 5

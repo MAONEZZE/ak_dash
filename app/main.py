@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 
 from app.config import settings
 from app.dominios.comercial.rotas import router as comercial_router
+from app.dominios.geral.rotas import router as geral_router
 from app.dominios.pessoas.rotas import router as pessoas_router
 
 app = FastAPI(title="Dashboard Akeel — BFF", version="0.1.0")
@@ -29,6 +30,7 @@ app.add_middleware(
 
 app.include_router(pessoas_router)
 app.include_router(comercial_router)
+app.include_router(geral_router)
 
 
 @app.get("/saude", tags=["infra"])
