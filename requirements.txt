@@ -1,4 +1,3 @@
--e git+https://github.com/MAONEZZE/ak_dash.git@d2726a473c73f781fbb1dc16567556779655b86b#egg=ak_dash
 annotated-doc==0.0.5
 annotated-types==0.8.0
 anyio==4.15.1
