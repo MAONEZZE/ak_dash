@@ -4,7 +4,7 @@ from datetime import date
 
 import pytest
 
-from app.periodo import dias_uteis_decorridos, resolver_periodo, semana_iso
+from app.periodo import agora_sp, dias_uteis_decorridos, resolver_periodo, semana_iso
 
 
 def test_resolver_periodo_dia():
@@ -78,3 +78,11 @@ def test_semana_com_formato_invalido_levanta_valueerror():
 def test_semana_tem_5_dias_uteis():
     p = resolver_periodo("semana", "2026-W38")
     assert dias_uteis_decorridos(p.inicio, p.fim, hoje=p.fim) == 5
+
+
+# O corte de `buscar_eventos_proximos` precisa de um instante inequívoco:
+# ingênuo, o valor seria interpretado como UTC e adiantaria o filtro em 3h.
+def test_agora_sp_tem_fuso():
+    agora = agora_sp()
+    assert agora.tzinfo is not None
+    assert agora.utcoffset() is not None

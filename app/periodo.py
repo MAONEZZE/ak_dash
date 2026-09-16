@@ -14,12 +14,17 @@ def hoje_sp() -> date:
 
 
 def agora_sp() -> datetime:
-    """Agora em São Paulo, SEM fuso — para comparar com colunas `timestamp`
+    """Agora em São Paulo, COM fuso.
 
-    sem fuso (`SED.events.event_date`). Com `tzinfo` a comparação viraria
-    UTC do outro lado e deslocaria o corte em 3 horas.
+    Já foi ingênuo, para casar com `SED.events.event_date` sendo `timestamp`
+    sem fuso. Era errado: o Prisma grava aquela coluna em UTC, então comparar
+    com o relógio de parede de São Paulo adiantava o corte em 3h e deixava
+    eventos já começados aparecendo como "próximos".
+
+    Quem monta o filtro é que decide o formato do instante — ver
+    `buscar_eventos_proximos`. Aqui só devolvemos um instante inequívoco.
     """
-    return datetime.now(TZ_SP).replace(tzinfo=None)
+    return datetime.now(TZ_SP)
 
 
 @dataclass(frozen=True)

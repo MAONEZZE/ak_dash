@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 from app.config import settings
 from app.fontes.banco import query
@@ -82,6 +82,18 @@ class EventoInscricoes:
     aprovados: int
 
 
+def _instante_utc(momento: datetime) -> str:
+    """ISO-8601 em UTC com sufixo `Z`.
+
+    `Z` em vez do `+00:00` que o `isoformat()` produz: o `+` depende de
+    percent-encoding correto para não virar espaço na querystring, e `Z` não
+    tem essa armadilha. Datetime ingênuo é assumido como UTC.
+    """
+    if momento.tzinfo is None:
+        return momento.isoformat(timespec="seconds") + "Z"
+    return momento.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def buscar_eventos_proximos(agora: datetime) -> list[EventoInscricoes]:
     """Próximos `LIMITE_EVENTOS` eventos do segundo Supabase (`SED.events`),
 
@@ -92,14 +104,22 @@ def buscar_eventos_proximos(agora: datetime) -> list[EventoInscricoes]:
     card. Sem as envs `SUPABASE_INSCRICOES_*`, `query()` devolve vazio e a
     lista sai `[]` — o card degrada pra estado vazio, nunca derruba /geral.
 
-    `event_date` é `timestamp` sem fuso no banco, então `agora` também tem
-    que chegar aqui ingênuo (horário de São Paulo) — comparar um com fuso
-    e outro sem deslocaria o corte em 3 horas.
+    `agora` chega com fuso e o filtro é montado em UTC com sufixo `Z`. Esse
+    formato é correto nos dois esquemas possíveis da coluna, o que permite
+    migrar `event_date` para `timestamptz` sem tocar aqui:
+
+    - sendo `timestamp` sem fuso, o Postgres descarta o `Z` e compara relógio
+      de parede contra relógio de parede — e a coluna guarda UTC, porque é
+      assim que o Prisma grava;
+    - sendo `timestamptz`, o `Z` é respeitado e a comparação é de instantes.
+
+    Mandar o horário de São Paulo aqui (com ou sem fuso) quebraria o primeiro
+    caso, adiantando o corte em 3h.
     """
     eventos = query(
         "events",
         {
-            "event_date": f"gte.{agora.isoformat(timespec='seconds')}",
+            "event_date": f"gte.{_instante_utc(agora)}",
             "order": "event_date.asc",
         },
         schema=settings.supabase_inscricoes_schema or "public",

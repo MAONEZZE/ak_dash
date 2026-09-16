@@ -5,7 +5,7 @@ mesmo `buscar_totais` do Comercial (ver tests/test_banco_comercial.py).
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from app.dominios.geral import banco as banco_mod
 
@@ -58,7 +58,8 @@ def test_filtra_por_data_futura_e_so_status_pending_approved(monkeypatch):
         [],
     )
     banco_mod.buscar_eventos_proximos(datetime(2026, 9, 15, 10, 30, 0))
-    assert chamadas[0]["filtros"]["event_date"] == "gte.2026-09-15T10:30:00"
+    # Ingênuo é assumido como UTC: só ganha o sufixo `Z`, sem deslocar nada.
+    assert chamadas[0]["filtros"]["event_date"] == "gte.2026-09-15T10:30:00Z"
     assert chamadas[0]["filtros"]["order"] == "event_date.asc"
     assert chamadas[1]["filtros"]["status"] == "in.(pending,approved)"
     assert chamadas[1]["filtros"]["event_id"] == 'in.("e1")'
@@ -91,3 +92,27 @@ def test_evento_sem_titulo_ganha_rotulo_neutro(monkeypatch):
     )
     (evento,) = banco_mod.buscar_eventos_proximos(datetime(2026, 9, 15, 10, 0))
     assert evento.titulo == "Sem título"
+
+
+# O corte tem que viajar em UTC. Mandar o relógio de parede de São Paulo
+# adiantava o filtro em 3h contra a coluna (que o Prisma grava em UTC), e
+# eventos já começados apareciam como "próximos".
+def test_corte_vai_em_utc_quando_agora_tem_fuso(monkeypatch):
+    chamadas = _mockar_duas_queries(monkeypatch, [], [])
+    sp = timezone(timedelta(hours=-3))
+
+    banco_mod.buscar_eventos_proximos(datetime(2026, 9, 15, 10, 30, 0, tzinfo=sp))
+
+    assert chamadas[0]["filtros"]["event_date"] == "gte.2026-09-15T13:30:00Z"
+
+
+# `+00:00` dependeria de percent-encoding correto para não virar espaço na
+# querystring do PostgREST; `Z` não tem essa armadilha.
+def test_corte_nunca_usa_offset_numerico(monkeypatch):
+    chamadas = _mockar_duas_queries(monkeypatch, [], [])
+
+    banco_mod.buscar_eventos_proximos(datetime(2026, 9, 15, 10, 30, 0, tzinfo=timezone.utc))
+
+    valor = chamadas[0]["filtros"]["event_date"]
+    assert valor.endswith("Z")
+    assert "+" not in valor
