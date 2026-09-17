@@ -35,22 +35,33 @@ def _erro_401(mensagem: str) -> HTTPException:
     )
 
 
-def _obter_jwks_por_kid() -> dict[str, PyJWK]:
+def _obter_jwks_por_kid(forcar: bool = False) -> dict[str, PyJWK]:
+    """JWKS em cache, mas FALHA NUNCA É CACHEADA.
+
+    Antes, um erro de rede na primeira busca gravava `{}` no cache pra sempre:
+    daí em diante todo token caía no fallback HS256, que nunca valida um token
+    ES256 — e este projeto assina em ES256. Efeito: um blip de rede no boot do
+    BFF fazia 401 em toda requisição até alguém reiniciar o processo. Com o
+    dashboard numa TV, isso é a tela de login travada até alguém perceber.
+
+    `forcar=True` refaz a busca ignorando o cache — usado quando chega um `kid`
+    desconhecido, que é o que se vê quando o Supabase rotaciona a chave.
+    """
     global _jwks_por_kid
-    if _jwks_por_kid is not None:
+    if _jwks_por_kid is not None and not forcar:
         return _jwks_por_kid
     if not settings.supabase_url:
-        _jwks_por_kid = {}
-        return _jwks_por_kid
+        return {}
     try:
         resposta = httpx.get(f"{settings.supabase_url}/auth/v1/.well-known/jwks.json", timeout=10.0)
         resposta.raise_for_status()
         chaves = resposta.json().get("keys", [])
         _jwks_por_kid = {c["kid"]: PyJWK.from_dict(c) for c in chaves if "kid" in c}
+        return _jwks_por_kid
     except httpx.HTTPError as exc:
+        # Sem gravar no cache: a próxima requisição tenta de novo.
         logger.warning("Não foi possível buscar o JWKS do Supabase: %s", exc)
-        _jwks_por_kid = {}
-    return _jwks_por_kid
+        return _jwks_por_kid or {}
 
 
 def exigir_usuario(authorization: str = Header(default="")) -> dict:
@@ -65,6 +76,11 @@ def exigir_usuario(authorization: str = Header(default="")) -> dict:
 
     kid = cabecalho.get("kid")
     chave_jwks = _obter_jwks_por_kid().get(kid) if kid else None
+    if kid and chave_jwks is None:
+        # `kid` que o cache não conhece: pode ser rotação de chave no Supabase.
+        # Rebusca antes de desistir, senão a rotação derrubaria todo mundo até
+        # o próximo restart do BFF.
+        chave_jwks = _obter_jwks_por_kid(forcar=True).get(kid)
     if chave_jwks is not None:
         try:
             return jwt.decode(token, chave_jwks.key, algorithms=_ALGORITMOS_JWKS, audience="authenticated")
