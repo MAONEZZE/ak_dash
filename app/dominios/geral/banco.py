@@ -30,9 +30,19 @@ CHAVES_FATURAMENTO = ("faturamento", "liquidado", "inscritos", "aprovados")
 # Cards de Inscritos/Aprovados: os N próximos eventos de `SED.events` giram
 # no card, um por vez. 3 é decisão de produto (3 barrinhas no rodapé).
 LIMITE_EVENTOS = 3
-# "Inscrito" = quem se inscreveu e não foi recusado; `rejected` e afins
-# nunca entram em nenhum dos dois números.
-STATUS_INSCRICAO = ("pending", "approved")
+
+# "Inscrito" = TODA linha de `SED.registrations` do evento, seja qual for o
+# status — o card mede captação (quanta gente se inscreveu), não ocupação de
+# vaga. Por isso não há filtro de status na consulta.
+#
+# Era `("pending", "approved")`, que excluía os recusados: a Imersão Alta
+# Cadência tinha 70 inscrições no banco e o card mostrava 65, porque 5 eram
+# `rejected`. Decisão de produto em 17/09/2026: o número da tela tem que ser o
+# mesmo que se conta no banco.
+#
+# Consequência a vigiar: status novo que signifique desistência (`cancelled`,
+# por exemplo) passaria a contar como inscrito. Hoje só existem `pending`,
+# `approved` e `rejected`. `aprovados` segue contando só `approved`.
 
 
 @dataclass(frozen=True)
@@ -69,7 +79,7 @@ def buscar_faturamento(inicio: date, fim: date, ids_pessoas: list[int]) -> Fatur
 class EventoInscricoes:
     """Um evento de `SED.events` + as contagens de `SED.registrations` dele.
 
-    `inscritos` conta `pending` + `approved` (todo mundo na lista);
+    `inscritos` conta TODAS as inscrições do evento, qualquer status;
     `aprovados`, só os `approved` — daí `aprovados <= inscritos` sempre.
     `capacidade` é `None` quando o evento não tem limite cadastrado.
     """
@@ -133,10 +143,7 @@ def buscar_eventos_proximos(agora: datetime) -> list[EventoInscricoes]:
     ids = ",".join(f'"{e["id"]}"' for e in eventos)
     inscricoes = query(
         "registrations",
-        {
-            "event_id": f"in.({ids})",
-            "status": f"in.({','.join(STATUS_INSCRICAO)})",
-        },
+        {"event_id": f"in.({ids})"},
         schema=settings.supabase_inscricoes_schema or "public",
         colunas="event_id,status",
         url_base=settings.supabase_inscricoes_url,

@@ -25,7 +25,12 @@ def _mockar_duas_queries(monkeypatch, eventos: list[dict], inscricoes: list[dict
     return chamadas
 
 
-def test_conta_inscritos_como_pendentes_mais_aprovados(monkeypatch):
+def test_inscritos_conta_toda_inscricao_inclusive_recusada(monkeypatch):
+    """Recusado É inscrito: o card mede captação, não ocupação de vaga.
+
+    Regressão do caso real da Imersão Alta Cadência (17/09/2026): 70 linhas no
+    banco, 5 delas `rejected`, e a tela mostrava 65.
+    """
     _mockar_duas_queries(
         monkeypatch,
         [{"id": "e1", "title": "Imersão", "event_date": "2026-09-20T19:00:00", "capacity": 50}],
@@ -33,10 +38,11 @@ def test_conta_inscritos_como_pendentes_mais_aprovados(monkeypatch):
             {"event_id": "e1", "status": "pending"},
             {"event_id": "e1", "status": "pending"},
             {"event_id": "e1", "status": "approved"},
+            {"event_id": "e1", "status": "rejected"},
         ],
     )
     (evento,) = banco_mod.buscar_eventos_proximos(datetime(2026, 9, 15, 10, 0))
-    assert evento.inscritos == 3
+    assert evento.inscritos == 4
     assert evento.aprovados == 1
     assert evento.capacidade == 50
 
@@ -51,7 +57,7 @@ def test_evento_sem_inscricao_sai_com_zero_nao_com_erro(monkeypatch):
     assert (evento.inscritos, evento.aprovados, evento.capacidade) == (0, 0, None)
 
 
-def test_filtra_por_data_futura_e_so_status_pending_approved(monkeypatch):
+def test_filtra_por_data_futura_e_nao_filtra_status(monkeypatch):
     chamadas = _mockar_duas_queries(
         monkeypatch,
         [{"id": "e1", "title": "x", "event_date": "2026-09-20T19:00:00", "capacity": None}],
@@ -61,7 +67,8 @@ def test_filtra_por_data_futura_e_so_status_pending_approved(monkeypatch):
     # Ingênuo é assumido como UTC: só ganha o sufixo `Z`, sem deslocar nada.
     assert chamadas[0]["filtros"]["event_date"] == "gte.2026-09-15T10:30:00Z"
     assert chamadas[0]["filtros"]["order"] == "event_date.asc"
-    assert chamadas[1]["filtros"]["status"] == "in.(pending,approved)"
+    # Sem filtro de status: toda inscrição do evento conta como inscrito.
+    assert "status" not in chamadas[1]["filtros"]
     assert chamadas[1]["filtros"]["event_id"] == 'in.("e1")'
 
 
