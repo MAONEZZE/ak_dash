@@ -14,20 +14,21 @@ from app.dominios.pessoas.banco import Pessoa
 from app.metas import Metas
 from app.metricas import NOME_EXIBICAO
 from app.periodo import Periodo, dias_uteis_decorridos
-from app.pontuacao import atribuir_ranking, calcular_pontuacao
+from app.pontuacao import atribuir_ranking
 
 # Colunas da tabela de pessoas, por cargo (decisão de produto).
 _METRICAS_SDR_TABELA = ("numeros_captados", "ligacoes_agendadas", "indicacoes")
 _METRICAS_CLOSER_TABELA = ("reunioes_realizadas", "liquidado", "aprovados", "indicacoes")
 
 # Métricas que ENTRAM NA PONTUAÇÃO (e, por consequência, no pódio) — nem toda
-# coluna da tabela conta. `liquidado` e `aprovados` ficam de fora enquanto
-# `dash.metricas_faturamento` não tiver as colunas de negócio: elas voltam
-# `None` pra todo closer, e uma métrica sem realizado zera a pontuação inteira
-# (regra de `pontuacao.py`) — era exatamente isso que deixava o pódio de
-# Closer vazio enquanto o de SDR aparecia. Elas seguem visíveis na tabela,
-# só não pontuam. Denominador fixo por cargo: todo closer é medido pelas
-# mesmas métricas, senão o ranking compararia médias de tamanhos diferentes.
+# coluna da tabela conta. A pontuação da Geral é a SOMA BRUTA do realizado
+# dessas métricas (não depende de meta cadastrada — ver `_pontuacao_por_quantidade`).
+# `liquidado` e `aprovados` ficam de fora por decisão de produto: são
+# métricas financeiras, não de atividade, e não fazem sentido somadas junto
+# com contagens de reunião/indicação numa única pontuação. Elas seguem
+# visíveis na tabela, só não pontuam.
+# Denominador fixo por cargo: todo closer é medido pelas mesmas métricas,
+# senão o ranking compararia somas de tamanhos diferentes.
 _METRICAS_PONTUACAO = {
     "sdr": _METRICAS_SDR_TABELA,
     "closer": ("reunioes_realizadas", "indicacoes"),
@@ -35,7 +36,13 @@ _METRICAS_PONTUACAO = {
 
 # Inscritos/Aprovados saíram daqui: viraram `eventos` na resposta — não são
 # mais um número do período, e sim os próximos eventos girando no card.
-_CARDS_ESCUROS = ("faturamento", "liquidado")
+#
+# Realizado dos escuros vem de `dash.metricas_faturamento` (número fechado da
+# empresa) — SEM meta: faturamento e liquidado nunca tiveram (faturamento) ou
+# não têm mais (liquidado) uma composição de pessoas que os carregue, então
+# ficam sempre com `meta`/`pct`/`pct_ritmo` em `None`. Só os 4 cards claros
+# continuam com a meta somada por pessoa.
+_COMPOSICAO_CARDS_ESCUROS: tuple[str, ...] = ("faturamento", "liquidado")
 
 # Card claro da empresa -> (cargo, métrica) que o compõem. Uma definição só
 # para o realizado E para a meta: era a duplicação entre os dois que fazia
@@ -72,35 +79,47 @@ def _meta_card_empresa(
     metas: Metas,
     periodo: Periodo,
     composicao: tuple[tuple[str, str], ...],
-    id_por_cargo: dict[str, int | None],
     pessoas_por_cargo: dict[str, list[Pessoa]],
 ) -> int | None:
-    """Meta do card da empresa = meta do CARGO × pessoas ativas daquele cargo,
+    """Meta do card da empresa = SOMA das metas individuais das pessoas ativas
 
-    somada sobre os cargos que compõem o card (ex: reuniões agendadas = 4/dia
-    × 3 SDRs + 4/dia × 4 Closers = 28/dia). `dash.metricas_metas` não guarda linha de
-    empresa pras métricas de cargo justamente por isso: o número acompanha o
-    time sem ninguém recadastrar quando alguém entra ou sai.
+    dos cargos que compõem o card (ex: reuniões agendadas = as metas dos 3
+    SDRs + as dos 4 Closers). `dash.metricas_metas` não guarda linha de
+    empresa justamente por isso: o número acompanha o time sem ninguém
+    recadastrar quando alguém entra ou sai — e agora acompanha também quem
+    tem meta maior que o colega, coisa que a meta por cargo achatava.
 
-    `None` se QUALQUER parte não tiver meta cadastrada — nunca meta de um
-    cargo só contra um realizado que soma os dois.
+    `None` se QUALQUER pessoa da composição estiver sem meta cadastrada (ou
+    se a composição for vazia) — nunca a meta de parte do time contra um
+    realizado que soma o time inteiro.
     """
+    if not composicao:
+        return None
     total = 0
     for cargo, metrica in composicao:
-        id_cargo = id_por_cargo.get(cargo)
-        if id_cargo is None:
+        parcial = metas.somar(
+            periodo.inicio, periodo.fim, [int(p.id) for p in pessoas_por_cargo[cargo]], metrica
+        )
+        if parcial is None:
             return None
-        meta_por_pessoa = metas.por_cargo(periodo.inicio, periodo.fim, id_cargo, metrica)
-        if meta_por_pessoa is None:
-            return None
-        total += meta_por_pessoa * len(pessoas_por_cargo[cargo])
+        total += parcial
     return total
 
 
+def _pontuacao_por_quantidade(metricas_calc: list[dict], metricas: tuple[str, ...]) -> float:
+    """Soma bruta do realizado das métricas de pontuação do cargo — nunca
+
+    `None` (as métricas em `_METRICAS_PONTUACAO` sempre têm `realizado`
+    numérico, nunca `None`: vêm de `totais_sdr.realizado.get(..., 0)`/
+    `totais_closer.realizado.get(..., 0)`). Diferente de `/comercial/*`
+    (`calcular_pontuacao`, % da meta), a pontuação da Geral não depende de
+    meta cadastrada — é assim que todo mundo do cargo entra no ranking.
+    """
+    return sum(m["realizado"] or 0 for m in metricas_calc if m["metrica"] in metricas)
+
+
 def _montar_pessoa(pessoa: Pessoa, cargo: str, metricas_calc: list[dict], nomes_repetidos: set[str]) -> dict:
-    pontuacao = calcular_pontuacao(
-        [m for m in metricas_calc if m["metrica"] in _METRICAS_PONTUACAO[cargo]]
-    )
+    pontuacao = _pontuacao_por_quantidade(metricas_calc, _METRICAS_PONTUACAO[cargo])
     return {
         "id_user": int(pessoa.id),
         "nome": pessoa.nome,
@@ -130,9 +149,6 @@ def montar_resposta_geral(
     totais_sdr: TotaisCargo,
     totais_closer: TotaisCargo,
     metas: Metas,
-    id_cargo_sdr: int | None,
-    id_cargo_closer: int | None,
-    id_cargo_empresa: int | None,
     faturamento: Faturamento,
     eventos: list[EventoInscricoes],
 ) -> dict:
@@ -144,10 +160,9 @@ def montar_resposta_geral(
     as consultas de `vw_metricas`/faturamento que já vieram prontas em
     `totais_sdr`/`totais_closer`/`faturamento`.
 
-    `id_cargo_empresa` é o cargo `empresa` de `dash.metricas_cargo` — é nele
-    que ficam penduradas as metas que não são de ninguém em particular
-    (faturamento, liquidado). `None` (cargo ausente da tabela) degrada pra
-    meta `None`, nunca pra 0.
+    `metas` é por PESSOA (`dash.user_metas`): cada card da empresa soma as
+    metas de quem o compõe, e cada linha da tabela usa a meta daquela pessoa.
+    Quem não tem meta cadastrada fica com `None`, nunca com 0.
 
     `eventos` é a única parte da resposta que ignora o período pedido: são os
     próximos eventos (futuro), independentes do recorte de datas da página.
@@ -156,29 +171,24 @@ def montar_resposta_geral(
     dias_totais = dias_uteis_decorridos(periodo_metas.inicio, periodo_metas.fim, hoje=periodo_metas.fim)
     fracao_decorrida = dias_decorridos / dias_totais if dias_totais else 0.0
 
+    pessoas_por_cargo = {"sdr": pessoas_sdr, "closer": pessoas_closer}
+
     cards = []
-    for chave in _CARDS_ESCUROS:
+    for chave in _COMPOSICAO_CARDS_ESCUROS:
         realizado = faturamento.empresa.get(chave)
-        meta = (
-            metas.por_cargo(periodo_metas.inicio, periodo_metas.fim, id_cargo_empresa, chave)
-            if id_cargo_empresa is not None
-            else None
-        )
         cards.append(
             {
                 "metrica": chave,
                 "nome_exibicao": NOME_EXIBICAO[chave],
                 "escuro": True,
                 "realizado": realizado,
-                "meta": meta,
-                "pct": _pct(realizado, meta),
-                "pct_ritmo": _pct_ritmo(realizado, meta, fracao_decorrida),
+                "meta": None,
+                "pct": None,
+                "pct_ritmo": None,
             }
         )
 
     totais_por_cargo = {"sdr": totais_sdr, "closer": totais_closer}
-    pessoas_por_cargo = {"sdr": pessoas_sdr, "closer": pessoas_closer}
-    id_por_cargo = {"sdr": id_cargo_sdr, "closer": id_cargo_closer}
 
     for chave, composicao in _COMPOSICAO_CARDS_CLAROS.items():
         realizado = sum(
@@ -186,7 +196,7 @@ def montar_resposta_geral(
             for cargo, metrica in composicao
             for pessoa in pessoas_por_cargo[cargo]
         )
-        meta = _meta_card_empresa(metas, periodo_metas, composicao, id_por_cargo, pessoas_por_cargo)
+        meta = _meta_card_empresa(metas, periodo_metas, composicao, pessoas_por_cargo)
         cards.append(
             {
                 "metrica": chave,
@@ -202,27 +212,22 @@ def montar_resposta_geral(
     todos_nomes = [p.nome for p in pessoas_sdr] + [p.nome for p in pessoas_closer]
     nomes_repetidos = {nome for nome in todos_nomes if todos_nomes.count(nome) > 1}
 
+    def meta_de(id_user: int, chave: str) -> int | None:
+        return metas.por_usuario(periodo_metas.inicio, periodo_metas.fim, id_user, chave)
+
     pessoas_saida = []
-    meta_sdr = {
-        chave: metas.por_cargo(periodo_metas.inicio, periodo_metas.fim, id_cargo_sdr, chave) if id_cargo_sdr is not None else None
-        for chave in _METRICAS_SDR_TABELA
-    }
     for pessoa in pessoas_sdr:
         id_user = int(pessoa.id)
         metricas_calc = [
             {
                 "metrica": chave,
                 "realizado": totais_sdr.realizado.get((id_user, chave), 0),
-                "meta_periodo": meta_sdr[chave],
+                "meta_periodo": meta_de(id_user, chave),
             }
             for chave in _METRICAS_SDR_TABELA
         ]
         pessoas_saida.append(_montar_pessoa(pessoa, "sdr", metricas_calc, nomes_repetidos))
 
-    meta_closer = {
-        chave: metas.por_cargo(periodo_metas.inicio, periodo_metas.fim, id_cargo_closer, chave) if id_cargo_closer is not None else None
-        for chave in _METRICAS_CLOSER_TABELA
-    }
     for pessoa in pessoas_closer:
         id_user = int(pessoa.id)
         financeiro = faturamento.por_pessoa.get(id_user, {})
@@ -230,22 +235,22 @@ def montar_resposta_geral(
             {
                 "metrica": "reunioes_realizadas",
                 "realizado": totais_closer.realizado.get((id_user, "reunioes_realizadas"), 0),
-                "meta_periodo": meta_closer["reunioes_realizadas"],
+                "meta_periodo": meta_de(id_user, "reunioes_realizadas"),
             },
             {
                 "metrica": "liquidado",
                 "realizado": financeiro.get("liquidado"),
-                "meta_periodo": meta_closer["liquidado"],
+                "meta_periodo": meta_de(id_user, "liquidado"),
             },
             {
                 "metrica": "aprovados",
                 "realizado": financeiro.get("aprovados"),
-                "meta_periodo": meta_closer["aprovados"],
+                "meta_periodo": meta_de(id_user, "aprovados"),
             },
             {
                 "metrica": "indicacoes",
                 "realizado": totais_closer.realizado.get((id_user, "indicacoes"), 0),
-                "meta_periodo": meta_closer["indicacoes"],
+                "meta_periodo": meta_de(id_user, "indicacoes"),
             },
         ]
         pessoas_saida.append(_montar_pessoa(pessoa, "closer", metricas_calc, nomes_repetidos))

@@ -1,9 +1,12 @@
 """Leitura de `dash.metricas_cargo` — tabela de referência `id <-> cargo`.
 
 Hoje: closer=1, sdr=2, empresa=3. É ela que liga `users.id_cargo` ao nome do
-cargo (ver `dominios/pessoas/banco.py`) e que `dash.metas_cargo` usa pra
-vincular cada meta aos cargos em que ela vale. `empresa` é o cargo das metas
-que não pertencem a ninguém em particular (faturamento, liquidado).
+cargo — é esse o único uso que sobrou (ver `dominios/pessoas/banco.py`).
+
+Meta não passa mais por aqui: era `dash.metas_cargo` que vinculava meta a
+cargo, e ela saiu do banco em favor de `dash.user_metas` (meta por pessoa).
+O cargo `empresa` virou resquício: os cards da empresa somam as metas das
+pessoas que os compõem, ver `dominios/geral/calculo.py`.
 """
 from __future__ import annotations
 

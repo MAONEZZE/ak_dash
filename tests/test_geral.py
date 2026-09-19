@@ -9,12 +9,10 @@ from app.dominios.pessoas.banco import Pessoa
 from app.metas import Metas
 from app.periodo import Periodo
 
-# dash.metricas_cargo: closer=1, sdr=2, empresa=3 (mesmos ids do ambiente
-# real). `empresa` é o cargo das metas que não são de ninguém em particular
-# (faturamento, liquidado) — ver app/metas.py.
-ID_CARGO_CLOSER = 1
-ID_CARGO_SDR = 2
-ID_CARGO_EMPRESA = 3
+# Metas são de PESSOA (dash.user_metas), não de cargo: a chave de `Metas` é
+# (mês, id_user, métrica). Os ids abaixo são os das pessoas dos cenários —
+# NATHAN e JONATHAN são SDRs, JACOB é closer, como no ambiente real.
+NATHAN, JONATHAN, JACOB = 9, 2, 1
 
 
 def _totais(realizado: dict) -> TotaisCargo:
@@ -41,9 +39,6 @@ def _montar(**kwargs):
         periodo_metas=kwargs.pop("periodo_metas", _periodo_metas()),
         periodo_saida=kwargs.pop("periodo_saida", _periodo_saida()),
         hoje=kwargs.pop("hoje", date(2026, 9, 14)),
-        id_cargo_sdr=kwargs.pop("id_cargo_sdr", ID_CARGO_SDR),
-        id_cargo_closer=kwargs.pop("id_cargo_closer", ID_CARGO_CLOSER),
-        id_cargo_empresa=kwargs.pop("id_cargo_empresa", ID_CARGO_EMPRESA),
         **kwargs,
     )
 
@@ -83,6 +78,29 @@ def test_cards_escuros_none_quando_metricas_faturamento_vazia():
     assert card_faturamento["meta"] is None
 
 
+def test_cards_escuros_nunca_tem_meta_mesmo_com_metas_do_time_cadastradas():
+    # Faturamento/Liquidado (Geral) mostram só o valor puro do período — a
+    # composição que somava meta de closer pro Liquidado foi removida, então
+    # nem cadastrando meta pra todo o time ela deve reaparecer no card.
+    closer = [Pessoa(id="1", nome="Jacob", cargo="closer", email="ja@x.com")]
+    metas = Metas({(date(2026, 9, 1), JACOB, "liquidado"): 1000})
+    faturamento = Faturamento(empresa={"faturamento": 500000.0, "liquidado": 90000.0, "inscritos": None, "aprovados": None}, por_pessoa={})
+    resposta = _montar(
+        pessoas_sdr=[], pessoas_closer=closer,
+        totais_sdr=_totais({}), totais_closer=_totais({}),
+        metas=metas, faturamento=faturamento, eventos=[],
+    )
+    card_faturamento = next(c for c in resposta["cards"] if c["metrica"] == "faturamento")
+    card_liquidado = next(c for c in resposta["cards"] if c["metrica"] == "liquidado")
+    assert card_faturamento["realizado"] == 500000.0
+    assert card_faturamento["meta"] is None
+    assert card_faturamento["pct"] is None
+    assert card_liquidado["realizado"] == 90000.0
+    assert card_liquidado["meta"] is None
+    assert card_liquidado["pct"] is None
+    assert card_liquidado["pct_ritmo"] is None
+
+
 def test_card_indicacoes_soma_captadas_sdr_e_indicacoes_closer():
     sdr = [Pessoa(id="4", nome="Jennifer", cargo="sdr", email="j@x.com")]
     closer = [Pessoa(id="1", nome="Jacob", cargo="closer", email="ja@x.com")]
@@ -96,23 +114,29 @@ def test_card_indicacoes_soma_captadas_sdr_e_indicacoes_closer():
     assert card["realizado"] == 8
 
 
-def test_pontuacao_pessoa_requer_todas_as_metricas_da_tabela_com_meta():
-    # SDR na tabela tem 3 colunas — meta só numa não basta pra pontuação existir.
+def test_pontuacao_e_soma_bruta_de_quantidade_mesmo_sem_meta():
+    # SDR na tabela tem 3 colunas de pontuação; sem meta cadastrada em
+    # nenhuma, a pontuação é a soma bruta do realizado (312 + 0 + 0), não
+    # mais None — e a pessoa entra no ranking.
     sdr = [Pessoa(id="9", nome="Nathan", cargo="sdr", email="n@x.com")]
-    metas = Metas({(date(2026, 9, 1), ID_CARGO_SDR, "numeros_captados"): 400})
+    metas = Metas({(date(2026, 9, 1), NATHAN, "numeros_captados"): 400})
     resposta = _montar(
         pessoas_sdr=sdr, pessoas_closer=[],
         totais_sdr=_totais({(9, "numeros_captados"): 312}), totais_closer=_totais({}),
         metas=metas, faturamento=_faturamento_vazio(), eventos=[],
     )
-    assert resposta["pessoas"][0]["pontuacao"] is None
-    assert resposta["pessoas"][0]["posicao"] is None
+    assert resposta["pessoas"][0]["pontuacao"] == 312
+    assert resposta["pessoas"][0]["posicao"] is not None
 
 
-def test_duas_pessoas_do_mesmo_cargo_compartilham_a_mesma_meta():
+def test_cada_pessoa_da_tabela_e_cobrada_pela_meta_dela():
+    # Antes a meta era do cargo e a tabela mostrava o mesmo número pros dois.
     a = Pessoa(id="9", nome="Nathan", cargo="sdr", email="n@x.com")
     b = Pessoa(id="2", nome="Jonathan", cargo="sdr", email="j@x.com")
-    metas = Metas({(date(2026, 9, 1), ID_CARGO_SDR, "numeros_captados"): 20})  # diária
+    metas = Metas({  # diárias × 22 dias úteis de set/2026
+        (date(2026, 9, 1), NATHAN, "numeros_captados"): 20,
+        (date(2026, 9, 1), JONATHAN, "numeros_captados"): 30,
+    })
     resposta = _montar(
         pessoas_sdr=[a, b], pessoas_closer=[],
         totais_sdr=_totais({(9, "numeros_captados"): 500, (2, "numeros_captados"): 100}), totais_closer=_totais({}),
@@ -121,19 +145,24 @@ def test_duas_pessoas_do_mesmo_cargo_compartilham_a_mesma_meta():
     por_id = {p["id_user"]: p for p in resposta["pessoas"]}
     meta_nathan = next(m for m in por_id[9]["metricas"] if m["metrica"] == "numeros_captados")
     meta_jonathan = next(m for m in por_id[2]["metricas"] if m["metrica"] == "numeros_captados")
-    assert meta_nathan["meta"] == meta_jonathan["meta"] == 440  # 20/dia × 22 dias úteis
+    assert meta_nathan["meta"] == 440
+    assert meta_jonathan["meta"] == 660
 
 
-def test_id_cargo_none_degrada_pra_meta_none_sem_erro():
-    sdr = [Pessoa(id="9", nome="Nathan", cargo="sdr", email="n@x.com")]
-    metas = Metas({(date(2026, 9, 1), ID_CARGO_SDR, "numeros_captados"): 400})
+def test_pessoa_sem_meta_propria_fica_com_meta_none_sem_erro():
+    # Quem não tem linha em dash.user_metas não herda a do colega de cargo.
+    sdr = [
+        Pessoa(id="9", nome="Nathan", cargo="sdr", email="n@x.com"),
+        Pessoa(id="2", nome="Jonathan", cargo="sdr", email="j@x.com"),
+    ]
+    metas = Metas({(date(2026, 9, 1), NATHAN, "numeros_captados"): 400})
     resposta = _montar(
         pessoas_sdr=sdr, pessoas_closer=[],
-        totais_sdr=_totais({(9, "numeros_captados"): 312}), totais_closer=_totais({}),
+        totais_sdr=_totais({(9, "numeros_captados"): 312, (2, "numeros_captados"): 10}), totais_closer=_totais({}),
         metas=metas, faturamento=_faturamento_vazio(), eventos=[],
-        id_cargo_sdr=None,
     )
-    metrica = next(m for m in resposta["pessoas"][0]["metricas"] if m["metrica"] == "numeros_captados")
+    por_id = {p["id_user"]: p for p in resposta["pessoas"]}
+    metrica = next(m for m in por_id[2]["metricas"] if m["metrica"] == "numeros_captados")
     assert metrica["meta"] is None
 
 
@@ -186,9 +215,9 @@ def test_dias_uteis_decorridos_e_total_refletem_mes_parcial():
 def test_meta_usa_o_mes_inteiro_mesmo_com_periodo_de_saida_capado():
     # Meta cheia do mês (decisão de produto) não diminui só porque o mês
     # ainda não terminou — usa periodo_metas (mês inteiro), não periodo_saida.
-    # Card da empresa = meta do cargo × pessoas ativas: 20/dia × 22 × 1 SDR.
+    # Card da empresa = soma das metas do time: um SDR só, 20/dia × 22.
     sdr = [Pessoa(id="9", nome="Nathan", cargo="sdr", email="n@x.com")]
-    metas = Metas({(date(2026, 9, 1), ID_CARGO_SDR, "numeros_captados"): 20})
+    metas = Metas({(date(2026, 9, 1), NATHAN, "numeros_captados"): 20})
     resposta = _montar(
         pessoas_sdr=sdr, pessoas_closer=[],
         totais_sdr=_totais({(9, "numeros_captados"): 312}), totais_closer=_totais({}),
@@ -273,8 +302,8 @@ def test_closer_pontua_sem_liquidado_e_aprovados_cadastrados():
     closer = [Pessoa(id="1", nome="Jacob", cargo="closer", email="ja@x.com")]
     # Diárias: 4 reuniões realizadas/dia (88 no mês) e 15 indicações/dia (330).
     metas = Metas({
-        (date(2026, 9, 1), ID_CARGO_CLOSER, "reunioes_realizadas"): 4,
-        (date(2026, 9, 1), ID_CARGO_CLOSER, "indicacoes"): 15,
+        (date(2026, 9, 1), JACOB, "reunioes_realizadas"): 4,
+        (date(2026, 9, 1), JACOB, "indicacoes"): 15,
     })
     resposta = _montar(
         pessoas_sdr=[], pessoas_closer=closer,
@@ -283,37 +312,66 @@ def test_closer_pontua_sem_liquidado_e_aprovados_cadastrados():
         metas=metas, faturamento=_faturamento_vazio(), eventos=[],
     )
     pessoa = resposta["pessoas"][0]
-    assert pessoa["pontuacao"] == 50.0  # (44/88 + 165/330) / 2 * 100
+    assert pessoa["pontuacao"] == 209  # soma bruta: 44 + 165, não mais média de percentuais
     assert pessoa["posicao"] == 1
     # As duas colunas continuam na tabela, em branco — só não pontuam.
     assert {m["metrica"] for m in pessoa["metricas"]} == {"reunioes_realizadas", "liquidado", "aprovados", "indicacoes"}
 
 
-def test_closer_sem_meta_operacional_continua_sem_pontuacao():
-    # A regra "sem meta = sem pontuação" segue valendo pras métricas que pontuam.
+def test_closer_sem_nenhuma_meta_continua_pontuando_por_quantidade():
+    # Diferente de /comercial/*, a Geral não exige meta cadastrada: a
+    # pontuação é a soma bruta do realizado (44 de reuniões + 0 de
+    # indicações), e o closer entra no ranking mesmo sem meta nenhuma.
     closer = [Pessoa(id="1", nome="Jacob", cargo="closer", email="ja@x.com")]
-    metas = Metas({(date(2026, 9, 1), ID_CARGO_CLOSER, "reunioes_realizadas"): 4})
     resposta = _montar(
         pessoas_sdr=[], pessoas_closer=closer,
         totais_sdr=_totais({}), totais_closer=_totais({(1, "reunioes_realizadas"): 44}),
-        metas=metas, faturamento=_faturamento_vazio(), eventos=[],
+        metas=Metas({}), faturamento=_faturamento_vazio(), eventos=[],
     )
-    assert resposta["pessoas"][0]["pontuacao"] is None
-    assert resposta["pessoas"][0]["posicao"] is None
+    assert resposta["pessoas"][0]["pontuacao"] == 44
+    assert resposta["pessoas"][0]["posicao"] is not None
 
 
-def test_meta_do_card_da_empresa_e_a_do_cargo_vezes_o_time():
-    # Reuniões agendadas: 4/dia por pessoa, 2 SDRs + 1 Closer = 12/dia -> 264
-    # no mês (22 dias úteis). `dash.metricas_metas` não guarda linha de empresa; o
-    # número acompanha o time sozinho.
+def test_varios_closers_sem_meta_aparecem_todos_no_ranking_por_quantidade():
+    # Reproduz o cenário real relatado: nenhum closer com meta cadastrada, e
+    # mesmo assim todos aparecem no pódio, ranqueados pela quantidade bruta.
+    closers = [
+        Pessoa(id="1", nome="Jacob", cargo="closer", email="ja@x.com"),
+        Pessoa(id="3", nome="Alex", cargo="closer", email="al@x.com"),
+        Pessoa(id="10", nome="Jonathan", cargo="closer", email="jo@x.com"),
+    ]
+    resposta = _montar(
+        pessoas_sdr=[], pessoas_closer=closers,
+        totais_sdr=_totais({}),
+        totais_closer=_totais({
+            (1, "reunioes_realizadas"): 44,
+            (3, "reunioes_realizadas"): 20,
+            (10, "reunioes_realizadas"): 8,
+        }),
+        metas=Metas({}), faturamento=_faturamento_vazio(), eventos=[],
+    )
+    posicoes = {p["id_user"]: p["posicao"] for p in resposta["pessoas"]}
+    assert None not in posicoes.values()
+    assert len(set(posicoes.values())) == 3
+    assert posicoes[1] == 1  # Jacob (44) na frente
+    assert posicoes[3] == 2  # Alex (20)
+    assert posicoes[10] == 3  # Jonathan (8)
+
+
+def test_meta_do_card_da_empresa_e_a_soma_das_metas_do_time():
+    # Reuniões agendadas: 4/dia + 6/dia (SDRs) + 4/dia (Closer) = 14/dia ->
+    # 308 no mês (22 dias úteis). `dash.metricas_metas` não guarda linha de
+    # empresa; o número acompanha o time sozinho — e agora respeita quem tem
+    # meta maior, em vez de multiplicar uma média pelo tamanho do time.
     sdr = [
         Pessoa(id="9", nome="Nathan", cargo="sdr", email="n@x.com"),
         Pessoa(id="2", nome="Jonathan", cargo="sdr", email="j@x.com"),
     ]
     closer = [Pessoa(id="1", nome="Jacob", cargo="closer", email="ja@x.com")]
     metas = Metas({
-        (date(2026, 9, 1), ID_CARGO_SDR, "reunioes_agendadas"): 4,
-        (date(2026, 9, 1), ID_CARGO_CLOSER, "reunioes_agendadas"): 4,
+        (date(2026, 9, 1), NATHAN, "reunioes_agendadas"): 4,
+        (date(2026, 9, 1), JONATHAN, "reunioes_agendadas"): 6,
+        (date(2026, 9, 1), JACOB, "reunioes_agendadas"): 4,
     })
     resposta = _montar(
         pessoas_sdr=sdr, pessoas_closer=closer,
@@ -321,15 +379,15 @@ def test_meta_do_card_da_empresa_e_a_do_cargo_vezes_o_time():
         metas=metas, faturamento=_faturamento_vazio(), eventos=[],
     )
     card = next(c for c in resposta["cards"] if c["metrica"] == "reunioes_agendadas")
-    assert card["meta"] == 4 * 22 * 3
+    assert card["meta"] == (4 + 6 + 4) * 22
 
 
-def test_card_de_dois_cargos_sem_meta_num_deles_fica_sem_meta():
-    # Só o Closer tem meta de reuniões agendadas: o card não pode mostrar a meta
-    # de 4 closers contra um realizado que soma SDR + Closer.
+def test_card_sem_meta_de_alguem_do_time_fica_sem_meta():
+    # Só o Closer tem meta de reuniões agendadas: o card não pode mostrar a
+    # meta de uma pessoa contra um realizado que soma SDR + Closer.
     sdr = [Pessoa(id="9", nome="Nathan", cargo="sdr", email="n@x.com")]
     closer = [Pessoa(id="1", nome="Jacob", cargo="closer", email="ja@x.com")]
-    metas = Metas({(date(2026, 9, 1), ID_CARGO_CLOSER, "reunioes_agendadas"): 4})
+    metas = Metas({(date(2026, 9, 1), JACOB, "reunioes_agendadas"): 4})
     resposta = _montar(
         pessoas_sdr=sdr, pessoas_closer=closer,
         totais_sdr=_totais({}), totais_closer=_totais({}),
@@ -343,8 +401,8 @@ def test_card_de_indicacoes_junta_captadas_do_sdr_com_indicacoes_do_closer():
     sdr = [Pessoa(id="9", nome="Nathan", cargo="sdr", email="n@x.com")]
     closer = [Pessoa(id="1", nome="Jacob", cargo="closer", email="ja@x.com")]
     metas = Metas({
-        (date(2026, 9, 1), ID_CARGO_SDR, "indicacoes"): 4,
-        (date(2026, 9, 1), ID_CARGO_CLOSER, "indicacoes"): 10,
+        (date(2026, 9, 1), NATHAN, "indicacoes"): 4,
+        (date(2026, 9, 1), JACOB, "indicacoes"): 10,
     })
     resposta = _montar(
         pessoas_sdr=sdr, pessoas_closer=closer,

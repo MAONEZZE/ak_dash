@@ -6,7 +6,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.auth import exigir_usuario
 from app.cache import obter_ou_calcular
-from app.cargos import buscar_cargos
 from app.config import settings
 from app.dominios.comercial.banco import buscar_totais
 from app.dominios.geral.banco import buscar_eventos_proximos, buscar_faturamento
@@ -86,8 +85,6 @@ def get_geral(
         settings.cache_ttl_metricas_segundos,
         lambda: buscar_eventos_proximos(agora),
     )
-    cargos = obter_ou_calcular("cargos", settings.cache_ttl_pessoas_segundos, buscar_cargos)
-
     return montar_resposta_geral(
         periodo_metas=periodo_metas,
         periodo_saida=periodo_saida,
@@ -97,9 +94,6 @@ def get_geral(
         totais_sdr=totais_sdr,
         totais_closer=totais_closer,
         metas=metas,
-        id_cargo_sdr=cargos.get("sdr"),
-        id_cargo_closer=cargos.get("closer"),
-        id_cargo_empresa=cargos.get("empresa"),
         faturamento=faturamento,
         eventos=eventos,
     )

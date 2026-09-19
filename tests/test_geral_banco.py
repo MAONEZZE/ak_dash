@@ -5,9 +5,85 @@ mesmo `buscar_totais` do Comercial (ver tests/test_banco_comercial.py).
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+
+import pytest
 
 from app.dominios.geral import banco as banco_mod
+
+
+# --- buscar_faturamento (dash.metricas_faturamento: uma linha por venda)
+
+
+def _mockar_vendas(monkeypatch, linhas: list[dict]) -> list[dict]:
+    chamadas: list[dict] = []
+
+    def _fake_query(tabela, filtros=None, *a, **k):
+        chamadas.append({"tabela": tabela, "filtros": filtros or {}})
+        return linhas
+
+    monkeypatch.setattr(banco_mod, "query", _fake_query)
+    return chamadas
+
+
+def test_soma_varias_vendas_no_card_da_empresa(monkeypatch):
+    _mockar_vendas(
+        monkeypatch,
+        [
+            {"user_closer": 8, "valor_bruto_contrato": 400000, "liquido_entrada": 160019.64},
+            {"user_closer": 1, "valor_bruto_contrato": 165000, "liquido_entrada": 21737.70},
+            {"user_closer": 3, "valor_bruto_contrato": 60000, "liquido_entrada": 9000.00},
+        ],
+    )
+    resultado = banco_mod.buscar_faturamento(date(2026, 8, 1), date(2026, 8, 31), [1, 3, 8])
+    assert resultado.empresa["faturamento"] == 625000
+    assert resultado.empresa["liquidado"] == pytest.approx(190757.34)
+    assert resultado.empresa["inscritos"] is None
+    assert resultado.empresa["aprovados"] is None
+
+
+def test_agrupa_liquidado_por_user_closer(monkeypatch):
+    _mockar_vendas(
+        monkeypatch,
+        [
+            {"user_closer": 8, "valor_bruto_contrato": 300000, "liquido_entrada": 100000.00},
+            {"user_closer": 8, "valor_bruto_contrato": 100000, "liquido_entrada": 60019.64},
+            {"user_closer": 1, "valor_bruto_contrato": 165000, "liquido_entrada": 21737.70},
+        ],
+    )
+    resultado = banco_mod.buscar_faturamento(date(2026, 8, 1), date(2026, 8, 31), [1, 8])
+    assert resultado.por_pessoa[8]["liquidado"] == 160019.64
+    assert resultado.por_pessoa[1]["liquidado"] == 21737.70
+    assert resultado.por_pessoa[8]["inscritos"] is None
+    assert resultado.por_pessoa[8]["aprovados"] is None
+
+
+def test_venda_sem_user_closer_entra_na_empresa_e_em_ninguem(monkeypatch):
+    _mockar_vendas(
+        monkeypatch,
+        [
+            {"user_closer": None, "valor_bruto_contrato": 60000, "liquido_entrada": 15000.00},
+            {"user_closer": 1, "valor_bruto_contrato": 20000, "liquido_entrada": 5000.00},
+        ],
+    )
+    resultado = banco_mod.buscar_faturamento(date(2026, 8, 1), date(2026, 8, 31), [1])
+    assert resultado.empresa["faturamento"] == 80000
+    assert resultado.empresa["liquidado"] == 20000.00
+    assert list(resultado.por_pessoa.keys()) == [1]
+
+
+def test_periodo_sem_venda_da_zero_e_nao_erro(monkeypatch):
+    _mockar_vendas(monkeypatch, [])
+    resultado = banco_mod.buscar_faturamento(date(2026, 9, 1), date(2026, 9, 30), [1, 3, 8])
+    assert resultado.empresa["faturamento"] == 0
+    assert resultado.empresa["liquidado"] == 0
+    assert resultado.por_pessoa == {}
+
+
+def test_filtro_usa_data_venda_com_lt_no_dia_seguinte(monkeypatch):
+    chamadas = _mockar_vendas(monkeypatch, [])
+    banco_mod.buscar_faturamento(date(2026, 8, 1), date(2026, 8, 31), [])
+    assert chamadas[0]["filtros"]["and"] == "(data_venda.gte.2026-08-01,data_venda.lt.2026-09-01)"
 
 
 # --- buscar_eventos_proximos (segundo Supabase: SED.events/SED.registrations)

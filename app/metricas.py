@@ -12,8 +12,8 @@ antiga, que não existe mais — ver sql/2026-09-15-view-metricas.sql.
 from __future__ import annotations
 
 # `reunioes_agendadas` e `indicacoes` aparecem nos DOIS cargos: SDR e closer
-# agendam reunião e trabalham indicação, cada um com a sua meta (o vínculo
-# meta<->cargo é N:N em `dash.metas_cargo`).
+# agendam reunião e trabalham indicação, cada um com a sua meta (hoje meta é
+# por pessoa, em `dash.user_metas`).
 METRICAS_SDR: tuple[str, ...] = (
     "conexoes_enviadas",
     "conexoes_aceitas",

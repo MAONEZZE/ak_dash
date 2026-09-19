@@ -4,7 +4,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.auth import exigir_usuario
 from app.cache import obter_ou_calcular
-from app.cargos import buscar_cargos
 from app.config import settings
 from app.dominios.comercial.banco import buscar_totais
 from app.dominios.comercial.calculo import montar_resposta_comercial
@@ -46,12 +45,9 @@ def _comercial(granularidade: str, periodo_str: str, pessoas: list[str] | None, 
         settings.cache_ttl_metricas_segundos,
         lambda: buscar_metas(periodo.inicio, periodo.fim),
     )
-    cargos = obter_ou_calcular("cargos", settings.cache_ttl_pessoas_segundos, buscar_cargos)
-
     resultado = montar_resposta_comercial(
         periodo=periodo,
         cargo=cargo,
-        id_cargo=cargos.get(cargo),
         pessoas_cargo=pessoas_cargo,
         totais=totais,
         metas=metas,

@@ -32,9 +32,21 @@ def test_pontuacao_media_sem_cap():
     assert calcular_pontuacao(metricas) == 139.0
 
 
-def test_pontuacao_meta_zero_conta_como_100_por_cento():
-    metricas = [{"realizado": 0, "meta_periodo": 0}]
-    assert calcular_pontuacao(metricas) == 100.0
+def test_pontuacao_meta_zero_sai_da_media():
+    # Meta 0 = não cobrado nesta métrica: só a de meta 200 entra na média.
+    metricas = [
+        {"realizado": 50, "meta_periodo": 0},
+        {"realizado": 100, "meta_periodo": 200},
+    ]
+    assert calcular_pontuacao(metricas) == 50.0
+
+
+def test_pontuacao_todas_metas_zero_fica_sem_pontuacao():
+    metricas = [
+        {"realizado": 0, "meta_periodo": 0},
+        {"realizado": 10, "meta_periodo": 0},
+    ]
+    assert calcular_pontuacao(metricas) is None
 
 
 def test_ranking_dense_rank_com_empate_e_sem_pontuacao_fica_de_fora():

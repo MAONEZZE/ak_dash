@@ -5,6 +5,10 @@ por dia×métrica que bateu a meta diária"): `Σ(realizado/meta × 100) /
 qtd_metricas`, escala 0–100, SEM cap, contra a meta cheia do período — só
 calculada quando TODAS as métricas do cargo têm meta cadastrada pra aquela
 pessoa; caso contrário `None` (nunca uma média parcial disfarçada de total).
+
+A meta é de cada PESSOA (`dash.user_metas`), não mais do cargo: dois SDRs do
+mesmo squad podem ser cobrados por números diferentes, e o ranking continua
+comparando percentual de meta, não valor absoluto.
 """
 from __future__ import annotations
 
@@ -20,9 +24,11 @@ from app.pontuacao import atribuir_ranking, calcular_pontuacao
 
 
 def _status(realizado: int, meta_periodo: int | None, dias_com_lancamento: int) -> str:
+    # Meta 0 = não cobrado nesta métrica (mesma regra de `pontuacao.py`):
+    # sem isso, `realizado >= 0` sempre bate e a métrica aparece "atingida".
     if dias_com_lancamento == 0:
         return "sem_preenchimento"
-    if meta_periodo is None:
+    if meta_periodo is None or meta_periodo == 0:
         return "sem_meta"
     return "atingido" if realizado >= meta_periodo else "abaixo_da_meta"
 
@@ -36,17 +42,16 @@ class RespostaCargo:
 def montar_resposta_comercial(
     periodo: Periodo,
     cargo: str,
-    id_cargo: int | None,
     pessoas_cargo: list[Pessoa],
     totais: TotaisCargo,
     metas: Metas,
     emails_filtro: set[str] | None,
     hoje: date,
 ) -> RespostaCargo:
-    """`id_cargo` vem de `dash.metricas_cargo` (via `app.cargos.buscar_cargos`) —
+    """`cargo` só decide QUAIS métricas entram nas colunas (`metricas_do_cargo`);
 
-    `None` quando o cargo não foi encontrado nessa tabela (degradação: toda
-    meta do cargo vira `None`, nunca 0).
+    o valor da meta vem de cada pessoa. Pessoa sem meta cadastrada numa
+    métrica fica com `meta_periodo` `None` e status `sem_meta` — nunca 0.
     """
     pessoas_alvo = [p for p in pessoas_cargo if emails_filtro is None or p.email in emails_filtro]
     colunas = metricas_do_cargo(cargo)
@@ -59,11 +64,7 @@ def montar_resposta_comercial(
         for chave_metrica in colunas:
             realizado = totais.realizado.get((id_user, chave_metrica), 0)
             dias_com_lancamento = totais.dias_com_lancamento.get((id_user, chave_metrica), 0)
-            meta_periodo = (
-                metas.por_cargo(periodo.inicio, periodo.fim, id_cargo, chave_metrica)
-                if id_cargo is not None
-                else None
-            )
+            meta_periodo = metas.por_usuario(periodo.inicio, periodo.fim, id_user, chave_metrica)
             status = _status(realizado, meta_periodo, dias_com_lancamento)
             if status == "atingido":
                 atingidas += 1

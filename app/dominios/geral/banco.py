@@ -1,26 +1,28 @@
-"""Leitura de `dash.metricas_faturamento` — combinado como uma coluna por
+"""Leitura de `dash.metricas_faturamento` — uma linha por VENDA, não mais uma
 
-métrica (`id_user, periodo, faturamento, liquidado, inscritos, aprovados`),
-mas a tabela hoje só tem `id` e `created_at` (sem essas colunas, sem linha
-nenhuma). Isolado nesta função só: quando as colunas existirem, só este
-módulo muda. Até lá, `.get()` (nunca indexação) devolve `None` pra tudo —
-nunca `0`, nunca uma linha inventada.
+linha por pessoa/período. `buscar_faturamento` soma `valor_bruto_contrato` e
+`liquido_entrada` de toda venda com `data_venda` dentro do período pedido; o
+filtro usa `lt` no dia seguinte ao fim (nunca `lte`), porque `data_venda` é
+timestamp e `lte` na data perderia venda com hora ≠ meia-noite.
+
+O card da empresa soma TODA venda do período, inclusive de quem já saiu do
+time (`ids_pessoas` não filtra a consulta). Por pessoa, agrupa
+`liquido_entrada` por `user_closer`; venda sem `user_closer` entra no total
+da empresa e em ninguém. `inscritos`/`aprovados` continuam sempre `None`
+aqui — não existem nesta tabela, vêm do SED (ver `buscar_eventos_proximos`).
 
 Também lê o SEGUNDO Supabase (`SED.events`/`SED.registrations`), que
 alimenta os cards de Inscritos/Aprovados — ver `buscar_eventos_proximos`.
 
 As métricas de atividade (números captados, ligações, reuniões, indicações)
 NÃO passam por aqui: a Geral lê as mesmas `buscar_totais`/`dash.vw_metricas`
-que o Comercial. A leitura direta de `metricas_sdrs`/`metricas_closers` que
-existia neste módulo morreu com a recriação da view — ela agora lê essas
-mesmas tabelas em tempo real, então não há mais um lote "atrasado" pra
-complementar.
+que o Comercial.
 """
 from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from app.config import settings
 from app.fontes.banco import query
@@ -56,21 +58,24 @@ def _linha_vazia() -> dict[str, float | None]:
 
 
 def buscar_faturamento(inicio: date, fim: date, ids_pessoas: list[int]) -> Faturamento:
+    fim_exclusivo = fim + timedelta(days=1)
     linhas = query(
         "metricas_faturamento",
-        {"and": f"(periodo.gte.{inicio.isoformat()},periodo.lte.{fim.isoformat()})"},
+        {"and": f"(data_venda.gte.{inicio.isoformat()},data_venda.lt.{fim_exclusivo.isoformat()})"},
     )
 
-    empresa = _linha_vazia()
+    empresa: dict[str, float | None] = {**_linha_vazia(), "faturamento": 0.0, "liquidado": 0.0}
     por_pessoa: dict[int, dict[str, float | None]] = {}
 
     for r in linhas:
-        id_user = r.get("id_user")
-        alvo = empresa if id_user is None else por_pessoa.setdefault(int(id_user), _linha_vazia())
-        for chave in CHAVES_FATURAMENTO:
-            valor = r.get(chave)
-            if valor is not None:
-                alvo[chave] = valor
+        empresa["faturamento"] += r.get("valor_bruto_contrato") or 0
+        empresa["liquidado"] += r.get("liquido_entrada") or 0
+
+        id_user = r.get("user_closer")
+        if id_user is None:
+            continue
+        pessoa = por_pessoa.setdefault(int(id_user), {**_linha_vazia(), "liquidado": 0.0})
+        pessoa["liquidado"] += r.get("liquido_entrada") or 0
 
     return Faturamento(empresa=empresa, por_pessoa=por_pessoa)
 

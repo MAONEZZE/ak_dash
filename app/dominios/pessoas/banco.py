@@ -1,8 +1,7 @@
 """Leitura de `dash.users`: id, nome, cargo, email, active, role.
 
 O cargo saiu de `users` (era uma coluna de texto) e virou `users.id_cargo`,
-FK pra `dash.metricas_cargo` — a mesma tabela que `dash.metas_cargo` usa pra
-vincular meta a cargo. Aqui ele é resolvido de volta pro nome ('sdr',
+FK pra `dash.metricas_cargo`. Aqui ele é resolvido de volta pro nome ('sdr',
 'closer', 'empresa'), que é o que o resto do BFF e o contrato da API usam.
 Pessoa com `id_cargo` nulo ou apontando pra cargo inexistente fica com cargo
 `""` — some dos filtros por cargo em vez de ser chutada pra um deles.
