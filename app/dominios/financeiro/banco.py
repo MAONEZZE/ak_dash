@@ -63,6 +63,13 @@ def buscar_vendas_detalhadas(inicio: date, fim: date) -> list[dict]:
             "liquido_entrada": v.get("liquido_entrada") or 0,
             "imposto": v.get("imposto") or 0,
             "taxa": v.get("taxa") or 0,
+            # Segundo pagamento de uma venda parcelada em duas formas diferentes
+            # (ex.: entrada no PIX + resto no cartão) — mesmo imposto da venda,
+            # taxa e forma próprias. "0"/None quando não existe.
+            "valor_pgto_2": v.get("valor_pgto_2") or 0,
+            "taxa_pgto_2": v.get("taxa_pgto_2") or 0,
+            "liquido_pgto_2": v.get("liquido_pgto_2") or 0,
+            "forma_pgto_2": v.get("forma_pgto_2"),
             "user_closer": int(v["user_closer"]) if v.get("user_closer") is not None else None,
             "closer": closers.get(int(v["user_closer"])) if v.get("user_closer") is not None else None,
         }

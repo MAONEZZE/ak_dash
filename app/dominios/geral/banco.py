@@ -68,14 +68,22 @@ def buscar_faturamento(inicio: date, fim: date, ids_pessoas: list[int]) -> Fatur
     por_pessoa: dict[int, dict[str, float | None]] = {}
 
     for r in linhas:
+        # `liquido_entrada` é só o líquido do PRIMEIRO pagamento da venda —
+        # quando ela tem um segundo pagamento (`valor_pgto_2`/`liquido_pgto_2`,
+        # ex.: entrada no PIX + resto no cartão, cada um com sua taxa), o
+        # líquido de verdade é a soma dos dois. Sem isso o card subestimava o
+        # liquidado toda vez que uma venda vinha parcelada em duas formas —
+        # mesmo bug encontrado e corrigido em dominios/financeiro/banco.py.
+        liquido_venda = (r.get("liquido_entrada") or 0) + (r.get("liquido_pgto_2") or 0)
+
         empresa["faturamento"] += r.get("valor_bruto_contrato") or 0
-        empresa["liquidado"] += r.get("liquido_entrada") or 0
+        empresa["liquidado"] += liquido_venda
 
         id_user = r.get("user_closer")
         if id_user is None:
             continue
         pessoa = por_pessoa.setdefault(int(id_user), {**_linha_vazia(), "liquidado": 0.0})
-        pessoa["liquidado"] += r.get("liquido_entrada") or 0
+        pessoa["liquidado"] += liquido_venda
 
     return Faturamento(empresa=empresa, por_pessoa=por_pessoa)
 

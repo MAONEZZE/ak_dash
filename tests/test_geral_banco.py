@@ -80,6 +80,35 @@ def test_periodo_sem_venda_da_zero_e_nao_erro(monkeypatch):
     assert resultado.por_pessoa == {}
 
 
+def test_liquidado_soma_o_segundo_pagamento_da_venda(monkeypatch):
+    # Venda parcelada em duas formas (ex.: entrada no PIX + resto no cartão) —
+    # cada pagamento com seu próprio líquido. Faltava somar o segundo: era
+    # esse o bug que subestimava o card "Liquidado" da Geral.
+    _mockar_vendas(
+        monkeypatch,
+        [
+            {
+                "user_closer": 8,
+                "valor_bruto_contrato": 60000,
+                "liquido_entrada": 27000.00,
+                "liquido_pgto_2": 21737.70,
+            },
+        ],
+    )
+    resultado = banco_mod.buscar_faturamento(date(2026, 8, 1), date(2026, 8, 31), [8])
+    assert resultado.empresa["liquidado"] == pytest.approx(48737.70)
+    assert resultado.por_pessoa[8]["liquidado"] == pytest.approx(48737.70)
+
+
+def test_liquidado_sem_segundo_pagamento_nao_muda(monkeypatch):
+    _mockar_vendas(
+        monkeypatch,
+        [{"user_closer": 8, "valor_bruto_contrato": 60000, "liquido_entrada": 27000.00}],
+    )
+    resultado = banco_mod.buscar_faturamento(date(2026, 8, 1), date(2026, 8, 31), [8])
+    assert resultado.empresa["liquidado"] == 27000.00
+
+
 def test_filtro_usa_data_venda_com_lt_no_dia_seguinte(monkeypatch):
     chamadas = _mockar_vendas(monkeypatch, [])
     banco_mod.buscar_faturamento(date(2026, 8, 1), date(2026, 8, 31), [])

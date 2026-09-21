@@ -189,6 +189,66 @@ def test_buscar_closers_com_lista_vazia_nao_consulta():
     assert banco_mod.buscar_closers([]) == {}
 
 
+def test_venda_com_segundo_pagamento_expoe_valor_taxa_liquido_e_forma_pgto_2(monkeypatch):
+    _mockar(
+        monkeypatch,
+        {
+            "metricas_faturamento": [
+                {
+                    "id": 7,
+                    "data_venda": "2026-08-13T00:00:00",
+                    "id_cliente": None,
+                    "produto": "KeepSide",
+                    "canal": "LinkedIn",
+                    "metodo_pagamento": "PIX",
+                    "num_parcelas": 2,
+                    "valor_bruto_contrato": 60000,
+                    "valor_entrada": 30000,
+                    "liquido_entrada": 27000,
+                    "imposto": 0.1,
+                    "taxa": 0,
+                    "valor_pgto_2": 30000,
+                    "taxa_pgto_2": 0.1949,
+                    "liquido_pgto_2": 21737.7,
+                    "forma_pgto_2": "Cartão",
+                },
+            ],
+        },
+    )
+    vendas = banco_mod.buscar_vendas_detalhadas(date(2026, 8, 1), date(2026, 8, 31))
+    assert vendas[0]["valor_pgto_2"] == 30000
+    assert vendas[0]["taxa_pgto_2"] == 0.1949
+    assert vendas[0]["liquido_pgto_2"] == 21737.7
+    assert vendas[0]["forma_pgto_2"] == "Cartão"
+
+
+def test_venda_sem_segundo_pagamento_fica_zerada_e_forma_pgto_2_none(monkeypatch):
+    _mockar(
+        monkeypatch,
+        {
+            "metricas_faturamento": [
+                {
+                    "id": 8,
+                    "data_venda": "2026-08-14T00:00:00",
+                    "id_cliente": None,
+                    "produto": None,
+                    "canal": None,
+                    "metodo_pagamento": None,
+                    "num_parcelas": 1,
+                    "valor_bruto_contrato": 1000,
+                    "valor_entrada": 1000,
+                    "liquido_entrada": 900,
+                },
+            ],
+        },
+    )
+    vendas = banco_mod.buscar_vendas_detalhadas(date(2026, 8, 1), date(2026, 8, 31))
+    assert vendas[0]["valor_pgto_2"] == 0
+    assert vendas[0]["taxa_pgto_2"] == 0
+    assert vendas[0]["liquido_pgto_2"] == 0
+    assert vendas[0]["forma_pgto_2"] is None
+
+
 def test_filtro_de_data_usa_lt_no_dia_seguinte_ao_fim(monkeypatch):
     chamadas = _mockar(monkeypatch, {"metricas_faturamento": []})
     banco_mod.buscar_vendas_detalhadas(date(2026, 8, 1), date(2026, 8, 31))
