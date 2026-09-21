@@ -40,6 +40,16 @@ def get_financeiro(
             detail={"erro": {"codigo": "parametro_invalido", "mensagem": str(exc)}},
         ) from exc
 
+    if periodo_pedido.inicio > hoje:
+        # Sem o guard, `fim_capado = min(fim, hoje)` abaixo deixava
+        # `inicio > fim` pra um período inteiramente no futuro — a resposta
+        # ecoava um intervalo absurdo. Com o período agora selecionável pela
+        # UI (pill de mês), isso deixou de ser só um caso de query manual.
+        raise HTTPException(
+            status_code=400,
+            detail={"erro": {"codigo": "periodo_no_futuro", "mensagem": "período pedido é inteiramente no futuro"}},
+        )
+
     fim_capado = min(periodo_pedido.fim, hoje)
     periodo_saida = Periodo(periodo_pedido.granularidade, periodo_pedido.inicio, fim_capado)
 

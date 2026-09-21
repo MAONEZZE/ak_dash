@@ -1,10 +1,11 @@
-"""Leitura de `dash.metricas_faturamento` (uma linha por venda) e
-`dash.cliente_faturamento` (73 clientes) pra tabela de vendas de `/financeiro`.
+"""Leitura de `dash.metricas_faturamento` (uma linha por venda),
+`dash.cliente_faturamento` (73 clientes) e `dash.users` (closer) pra tabela
+de vendas de `/financeiro`.
 
-Duas consultas, junção em Python — mesmo padrão de `buscar_eventos_proximos`
+Três consultas, junção em Python — mesmo padrão de `buscar_eventos_proximos`
 em `dominios/geral/banco.py`. Não vale a pena um `select` aninhado do
-PostgREST aqui: são duas tabelas pequenas e o BFF já faz esse tipo de join
-em memória em outro domínio.
+PostgREST aqui: são tabelas pequenas e o BFF já faz esse tipo de join em
+memória em outro domínio.
 """
 from __future__ import annotations
 
@@ -21,6 +22,20 @@ def buscar_clientes(ids: list[int]) -> dict[int, str]:
     return {int(r["id"]): r["nome"] for r in linhas if r.get("nome")}
 
 
+def buscar_closers(ids: list[int]) -> dict[int, str]:
+    """Nome de `dash.users` pros `user_closer` referenciados nas vendas.
+
+    Sem filtro de `active`: closer que já saiu do time (ex.: Mariana) ainda
+    precisa aparecer na venda que fez. `/pessoas` não serve aqui por isso —
+    só lista `active = true`.
+    """
+    if not ids:
+        return {}
+    ids_str = ",".join(str(i) for i in ids)
+    linhas = query("users", {"id": f"in.({ids_str})"})
+    return {int(r["id"]): r["nome"] for r in linhas if r.get("nome")}
+
+
 def buscar_vendas_detalhadas(inicio: date, fim: date) -> list[dict]:
     fim_exclusivo = fim + timedelta(days=1)
     vendas = query(
@@ -30,6 +45,9 @@ def buscar_vendas_detalhadas(inicio: date, fim: date) -> list[dict]:
 
     ids_clientes = [int(v["id_cliente"]) for v in vendas if v.get("id_cliente") is not None]
     clientes = buscar_clientes(ids_clientes)
+
+    ids_closers = [int(v["user_closer"]) for v in vendas if v.get("user_closer") is not None]
+    closers = buscar_closers(ids_closers)
 
     return [
         {
@@ -41,7 +59,12 @@ def buscar_vendas_detalhadas(inicio: date, fim: date) -> list[dict]:
             "metodo_pagamento": v.get("metodo_pagamento"),
             "num_parcelas": v.get("num_parcelas"),
             "valor_bruto_contrato": v.get("valor_bruto_contrato") or 0,
+            "valor_entrada": v.get("valor_entrada") or 0,
             "liquido_entrada": v.get("liquido_entrada") or 0,
+            "imposto": v.get("imposto") or 0,
+            "taxa": v.get("taxa") or 0,
+            "user_closer": int(v["user_closer"]) if v.get("user_closer") is not None else None,
+            "closer": closers.get(int(v["user_closer"])) if v.get("user_closer") is not None else None,
         }
         for v in vendas
     ]

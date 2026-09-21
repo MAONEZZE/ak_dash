@@ -13,6 +13,7 @@ from app import cargos as cargos_mod
 from app import metas as metas_mod
 from app.auth import exigir_usuario
 from app.dominios.comercial import banco as comercial_banco_mod
+from app.dominios.financeiro import banco as financeiro_banco_mod
 from app.dominios.geral import banco as geral_banco_mod
 from app.dominios.pessoas import banco as pessoas_banco_mod
 from app.main import app
@@ -35,7 +36,7 @@ def _fake_query(tabela, filtros=None, schema="dash", colunas="*", **kwargs):
 
 
 def _sobrescrever_query(monkeypatch) -> None:
-    for mod in (pessoas_banco_mod, comercial_banco_mod, geral_banco_mod, metas_mod, cargos_mod):
+    for mod in (pessoas_banco_mod, comercial_banco_mod, geral_banco_mod, financeiro_banco_mod, metas_mod, cargos_mod):
         monkeypatch.setattr(mod, "query", _fake_query)
 
 
@@ -88,6 +89,21 @@ def test_geral_200_periodo_atual(monkeypatch):
 def test_geral_400_periodo_invalido(monkeypatch):
     resposta = _client(monkeypatch).get("/geral", params={"periodo": "2026-99"})
     assert resposta.status_code == 400
+
+
+def test_financeiro_200_periodo_atual(monkeypatch):
+    resposta = _client(monkeypatch).get("/financeiro", params={"granularidade": "mes"})
+    assert resposta.status_code == 200
+    corpo = resposta.json()
+    assert corpo["vendas"] == []  # `metricas_faturamento` vazia no fake de query
+
+
+def test_financeiro_400_periodo_inteiramente_no_futuro(monkeypatch):
+    # `hoje_sp()` é real (não mockado) — dezembro de qualquer ano futuro
+    # próximo cai sempre depois de hoje.
+    resposta = _client(monkeypatch).get("/financeiro", params={"granularidade": "mes", "periodo": "2099-12"})
+    assert resposta.status_code == 400
+    assert resposta.json()["erro"]["codigo"] == "periodo_no_futuro"
 
 
 def test_sem_token_401(monkeypatch):
