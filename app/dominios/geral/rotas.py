@@ -70,13 +70,30 @@ def get_geral(
         settings.cache_ttl_metricas_segundos,
         lambda: buscar_metas(periodo_metas.inicio, periodo_metas.fim),
     )
+    ids_closer = [int(p.id) for p in pessoas_closer]
     faturamento = obter_ou_calcular(
         f"faturamento:{chave_periodo}",
         settings.cache_ttl_metricas_segundos,
-        lambda: buscar_faturamento(
-            periodo_saida.inicio, periodo_saida.fim, [int(p.id) for p in pessoas_closer]
-        ),
+        lambda: buscar_faturamento(periodo_saida.inicio, periodo_saida.fim, ids_closer),
     )
+
+    # Os dois cards ESCUROS (Faturamento/Liquidado) são sempre do MÊS, nunca do
+    # recorte pedido: em Dia/Semana/Ano mostram o mês corrente; sob Mês, o mês
+    # navegado na pill. Decisão de produto — são o número fechado da empresa, e
+    # ninguém lê faturamento "do dia" ou "da semana". O resto da página segue o
+    # filtro normalmente, inclusive as colunas Liquidado/Aprovados do closer na
+    # tabela, que continuam saindo de `faturamento` (período pedido).
+    mes_cards = periodo_metas if granularidade == "mes" else resolver_periodo("mes", _valor_atual("mes", hoje))
+    inicio_mes, fim_mes = mes_cards.inicio, min(mes_cards.fim, hoje)
+    if (inicio_mes, fim_mes) == (periodo_saida.inicio, periodo_saida.fim):
+        faturamento_mes = faturamento
+    else:
+        faturamento_mes = obter_ou_calcular(
+            f"faturamento:{inicio_mes.isoformat()}:{fim_mes.isoformat()}",
+            settings.cache_ttl_metricas_segundos,
+            lambda: buscar_faturamento(inicio_mes, fim_mes, ids_closer),
+        )
+
     # Fora do período da página de propósito: os cards de Inscritos/Aprovados
     # mostram os próximos eventos (futuro), não o recorte de datas selecionado.
     agora = agora_sp()
@@ -95,5 +112,6 @@ def get_geral(
         totais_closer=totais_closer,
         metas=metas,
         faturamento=faturamento,
+        faturamento_mes=faturamento_mes,
         eventos=eventos,
     )

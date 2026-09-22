@@ -35,6 +35,9 @@ def _periodo_saida():
 
 
 def _montar(**kwargs):
+    # Sob granularidade Mês (o caso da maioria dos cenários) os dois faturamentos
+    # são o mesmo objeto — quem separa os dois é `rotas.py`.
+    kwargs.setdefault("faturamento_mes", kwargs.get("faturamento"))
     return montar_resposta_geral(
         periodo_metas=kwargs.pop("periodo_metas", _periodo_metas()),
         periodo_saida=kwargs.pop("periodo_saida", _periodo_saida()),
@@ -413,3 +416,30 @@ def test_card_de_indicacoes_junta_captadas_do_sdr_com_indicacoes_do_closer():
     card = next(c for c in resposta["cards"] if c["metrica"] == "indicacoes")
     assert card["realizado"] == 8
     assert card["meta"] == (4 * 22) + (10 * 22)
+
+
+def test_cards_escuros_saem_do_faturamento_do_mes_nao_do_periodo_pedido():
+    """Sob Dia/Semana/Ano os dois cards escuros mostram o mês corrente — as
+    colunas Liquidado/Aprovados da tabela é que seguem o recorte pedido."""
+    do_dia = Faturamento(
+        empresa={"faturamento": 12_000.0, "liquidado": 3_000.0, "inscritos": None, "aprovados": None},
+        por_pessoa={JACOB: {"liquidado": 3_000.0, "aprovados": 1}},
+    )
+    do_mes = Faturamento(
+        empresa={"faturamento": 500_000.0, "liquidado": 90_000.0, "inscritos": None, "aprovados": None},
+        por_pessoa={},
+    )
+    resposta = _montar(
+        periodo_metas=Periodo("dia", date(2026, 9, 14), date(2026, 9, 14)),
+        periodo_saida=Periodo("dia", date(2026, 9, 14), date(2026, 9, 14)),
+        pessoas_sdr=[], pessoas_closer=[Pessoa(id="1", nome="Jacob", cargo="closer", email="j@x.com")],
+        totais_sdr=_totais({}), totais_closer=_totais({}),
+        metas=Metas({}), faturamento=do_dia, faturamento_mes=do_mes, eventos=[],
+    )
+
+    escuros = {c["metrica"]: c["realizado"] for c in resposta["cards"] if c["escuro"]}
+    assert escuros == {"faturamento": 500_000.0, "liquidado": 90_000.0}
+
+    jacob = next(p for p in resposta["pessoas"] if p["id_user"] == JACOB)
+    liquidado = next(m for m in jacob["metricas"] if m["metrica"] == "liquidado")
+    assert liquidado["realizado"] == 3_000.0

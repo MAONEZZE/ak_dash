@@ -38,7 +38,8 @@ _METRICAS_PONTUACAO = {
 # mais um número do período, e sim os próximos eventos girando no card.
 #
 # Realizado dos escuros vem de `dash.metricas_faturamento` (número fechado da
-# empresa) — SEM meta: faturamento e liquidado nunca tiveram (faturamento) ou
+# empresa) SEMPRE DO MÊS (`faturamento_mes`), nunca do recorte pedido — e SEM
+# meta: faturamento e liquidado nunca tiveram (faturamento) ou
 # não têm mais (liquidado) uma composição de pessoas que os carregue, então
 # ficam sempre com `meta`/`pct`/`pct_ritmo` em `None`. Só os 4 cards claros
 # continuam com a meta somada por pessoa.
@@ -150,6 +151,7 @@ def montar_resposta_geral(
     totais_closer: TotaisCargo,
     metas: Metas,
     faturamento: Faturamento,
+    faturamento_mes: Faturamento,
     eventos: list[EventoInscricoes],
 ) -> dict:
     """`periodo_metas` é o período pedido por inteiro (dia/mês/ano completo,
@@ -164,6 +166,12 @@ def montar_resposta_geral(
     metas de quem o compõe, e cada linha da tabela usa a meta daquela pessoa.
     Quem não tem meta cadastrada fica com `None`, nunca com 0.
 
+    `faturamento` é do período pedido e alimenta as colunas Liquidado/Aprovados
+    do closer na tabela. `faturamento_mes` é do MÊS (corrente sob
+    dia/semana/ano; o navegado sob mês) e alimenta só os dois cards escuros —
+    ver o comentário em `rotas.py`. Sob granularidade Mês os dois são o mesmo
+    objeto.
+
     `eventos` é a única parte da resposta que ignora o período pedido: são os
     próximos eventos (futuro), independentes do recorte de datas da página.
     """
@@ -175,7 +183,7 @@ def montar_resposta_geral(
 
     cards = []
     for chave in _COMPOSICAO_CARDS_ESCUROS:
-        realizado = faturamento.empresa.get(chave)
+        realizado = faturamento_mes.empresa.get(chave)
         cards.append(
             {
                 "metrica": chave,

@@ -6,6 +6,8 @@ rotas do FastAPI. Toda I/O de banco é substituída por `query()` monkeypatched.
 """
 from __future__ import annotations
 
+from datetime import date
+
 from fastapi.testclient import TestClient
 
 from app import cache
@@ -15,6 +17,7 @@ from app.auth import exigir_usuario
 from app.dominios.comercial import banco as comercial_banco_mod
 from app.dominios.financeiro import banco as financeiro_banco_mod
 from app.dominios.geral import banco as geral_banco_mod
+from app.dominios.geral import rotas as geral_rotas_mod
 from app.dominios.pessoas import banco as pessoas_banco_mod
 from app.main import app
 
@@ -112,3 +115,31 @@ def test_sem_token_401(monkeypatch):
     app.dependency_overrides.pop(exigir_usuario, None)
     resposta = TestClient(app).get("/geral")
     assert resposta.status_code == 401
+
+
+def test_geral_em_dia_busca_faturamento_do_dia_e_do_mes_corrente(monkeypatch):
+    """Cards escuros (Faturamento/Liquidado) são sempre do MÊS; o resto da
+    página segue o recorte pedido — então sob `dia` a rota faz DUAS consultas a
+    `metricas_faturamento`, uma por intervalo."""
+    intervalos: list[str] = []
+
+    def query_espiã(tabela, filtros=None, schema="dash", colunas="*", **kwargs):
+        if tabela == "metricas_faturamento":
+            intervalos.append((filtros or {})["and"])
+        return _fake_query(tabela, filtros, schema, colunas, **kwargs)
+
+    for mod in (pessoas_banco_mod, comercial_banco_mod, geral_banco_mod, financeiro_banco_mod, metas_mod, cargos_mod):
+        monkeypatch.setattr(mod, "query", query_espiã)
+    cache.invalidar()
+    app.dependency_overrides[exigir_usuario] = lambda: {"sub": "dev"}
+
+    # Data fixa: no dia 1º os dois intervalos coincidiriam e a rota reaproveita
+    # a mesma consulta — o cenário que interessa é um dia no meio do mês.
+    monkeypatch.setattr(geral_rotas_mod, "hoje_sp", lambda: date(2026, 9, 14))
+
+    resposta = TestClient(app).get("/geral", params={"granularidade": "dia"})
+    assert resposta.status_code == 200
+
+    assert len(intervalos) == 2
+    assert "data_venda.gte.2026-09-14" in intervalos[0]  # tabela/pódios: só o dia
+    assert "data_venda.gte.2026-09-01" in intervalos[1]  # cards escuros: o mês
