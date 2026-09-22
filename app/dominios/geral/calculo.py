@@ -17,7 +17,7 @@ from app.periodo import Periodo, dias_uteis_decorridos
 from app.pontuacao import atribuir_ranking
 
 # Colunas da tabela de pessoas, por cargo (decisão de produto).
-_METRICAS_SDR_TABELA = ("numeros_captados", "ligacoes_agendadas", "indicacoes")
+_METRICAS_SDR_TABELA = ("numeros_captados", "ligacoes_agendadas", "reunioes_agendadas", "indicacoes")
 _METRICAS_CLOSER_TABELA = ("reunioes_realizadas", "liquidado", "aprovados", "indicacoes")
 
 # Métricas que ENTRAM NA PONTUAÇÃO (e, por consequência, no pódio) — nem toda
@@ -26,11 +26,13 @@ _METRICAS_CLOSER_TABELA = ("reunioes_realizadas", "liquidado", "aprovados", "ind
 # `liquidado` e `aprovados` ficam de fora por decisão de produto: são
 # métricas financeiras, não de atividade, e não fazem sentido somadas junto
 # com contagens de reunião/indicação numa única pontuação. Elas seguem
-# visíveis na tabela, só não pontuam.
+# visíveis na tabela, só não pontuam. `reunioes_agendadas` entrou na tabela
+# do SDR como coluna e também não pontua: o pódio continua sendo comparado
+# pelo mesmo trio de sempre, sem reescalar o ranking.
 # Denominador fixo por cargo: todo closer é medido pelas mesmas métricas,
 # senão o ranking compararia somas de tamanhos diferentes.
 _METRICAS_PONTUACAO = {
-    "sdr": _METRICAS_SDR_TABELA,
+    "sdr": ("numeros_captados", "ligacoes_agendadas", "indicacoes"),
     "closer": ("reunioes_realizadas", "indicacoes"),
 }
 

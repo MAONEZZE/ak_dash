@@ -87,6 +87,7 @@ def montar_resposta_comercial(
                 "id_user": str(id_user),
                 "email": pessoa.email,
                 "nome": pessoa.nome or None,
+                "imagem_url": pessoa.imagem_url,
                 "metas_atingidas": {"atingidas": atingidas, "total": len(metricas_saida)},
                 "metricas": metricas_saida,
                 "contas_origem": totais.contas_por_pessoa.get(id_user, []),
