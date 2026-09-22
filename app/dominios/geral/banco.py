@@ -30,8 +30,8 @@ from app.fontes.banco import query
 CHAVES_FATURAMENTO = ("faturamento", "liquidado", "inscritos", "aprovados")
 
 # Cards de Inscritos/Aprovados: os N próximos eventos de `SED.events` giram
-# no card, um por vez. 3 é decisão de produto (3 barrinhas no rodapé).
-LIMITE_EVENTOS = 3
+# no card, um por vez. 2 é decisão de produto (2 barrinhas no rodapé).
+LIMITE_EVENTOS = 2
 
 # "Inscrito" = TODA linha de `SED.registrations` do evento, seja qual for o
 # status — o card mede captação (quanta gente se inscreveu), não ocupação de

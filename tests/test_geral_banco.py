@@ -177,7 +177,7 @@ def test_filtra_por_data_futura_e_nao_filtra_status(monkeypatch):
     assert chamadas[1]["filtros"]["event_id"] == 'in.("e1")'
 
 
-def test_no_maximo_tres_eventos_e_na_ordem_do_banco(monkeypatch):
+def test_no_maximo_dois_eventos_e_na_ordem_do_banco(monkeypatch):
     _mockar_duas_queries(
         monkeypatch,
         [
@@ -187,7 +187,7 @@ def test_no_maximo_tres_eventos_e_na_ordem_do_banco(monkeypatch):
         [],
     )
     eventos = banco_mod.buscar_eventos_proximos(datetime(2026, 9, 15, 10, 0))
-    assert [e.id for e in eventos] == ["e1", "e2", "e3"]
+    assert [e.id for e in eventos] == ["e1", "e2"]
 
 
 def test_sem_evento_futuro_nao_consulta_inscricoes(monkeypatch):
