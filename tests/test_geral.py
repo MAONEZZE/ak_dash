@@ -118,9 +118,8 @@ def test_card_indicacoes_soma_captadas_sdr_e_indicacoes_closer():
 
 
 def test_pontuacao_e_soma_bruta_de_quantidade_mesmo_sem_meta():
-    # SDR na tabela tem 3 colunas de pontuação; sem meta cadastrada em
-    # nenhuma, a pontuação é a soma bruta do realizado (312 + 0 + 0), não
-    # mais None — e a pessoa entra no ranking.
+    # Sem meta cadastrada, a pontuação é a soma bruta do realizado × 10
+    # (312 captados = 3120 pts), não None — e a pessoa entra no ranking.
     sdr = [Pessoa(id="9", nome="Nathan", cargo="sdr", email="n@x.com")]
     metas = Metas({(date(2026, 9, 1), NATHAN, "numeros_captados"): 400})
     resposta = _montar(
@@ -128,7 +127,7 @@ def test_pontuacao_e_soma_bruta_de_quantidade_mesmo_sem_meta():
         totais_sdr=_totais({(9, "numeros_captados"): 312}), totais_closer=_totais({}),
         metas=metas, faturamento=_faturamento_vazio(), eventos=[],
     )
-    assert resposta["pessoas"][0]["pontuacao"] == 312
+    assert resposta["pessoas"][0]["pontuacao"] == 3120
     assert resposta["pessoas"][0]["posicao"] is not None
 
 
@@ -298,9 +297,8 @@ def test_card_reunioes_agendadas_soma_sdr_e_closer():
     assert card["realizado"] == 15
 
 
-def test_closer_pontua_sem_liquidado_e_aprovados_cadastrados():
-    # `metricas_faturamento` ainda não tem colunas: liquidado/aprovados voltam
-    # None pra todo closer. Isso não pode zerar a pontuação — senão o pódio de
+def test_closer_pontua_sem_liquidado_cadastrado():
+    # Venda sem closer atribuído: liquidado volta None pro closer. Isso não pode zerar a pontuação — senão o pódio de
     # Closer nunca aparece, que era o sintoma relatado.
     closer = [Pessoa(id="1", nome="Jacob", cargo="closer", email="ja@x.com")]
     # Diárias: 4 reuniões realizadas/dia (88 no mês) e 15 indicações/dia (330).
@@ -315,23 +313,24 @@ def test_closer_pontua_sem_liquidado_e_aprovados_cadastrados():
         metas=metas, faturamento=_faturamento_vazio(), eventos=[],
     )
     pessoa = resposta["pessoas"][0]
-    assert pessoa["pontuacao"] == 209  # soma bruta: 44 + 165, não mais média de percentuais
+    assert pessoa["pontuacao"] == 2090  # (44 + 165) × 10, não média de percentuais
     assert pessoa["posicao"] == 1
-    # As duas colunas continuam na tabela, em branco — só não pontuam.
-    assert {m["metrica"] for m in pessoa["metricas"]} == {"reunioes_realizadas", "liquidado", "aprovados", "indicacoes"}
+    # Liquidado continua na tabela, em branco — só não pontua. Reuniões
+    # agendadas tomou o lugar da antiga coluna Aprovados.
+    assert [m["metrica"] for m in pessoa["metricas"]] == ["reunioes_realizadas", "liquidado", "reunioes_agendadas", "indicacoes"]
 
 
 def test_closer_sem_nenhuma_meta_continua_pontuando_por_quantidade():
     # Diferente de /comercial/*, a Geral não exige meta cadastrada: a
-    # pontuação é a soma bruta do realizado (44 de reuniões + 0 de
-    # indicações), e o closer entra no ranking mesmo sem meta nenhuma.
+    # pontuação é a soma bruta do realizado × 10 (44 de reuniões + 0 de
+    # indicações = 440), e o closer entra no ranking mesmo sem meta nenhuma.
     closer = [Pessoa(id="1", nome="Jacob", cargo="closer", email="ja@x.com")]
     resposta = _montar(
         pessoas_sdr=[], pessoas_closer=closer,
         totais_sdr=_totais({}), totais_closer=_totais({(1, "reunioes_realizadas"): 44}),
         metas=Metas({}), faturamento=_faturamento_vazio(), eventos=[],
     )
-    assert resposta["pessoas"][0]["pontuacao"] == 44
+    assert resposta["pessoas"][0]["pontuacao"] == 440
     assert resposta["pessoas"][0]["posicao"] is not None
 
 
@@ -420,10 +419,10 @@ def test_card_de_indicacoes_junta_captadas_do_sdr_com_indicacoes_do_closer():
 
 def test_cards_escuros_saem_do_faturamento_do_mes_nao_do_periodo_pedido():
     """Sob Dia/Semana/Ano os dois cards escuros mostram o mês corrente — as
-    colunas Liquidado/Aprovados da tabela é que seguem o recorte pedido."""
+    coluna Liquidado da tabela é que segue o recorte pedido."""
     do_dia = Faturamento(
         empresa={"faturamento": 12_000.0, "liquidado": 3_000.0, "inscritos": None, "aprovados": None},
-        por_pessoa={JACOB: {"liquidado": 3_000.0, "aprovados": 1}},
+        por_pessoa={JACOB: {"liquidado": 3_000.0}},
     )
     do_mes = Faturamento(
         empresa={"faturamento": 500_000.0, "liquidado": 90_000.0, "inscritos": None, "aprovados": None},
@@ -443,3 +442,31 @@ def test_cards_escuros_saem_do_faturamento_do_mes_nao_do_periodo_pedido():
     jacob = next(p for p in resposta["pessoas"] if p["id_user"] == JACOB)
     liquidado = next(m for m in jacob["metricas"] if m["metrica"] == "liquidado")
     assert liquidado["realizado"] == 3_000.0
+
+
+def test_reuniao_agendada_pontua_no_podio_de_sdr_e_de_closer():
+    # Caso real de 24/09 no filtro Dia: a única atividade lançada era reunião
+    # agendada e o pódio inteiro ficava em 0. No closer ela pontua mesmo não
+    # sendo coluna da tabela dele.
+    sdr = [
+        Pessoa(id="2", nome="Jennifer", cargo="sdr", email="je@x.com"),
+        Pessoa(id="9", nome="Nathan", cargo="sdr", email="n@x.com"),
+    ]
+    closer = [
+        Pessoa(id="1", nome="Thalyson", cargo="closer", email="t@x.com"),
+        Pessoa(id="3", nome="Jacob", cargo="closer", email="ja@x.com"),
+    ]
+    resposta = _montar(
+        pessoas_sdr=sdr, pessoas_closer=closer,
+        totais_sdr=_totais({(2, "reunioes_agendadas"): 5, (9, "reunioes_agendadas"): 3}),
+        totais_closer=_totais({(1, "reunioes_agendadas"): 1}),
+        metas=Metas({}), faturamento=_faturamento_vazio(), eventos=[],
+    )
+    por_nome = {p["nome"]: p for p in resposta["pessoas"]}
+    assert (por_nome["Jennifer"]["pontuacao"], por_nome["Jennifer"]["posicao"]) == (50, 1)
+    assert (por_nome["Nathan"]["pontuacao"], por_nome["Nathan"]["posicao"]) == (30, 2)
+    # Ranking por cargo: Thalyson é 1º entre closers, mesmo com menos pontos que os SDRs.
+    assert (por_nome["Thalyson"]["pontuacao"], por_nome["Thalyson"]["posicao"]) == (10, 1)
+    assert (por_nome["Jacob"]["pontuacao"], por_nome["Jacob"]["posicao"]) == (0, 2)
+    reunioes = next(m for m in por_nome["Thalyson"]["metricas"] if m["metrica"] == "reunioes_agendadas")
+    assert reunioes["realizado"] == 1

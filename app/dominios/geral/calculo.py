@@ -18,23 +18,26 @@ from app.pontuacao import atribuir_ranking
 
 # Colunas da tabela de pessoas, por cargo (decisão de produto).
 _METRICAS_SDR_TABELA = ("numeros_captados", "ligacoes_agendadas", "reunioes_agendadas", "indicacoes")
-_METRICAS_CLOSER_TABELA = ("reunioes_realizadas", "liquidado", "aprovados", "indicacoes")
+_METRICAS_CLOSER_TABELA = ("reunioes_realizadas", "liquidado", "reunioes_agendadas", "indicacoes")
 
 # Métricas que ENTRAM NA PONTUAÇÃO (e, por consequência, no pódio) — nem toda
 # coluna da tabela conta. A pontuação da Geral é a SOMA BRUTA do realizado
-# dessas métricas (não depende de meta cadastrada — ver `_pontuacao_por_quantidade`).
-# `liquidado` e `aprovados` ficam de fora por decisão de produto: são
-# métricas financeiras, não de atividade, e não fazem sentido somadas junto
-# com contagens de reunião/indicação numa única pontuação. Elas seguem
-# visíveis na tabela, só não pontuam. `reunioes_agendadas` entrou na tabela
-# do SDR como coluna e também não pontua: o pódio continua sendo comparado
-# pelo mesmo trio de sempre, sem reescalar o ranking.
+# dessas métricas × `_PONTOS_POR_UNIDADE`, lido direto de `vw_metricas` (não
+# depende de meta cadastrada — ver `_pontuacao_por_quantidade`).
+# `liquidado` fica de fora por decisão de produto: é métrica financeira, não
+# de atividade, e não faz sentido somada junto com contagens de
+# reunião/indicação numa única pontuação. Segue visível na tabela, só não pontua. `reunioes_agendadas` entrou em
+# 24/09/2026: sem ela, no filtro Dia o pódio ficava todo em 0 nas horas em
+# que a única atividade lançada era reunião agendada.
 # Denominador fixo por cargo: todo closer é medido pelas mesmas métricas,
 # senão o ranking compararia somas de tamanhos diferentes.
 _METRICAS_PONTUACAO = {
-    "sdr": ("numeros_captados", "ligacoes_agendadas", "indicacoes"),
-    "closer": ("reunioes_realizadas", "indicacoes"),
+    "sdr": ("numeros_captados", "ligacoes_agendadas", "reunioes_agendadas", "indicacoes"),
+    "closer": ("reunioes_agendadas", "reunioes_realizadas", "indicacoes"),
 }
+
+# Cada unidade de atividade vale 10 pontos (decisão de produto, 24/09/2026).
+_PONTOS_POR_UNIDADE = 10
 
 # Inscritos/Aprovados saíram daqui: viraram `eventos` na resposta — não são
 # mais um número do período, e sim os próximos eventos girando no card.
@@ -109,20 +112,20 @@ def _meta_card_empresa(
     return total
 
 
-def _pontuacao_por_quantidade(metricas_calc: list[dict], metricas: tuple[str, ...]) -> float:
-    """Soma bruta do realizado das métricas de pontuação do cargo — nunca
+def _pontuacao_por_quantidade(totais: TotaisCargo, id_user: int, cargo: str) -> float:
+    """Soma bruta do realizado das métricas de pontuação do cargo, × 10 — nunca
 
-    `None` (as métricas em `_METRICAS_PONTUACAO` sempre têm `realizado`
-    numérico, nunca `None`: vêm de `totais_sdr.realizado.get(..., 0)`/
-    `totais_closer.realizado.get(..., 0)`). Diferente de `/comercial/*`
+    `None` (métrica sem linha no período conta 0). Diferente de `/comercial/*`
     (`calcular_pontuacao`, % da meta), a pontuação da Geral não depende de
     meta cadastrada — é assim que todo mundo do cargo entra no ranking.
     """
-    return sum(m["realizado"] or 0 for m in metricas_calc if m["metrica"] in metricas)
+    unidades = sum(totais.realizado.get((id_user, metrica), 0) for metrica in _METRICAS_PONTUACAO[cargo])
+    return unidades * _PONTOS_POR_UNIDADE
 
 
-def _montar_pessoa(pessoa: Pessoa, cargo: str, metricas_calc: list[dict], nomes_repetidos: set[str]) -> dict:
-    pontuacao = _pontuacao_por_quantidade(metricas_calc, _METRICAS_PONTUACAO[cargo])
+def _montar_pessoa(
+    pessoa: Pessoa, cargo: str, metricas_calc: list[dict], pontuacao: float, nomes_repetidos: set[str]
+) -> dict:
     return {
         "id_user": int(pessoa.id),
         "nome": pessoa.nome,
@@ -168,8 +171,8 @@ def montar_resposta_geral(
     metas de quem o compõe, e cada linha da tabela usa a meta daquela pessoa.
     Quem não tem meta cadastrada fica com `None`, nunca com 0.
 
-    `faturamento` é do período pedido e alimenta as colunas Liquidado/Aprovados
-    do closer na tabela. `faturamento_mes` é do MÊS (corrente sob
+    `faturamento` é do período pedido e alimenta a coluna Liquidado do
+    closer na tabela. `faturamento_mes` é do MÊS (corrente sob
     dia/semana/ano; o navegado sob mês) e alimenta só os dois cards escuros —
     ver o comentário em `rotas.py`. Sob granularidade Mês os dois são o mesmo
     objeto.
@@ -236,7 +239,9 @@ def montar_resposta_geral(
             }
             for chave in _METRICAS_SDR_TABELA
         ]
-        pessoas_saida.append(_montar_pessoa(pessoa, "sdr", metricas_calc, nomes_repetidos))
+        pessoas_saida.append(_montar_pessoa(
+            pessoa, "sdr", metricas_calc, _pontuacao_por_quantidade(totais_sdr, id_user, "sdr"), nomes_repetidos
+        ))
 
     for pessoa in pessoas_closer:
         id_user = int(pessoa.id)
@@ -253,9 +258,9 @@ def montar_resposta_geral(
                 "meta_periodo": meta_de(id_user, "liquidado"),
             },
             {
-                "metrica": "aprovados",
-                "realizado": financeiro.get("aprovados"),
-                "meta_periodo": meta_de(id_user, "aprovados"),
+                "metrica": "reunioes_agendadas",
+                "realizado": totais_closer.realizado.get((id_user, "reunioes_agendadas"), 0),
+                "meta_periodo": meta_de(id_user, "reunioes_agendadas"),
             },
             {
                 "metrica": "indicacoes",
@@ -263,9 +268,13 @@ def montar_resposta_geral(
                 "meta_periodo": meta_de(id_user, "indicacoes"),
             },
         ]
-        pessoas_saida.append(_montar_pessoa(pessoa, "closer", metricas_calc, nomes_repetidos))
+        pessoas_saida.append(_montar_pessoa(
+            pessoa, "closer", metricas_calc, _pontuacao_por_quantidade(totais_closer, id_user, "closer"), nomes_repetidos
+        ))
 
-    atribuir_ranking(pessoas_saida, "pontuacao")
+    # Um ranking por cargo (contrato: SDR só contra SDR, Closer só contra Closer).
+    for cargo in ("sdr", "closer"):
+        atribuir_ranking([p for p in pessoas_saida if p["cargo"] == cargo], "pontuacao")
 
     avisos: list[str] = []
     if metas.vazio:

@@ -81,8 +81,8 @@ def get_geral(
     # recorte pedido: em Dia/Semana/Ano mostram o mês corrente; sob Mês, o mês
     # navegado na pill. Decisão de produto — são o número fechado da empresa, e
     # ninguém lê faturamento "do dia" ou "da semana". O resto da página segue o
-    # filtro normalmente, inclusive as colunas Liquidado/Aprovados do closer na
-    # tabela, que continuam saindo de `faturamento` (período pedido).
+    # filtro normalmente, inclusive a coluna Liquidado do closer na tabela,
+    # que continua saindo de `faturamento` (período pedido).
     mes_cards = periodo_metas if granularidade == "mes" else resolver_periodo("mes", _valor_atual("mes", hoje))
     inicio_mes, fim_mes = mes_cards.inicio, min(mes_cards.fim, hoje)
     if (inicio_mes, fim_mes) == (periodo_saida.inicio, periodo_saida.fim):

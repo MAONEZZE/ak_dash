@@ -4,6 +4,8 @@ from __future__ import annotations
 import time
 from typing import Callable, TypeVar
 
+from app.fontes.banco import falhas_na_thread
+
 T = TypeVar("T")
 
 _armazenamento: dict[str, tuple[float, object]] = {}
@@ -16,8 +18,13 @@ def obter_ou_calcular(chave: str, ttl_segundos: float, calcular: Callable[[], T]
         expira_em, valor = entrada
         if agora < expira_em:
             return valor  # type: ignore[return-value]
+    falhas_antes = falhas_na_thread()
     valor = calcular()
-    _armazenamento[chave] = (agora + ttl_segundos, valor)
+    # Consulta que degradou pra vazio não vira cache: senão um timeout de
+    # rede deixava o dash sem dado (ou "Meta não cadastrada") pelo TTL inteiro.
+    # Sem cache, a próxima requisição tenta de novo.
+    if falhas_na_thread() == falhas_antes:
+        _armazenamento[chave] = (agora + ttl_segundos, valor)
     return valor
 
 
