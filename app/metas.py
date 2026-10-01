@@ -15,9 +15,12 @@ captados/dia). A meta de um período é `valor_meta × dias úteis do período` 
 ver `Metas.por_usuario`. Quem cadastra só informa a diária; dia, semana, mês
 e ano saem sozinhos, sem recadastrar nada.
 
-`periodo` (coluna `date` de `metricas_metas`) é sempre o primeiro dia do
-mês-alvo, e é ele que data a meta: `user_metas` não tem data própria, herda a
-da linha que aponta.
+Quem data o valor é `user_metas.atualizado_em`: a meta vale no mês em que foi
+atualizada. Na virada de mês o time só edita o `valor_meta` das linhas que já
+existem (que seguem apontando pra `metricas_metas` do mês anterior) — datar
+pelo `metricas_metas.periodo` deixava o mês novo sem meta nenhuma. Linha sem
+`atualizado_em` cai no `periodo` da meta pra qual aponta. Duas linhas da mesma
+pessoa/métrica no mesmo mês: vale a atualizada por último.
 
 A meta dos cards da empresa NÃO vem de uma linha própria: é a SOMA das metas
 das pessoas ativas que compõem o card (ver `dominios/geral/calculo.py`),
@@ -118,46 +121,68 @@ class Metas:
         return total
 
 
+def _proximo_mes(d: date) -> date:
+    return date(d.year + 1, 1, 1) if d.month == 12 else date(d.year, d.month + 1, 1)
+
+
 def buscar_metas(inicio: date, fim: date) -> Metas:
     meses = meses_no_intervalo(inicio, fim)
     if not meses:
         return Metas({})
 
-    linhas = query(
-        "metricas_metas",
-        {"and": f"(periodo.gte.{meses[0].isoformat()},periodo.lte.{meses[-1].isoformat()})"},
-    )
+    # Sem filtro de `periodo`: o mês sai de `user_metas.atualizado_em`, então
+    # uma meta declarada em setembro e atualizada em outubro vale em outubro.
+    linhas = query("metricas_metas")
     if not linhas:
         return Metas({})
 
-    # id da meta -> (mês, métrica) que ela representa.
-    alvo_por_meta: dict[int, tuple[date, str]] = {}
+    # id da meta -> (métrica, `periodo` como fallback de data).
+    alvo_por_meta: dict[int, tuple[str, date | None]] = {}
     for r in linhas:
-        try:
-            mes = primeiro_dia_do_mes(date.fromisoformat(str(r["periodo"])[:10]))
-        except (KeyError, ValueError):
-            continue
         metrica, id_meta = r.get("metrica"), r.get("id")
         if metrica is None or id_meta is None:
             continue
-        alvo_por_meta[int(id_meta)] = (mes, str(metrica))
+        try:
+            periodo = primeiro_dia_do_mes(date.fromisoformat(str(r["periodo"])[:10]))
+        except (KeyError, ValueError):
+            periodo = None
+        alvo_por_meta[int(id_meta)] = (str(metrica), periodo)
 
     if not alvo_por_meta:
         return Metas({})
 
-    # Só os vínculos das metas do intervalo — `user_metas` cresce a cada mês
-    # cadastrado, e não há por que trazer o histórico inteiro pra filtrar aqui.
     ids = ",".join(str(i) for i in sorted(alvo_por_meta))
+    de, ate = meses[0].isoformat(), _proximo_mes(meses[-1]).isoformat()
+    vinculos = query(
+        "user_metas",
+        {
+            "id_meta": f"in.({ids})",
+            "or": f"(and(atualizado_em.gte.{de},atualizado_em.lt.{ate}),atualizado_em.is.null)",
+        },
+    )
 
     valores: dict[tuple[date, int, str], int] = {}
-    for v in query("user_metas", {"id_meta": f"in.({ids})"}):
+    atualizado_por_chave: dict[tuple[date, int, str], str] = {}
+    for v in vinculos:
         id_meta, id_user, valor = v.get("id_meta"), v.get("id_user"), v.get("valor_meta")
         if id_meta is None or id_user is None or valor is None:
             continue
         alvo = alvo_por_meta.get(int(id_meta))
         if alvo is None:
             continue
-        mes, metrica = alvo
-        valores[(mes, int(id_user), metrica)] = int(valor)
+        metrica, periodo = alvo
+        atualizado = v.get("atualizado_em")
+        try:
+            mes = primeiro_dia_do_mes(date.fromisoformat(str(atualizado)[:10])) if atualizado else periodo
+        except ValueError:
+            mes = periodo
+        if mes is None or mes not in meses:
+            continue
+        chave = (mes, int(id_user), metrica)
+        marca = str(atualizado or "")
+        if chave in valores and marca < atualizado_por_chave[chave]:
+            continue
+        valores[chave] = int(valor)
+        atualizado_por_chave[chave] = marca
 
     return Metas(valores)

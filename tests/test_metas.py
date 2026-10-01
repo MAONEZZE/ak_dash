@@ -259,3 +259,46 @@ def test_somar_grupo_vazio_e_zero():
     # modelo antigo dava multiplicando a meta do cargo por zero pessoas.
     dia = date(2026, 9, 15)
     assert _metas_do_time().somar(dia, dia, [], "reunioes_agendadas") == 0
+
+
+# --- a data que vale é a de atualização do valor (`user_metas.atualizado_em`)
+
+
+def test_meta_de_setembro_atualizada_em_outubro_vale_em_outubro(monkeypatch):
+    # Na virada de mês o time só edita `valor_meta`; a linha segue apontando
+    # pra `metricas_metas` de setembro. Sem isso outubro ficava sem meta.
+    _mockar_banco(
+        monkeypatch,
+        [{"id": 2, "metrica": "numeros_captados", "periodo": "2026-09-01"}],
+        [{"id_meta": 2, "id_user": ANA, "valor_meta": 6, "atualizado_em": "2026-10-01T10:40:28.49142"}],
+    )
+    dia = date(2026, 10, 1)
+    metas = buscar_metas(dia, dia)
+    assert metas.por_usuario(dia, dia, ANA, "numeros_captados") == 6
+
+
+def test_valor_atualizado_em_outubro_nao_vale_mais_em_setembro(monkeypatch):
+    _mockar_banco(
+        monkeypatch,
+        [{"id": 2, "metrica": "numeros_captados", "periodo": "2026-09-01"}],
+        [{"id_meta": 2, "id_user": ANA, "valor_meta": 6, "atualizado_em": "2026-10-01T10:40:28"}],
+    )
+    metas = buscar_metas(date(2026, 9, 1), date(2026, 9, 30))
+    assert metas.por_usuario(date(2026, 9, 15), date(2026, 9, 15), ANA, "numeros_captados") is None
+
+
+def test_duas_linhas_no_mesmo_mes_vale_a_atualizada_por_ultimo(monkeypatch):
+    _mockar_banco(
+        monkeypatch,
+        [
+            {"id": 2, "metrica": "numeros_captados", "periodo": "2026-09-01"},
+            {"id": 20, "metrica": "numeros_captados", "periodo": "2026-10-01"},
+        ],
+        [
+            {"id_meta": 20, "id_user": ANA, "valor_meta": 8, "atualizado_em": "2026-10-05T09:00:00"},
+            {"id_meta": 2, "id_user": ANA, "valor_meta": 6, "atualizado_em": "2026-10-01T10:40:28"},
+        ],
+    )
+    dia = date(2026, 10, 6)
+    metas = buscar_metas(dia, dia)
+    assert metas.por_usuario(dia, dia, ANA, "numeros_captados") == 8
