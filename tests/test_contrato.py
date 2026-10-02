@@ -46,7 +46,7 @@ def test_bff_nao_expoe_rota_de_dado_ausente_do_contrato():
 def test_schema_respostacargo_tem_os_campos_que_o_bff_produz():
     spec = _carregar_openapi()
     campos = set(spec["components"]["schemas"]["RespostaComercial"]["required"])
-    assert campos == {"periodo", "periodo_parcial", "avisos", "pessoas", "serie_diaria"}
+    assert campos == {"periodo", "periodo_parcial", "dias_uteis", "avisos", "pessoas", "serie_diaria"}
 
 
 def test_schema_respostageral_tem_os_campos_que_o_bff_produz():

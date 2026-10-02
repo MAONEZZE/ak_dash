@@ -19,8 +19,16 @@ from app.dominios.comercial.banco import TotaisCargo
 from app.dominios.pessoas.banco import Pessoa
 from app.metas import Metas
 from app.metricas import NOME_EXIBICAO, metricas_do_cargo
-from app.periodo import Periodo
+from app.periodo import Periodo, dias_uteis_decorridos
 from app.pontuacao import atribuir_ranking, calcular_pontuacao
+
+
+# Métricas exibidas que NÃO entram na pontuação (decisão de produto,
+# 02/10/2026): entraram depois e a regra de pontuação não mudou por elas.
+_FORA_DA_PONTUACAO = {
+    "sdr": {"ligacoes_realizadas", "inscricoes_realizadas"},
+    "closer": {"ligacoes_agendadas", "inscricoes_realizadas"},
+}
 
 
 def _status(realizado: int, meta_periodo: int | None, dias_com_lancamento: int) -> str:
@@ -91,7 +99,9 @@ def montar_resposta_comercial(
                 "metas_atingidas": {"atingidas": atingidas, "total": len(metricas_saida)},
                 "metricas": metricas_saida,
                 "contas_origem": totais.contas_por_pessoa.get(id_user, []),
-                "pontuacao_total": calcular_pontuacao(metricas_saida),
+                "pontuacao_total": calcular_pontuacao(
+                    [m for m in metricas_saida if m["metrica"] not in _FORA_DA_PONTUACAO.get(cargo, set())]
+                ),
             }
         )
 
@@ -116,6 +126,12 @@ def montar_resposta_comercial(
             "fim": periodo.fim.isoformat(),
         },
         "periodo_parcial": periodo_parcial,
+        # Mesmo cálculo de `/geral`: período passado sai decorridos = total,
+        # período futuro sai decorridos = 0.
+        "dias_uteis": {
+            "decorridos": dias_uteis_decorridos(periodo.inicio, periodo.fim, hoje=hoje),
+            "total": dias_uteis_decorridos(periodo.inicio, periodo.fim, hoje=periodo.fim),
+        },
         "avisos": avisos,
         "pessoas": pessoas_saida,
         "serie_diaria": [

@@ -1,4 +1,4 @@
-"""Monta a resposta de `GET /geral`: 6 cards (2 escuros de faturamento + 4
+"""Monta a resposta de `GET /geral`: 7 cards (2 escuros de faturamento + 5
 
 claros somados de `dash.vw_metricas`), os próximos eventos que alimentam os
 cards de Inscritos/Aprovados, tabela de pessoas (colunas por cargo) e
@@ -17,8 +17,9 @@ from app.periodo import Periodo, dias_uteis_decorridos
 from app.pontuacao import atribuir_ranking
 
 # Colunas da tabela de pessoas, por cargo (decisão de produto).
-_METRICAS_SDR_TABELA = ("numeros_captados", "ligacoes_agendadas", "reunioes_agendadas", "indicacoes")
-_METRICAS_CLOSER_TABELA = ("reunioes_realizadas", "liquidado", "reunioes_agendadas", "indicacoes")
+_METRICAS_SDR_TABELA = (
+    "numeros_captados", "ligacoes_realizadas", "reunioes_agendadas", "indicacoes", "inscricoes_realizadas",
+)
 
 # Métricas que ENTRAM NA PONTUAÇÃO (e, por consequência, no pódio) — nem toda
 # coluna da tabela conta. A pontuação da Geral é a SOMA BRUTA do realizado
@@ -29,10 +30,14 @@ _METRICAS_CLOSER_TABELA = ("reunioes_realizadas", "liquidado", "reunioes_agendad
 # reunião/indicação numa única pontuação. Segue visível na tabela, só não pontua. `reunioes_agendadas` entrou em
 # 24/09/2026: sem ela, no filtro Dia o pódio ficava todo em 0 nas horas em
 # que a única atividade lançada era reunião agendada.
+# `ligacoes_agendadas` saiu do SDR em 02/10/2026 (a coluna deixou de existir
+# em `dash.metricas_sdrs`). As métricas novas — `ligacoes_realizadas` do SDR,
+# `ligacoes_agendadas` do closer e `inscricoes_realizadas` dos dois — aparecem
+# na tabela mas não pontuam (decisão de produto).
 # Denominador fixo por cargo: todo closer é medido pelas mesmas métricas,
 # senão o ranking compararia somas de tamanhos diferentes.
 _METRICAS_PONTUACAO = {
-    "sdr": ("numeros_captados", "ligacoes_agendadas", "reunioes_agendadas", "indicacoes"),
+    "sdr": ("numeros_captados", "reunioes_agendadas", "indicacoes"),
     "closer": ("reunioes_agendadas", "reunioes_realizadas", "indicacoes"),
 }
 
@@ -46,20 +51,23 @@ _PONTOS_POR_UNIDADE = 10
 # empresa) SEMPRE DO MÊS (`faturamento_mes`), nunca do recorte pedido — e SEM
 # meta: faturamento e liquidado nunca tiveram (faturamento) ou
 # não têm mais (liquidado) uma composição de pessoas que os carregue, então
-# ficam sempre com `meta`/`pct`/`pct_ritmo` em `None`. Só os 4 cards claros
+# ficam sempre com `meta`/`pct`/`pct_ritmo` em `None`. Só os 5 cards claros
 # continuam com a meta somada por pessoa.
 _COMPOSICAO_CARDS_ESCUROS: tuple[str, ...] = ("faturamento", "liquidado")
 
 # Card claro da empresa -> (cargo, métrica) que o compõem. Uma definição só
 # para o realizado E para a meta: era a duplicação entre os dois que fazia
 # "Reuniões Agendadas" somar o realizado de 4 closers contra a meta de 7
-# pessoas. Reuniões agendadas e indicações são de SDR + Closer; números
-# captados e ligações agendadas, só de SDR.
+# pessoas. Reuniões agendadas, indicações e inscrições são de SDR + Closer;
+# números captados, só de SDR; ligações agendadas, só de Closer (desde
+# 02/10/2026, quando a coluna saiu de `dash.metricas_sdrs`). A ordem aqui é a
+# ordem dos cards na tela.
 _COMPOSICAO_CARDS_CLAROS: dict[str, tuple[tuple[str, str], ...]] = {
     "numeros_captados": (("sdr", "numeros_captados"),),
-    "ligacoes_agendadas": (("sdr", "ligacoes_agendadas"),),
+    "ligacoes_agendadas": (("closer", "ligacoes_agendadas"),),
     "reunioes_agendadas": (("sdr", "reunioes_agendadas"), ("closer", "reunioes_agendadas")),
     "indicacoes": (("sdr", "indicacoes"), ("closer", "indicacoes")),
+    "inscricoes_realizadas": (("sdr", "inscricoes_realizadas"), ("closer", "inscricoes_realizadas")),
 }
 
 
@@ -266,6 +274,11 @@ def montar_resposta_geral(
                 "metrica": "indicacoes",
                 "realizado": totais_closer.realizado.get((id_user, "indicacoes"), 0),
                 "meta_periodo": meta_de(id_user, "indicacoes"),
+            },
+            {
+                "metrica": "inscricoes_realizadas",
+                "realizado": totais_closer.realizado.get((id_user, "inscricoes_realizadas"), 0),
+                "meta_periodo": meta_de(id_user, "inscricoes_realizadas"),
             },
         ]
         pessoas_saida.append(_montar_pessoa(

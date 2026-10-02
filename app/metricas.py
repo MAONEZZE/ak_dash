@@ -11,9 +11,10 @@ antiga, que não existe mais — ver sql/2026-09-15-view-metricas.sql.
 """
 from __future__ import annotations
 
-# `reunioes_agendadas` e `indicacoes` aparecem nos DOIS cargos: SDR e closer
-# agendam reunião e trabalham indicação, cada um com a sua meta (hoje meta é
-# por pessoa, em `dash.user_metas`).
+# `ligacoes_realizadas`, `reunioes_agendadas`, `indicacoes` e
+# `inscricoes_realizadas` aparecem nos DOIS cargos, cada pessoa com a sua meta
+# (meta é por pessoa, em `dash.user_metas`). `ligacoes_agendadas` saiu de
+# `dash.metricas_sdrs` em 02/10/2026 e hoje é só de closer.
 METRICAS_SDR: tuple[str, ...] = (
     "conexoes_enviadas",
     "conexoes_aceitas",
@@ -21,16 +22,19 @@ METRICAS_SDR: tuple[str, ...] = (
     "in_mails",
     "fups",
     "numeros_captados",
-    "ligacoes_agendadas",
+    "ligacoes_realizadas",
     "reunioes_agendadas",
     "indicacoes",
+    "inscricoes_realizadas",
 )
 
 METRICAS_CLOSER: tuple[str, ...] = (
+    "ligacoes_agendadas",
     "ligacoes_realizadas",
     "reunioes_agendadas",
     "reunioes_realizadas",
     "indicacoes",
+    "inscricoes_realizadas",
 )
 
 NOME_EXIBICAO: dict[str, str] = {
@@ -45,6 +49,7 @@ NOME_EXIBICAO: dict[str, str] = {
     "reunioes_agendadas": "Reuniões Agendadas",
     "reunioes_realizadas": "Reuniões Realizadas",
     "indicacoes": "Indicações",
+    "inscricoes_realizadas": "Inscrições Realizadas",
     # Métricas financeiras (fora de vw_metricas, ver dominios/geral/banco.py)
     "faturamento": "Faturamento",
     "liquidado": "Liquidado",

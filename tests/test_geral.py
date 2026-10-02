@@ -279,7 +279,7 @@ def test_sem_evento_futuro_a_lista_sai_vazia_sem_derrubar_o_resto():
         metas=Metas({}), faturamento=_faturamento_vazio(), eventos=[],
     )
     assert resposta["eventos"] == []
-    assert len(resposta["cards"]) == 6
+    assert len(resposta["cards"]) == 7
 
 
 def test_card_reunioes_agendadas_soma_sdr_e_closer():
@@ -317,7 +317,9 @@ def test_closer_pontua_sem_liquidado_cadastrado():
     assert pessoa["posicao"] == 1
     # Liquidado continua na tabela, em branco — só não pontua. Reuniões
     # agendadas tomou o lugar da antiga coluna Aprovados.
-    assert [m["metrica"] for m in pessoa["metricas"]] == ["reunioes_realizadas", "liquidado", "reunioes_agendadas", "indicacoes"]
+    assert [m["metrica"] for m in pessoa["metricas"]] == [
+        "reunioes_realizadas", "liquidado", "reunioes_agendadas", "indicacoes", "inscricoes_realizadas",
+    ]
 
 
 def test_closer_sem_nenhuma_meta_continua_pontuando_por_quantidade():
@@ -470,3 +472,99 @@ def test_reuniao_agendada_pontua_no_podio_de_sdr_e_de_closer():
     assert (por_nome["Jacob"]["pontuacao"], por_nome["Jacob"]["posicao"]) == (0, 2)
     reunioes = next(m for m in por_nome["Thalyson"]["metricas"] if m["metrica"] == "reunioes_agendadas")
     assert reunioes["realizado"] == 1
+
+
+def test_ordem_dos_cards():
+    resposta = _montar(
+        pessoas_sdr=[], pessoas_closer=[],
+        totais_sdr=_totais({}), totais_closer=_totais({}),
+        metas=Metas({}), faturamento=_faturamento_vazio(), eventos=[],
+    )
+    assert [c["metrica"] for c in resposta["cards"]] == [
+        "faturamento", "liquidado",
+        "numeros_captados", "ligacoes_agendadas", "reunioes_agendadas", "indicacoes", "inscricoes_realizadas",
+    ]
+    nomes = {c["metrica"]: c["nome_exibicao"] for c in resposta["cards"]}
+    assert nomes["inscricoes_realizadas"] == "Inscrições Realizadas"
+
+
+def test_card_ligacoes_agendadas_soma_os_closers():
+    # `ligacoes_agendadas` saiu de `dash.metricas_sdrs` (02/10/2026): o card
+    # passou a ser dos closers — e a meta é a soma das metas deles.
+    sdr = [Pessoa(id="9", nome="Nathan", cargo="sdr", email="n@x.com")]
+    closer = [
+        Pessoa(id="1", nome="Jacob", cargo="closer", email="ja@x.com"),
+        Pessoa(id="3", nome="Alex", cargo="closer", email="al@x.com"),
+    ]
+    metas = Metas({
+        (date(2026, 9, 1), JACOB, "ligacoes_agendadas"): 2,
+        (date(2026, 9, 1), 3, "ligacoes_agendadas"): 3,
+    })
+    resposta = _montar(
+        pessoas_sdr=sdr, pessoas_closer=closer,
+        totais_sdr=_totais({(9, "ligacoes_agendadas"): 100}),
+        totais_closer=_totais({(1, "ligacoes_agendadas"): 4, (3, "ligacoes_agendadas"): 6}),
+        metas=metas, faturamento=_faturamento_vazio(), eventos=[],
+    )
+    card = next(c for c in resposta["cards"] if c["metrica"] == "ligacoes_agendadas")
+    assert card["realizado"] == 10
+    assert card["meta"] == (2 + 3) * 22
+
+
+def test_card_inscricoes_realizadas_soma_sdr_e_closer():
+    sdr = [Pessoa(id="9", nome="Nathan", cargo="sdr", email="n@x.com")]
+    closer = [Pessoa(id="1", nome="Jacob", cargo="closer", email="ja@x.com")]
+    resposta = _montar(
+        pessoas_sdr=sdr, pessoas_closer=closer,
+        totais_sdr=_totais({(9, "inscricoes_realizadas"): 2}),
+        totais_closer=_totais({(1, "inscricoes_realizadas"): 5}),
+        metas=Metas({}), faturamento=_faturamento_vazio(), eventos=[],
+    )
+    card = next(c for c in resposta["cards"] if c["metrica"] == "inscricoes_realizadas")
+    assert card["realizado"] == 7
+
+
+def test_colunas_do_sdr_na_tabela():
+    sdr = [Pessoa(id="9", nome="Nathan", cargo="sdr", email="n@x.com")]
+    resposta = _montar(
+        pessoas_sdr=sdr, pessoas_closer=[],
+        totais_sdr=_totais({(9, "ligacoes_realizadas"): 12, (9, "inscricoes_realizadas"): 3}), totais_closer=_totais({}),
+        metas=Metas({}), faturamento=_faturamento_vazio(), eventos=[],
+    )
+    metricas = {m["metrica"]: m["realizado"] for m in resposta["pessoas"][0]["metricas"]}
+    assert list(metricas) == [
+        "numeros_captados", "ligacoes_realizadas", "reunioes_agendadas", "indicacoes", "inscricoes_realizadas",
+    ]
+    assert metricas["ligacoes_realizadas"] == 12
+    assert metricas["inscricoes_realizadas"] == 3
+
+
+def test_closer_mostra_inscricoes_realizadas_na_tabela():
+    closer = [Pessoa(id="1", nome="Jacob", cargo="closer", email="ja@x.com")]
+    resposta = _montar(
+        pessoas_sdr=[], pessoas_closer=closer,
+        totais_sdr=_totais({}), totais_closer=_totais({(1, "inscricoes_realizadas"): 4}),
+        metas=Metas({}), faturamento=_faturamento_vazio(), eventos=[],
+    )
+    metrica = next(m for m in resposta["pessoas"][0]["metricas"] if m["metrica"] == "inscricoes_realizadas")
+    assert metrica["realizado"] == 4
+
+
+def test_metricas_novas_nao_pontuam():
+    # Decisão de produto: aparecem na tabela, mas a regra de pontuação não muda.
+    sdr = [Pessoa(id="9", nome="Nathan", cargo="sdr", email="n@x.com")]
+    closer = [Pessoa(id="1", nome="Jacob", cargo="closer", email="ja@x.com")]
+    resposta = _montar(
+        pessoas_sdr=sdr, pessoas_closer=closer,
+        totais_sdr=_totais({
+            (9, "numeros_captados"): 1, (9, "ligacoes_realizadas"): 50, (9, "inscricoes_realizadas"): 50,
+        }),
+        totais_closer=_totais({
+            (1, "reunioes_realizadas"): 2, (1, "ligacoes_agendadas"): 50,
+            (1, "ligacoes_realizadas"): 50, (1, "inscricoes_realizadas"): 50,
+        }),
+        metas=Metas({}), faturamento=_faturamento_vazio(), eventos=[],
+    )
+    por_id = {p["id_user"]: p["pontuacao"] for p in resposta["pessoas"]}
+    assert por_id[9] == 10
+    assert por_id[1] == 20

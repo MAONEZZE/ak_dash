@@ -25,20 +25,51 @@ def test_soma_realizado_e_conta_dias_distintos(monkeypatch):
 
 
 def test_metrica_fora_do_conjunto_do_cargo_e_descartada_e_contada(monkeypatch):
-    # "ligacoes_realizadas" é métrica de closer — não deve aparecer num
-    # relatório de sdr. (`indicacoes` e `reunioes_agendadas` não servem de
-    # exemplo: valem pros dois cargos.)
+    # "reunioes_realizadas" é métrica só de closer — não deve aparecer num
+    # relatório de sdr. (`indicacoes`, `reunioes_agendadas`, `ligacoes_realizadas`
+    # e `inscricoes_realizadas` não servem de exemplo: valem pros dois cargos.)
     _mockar_query(
         monkeypatch,
         [
-            {"data": "2026-09-01", "id_user": 2, "metrica": "ligacoes_realizadas", "valor": 5, "conta": "x"},
+            {"data": "2026-09-01", "id_user": 2, "metrica": "reunioes_realizadas", "valor": 5, "conta": "x"},
             {"data": "2026-09-01", "id_user": 2, "metrica": "numeros_captados", "valor": 3, "conta": "x"},
         ],
     )
     totais = banco_mod.buscar_totais("sdr", [2], date(2026, 9, 1), date(2026, 9, 1))
-    assert (2, "ligacoes_realizadas") not in totais.realizado
+    assert (2, "reunioes_realizadas") not in totais.realizado
     assert totais.realizado[(2, "numeros_captados")] == 3
     assert totais.linhas_cargo_cruzado == 1
+
+
+def test_sdr_soma_ligacoes_realizadas_e_inscricoes_e_descarta_ligacoes_agendadas(monkeypatch):
+    # `ligacoes_agendadas` saiu de `dash.metricas_sdrs`: hoje é só de closer.
+    _mockar_query(
+        monkeypatch,
+        [
+            {"data": "2026-09-01", "id_user": 2, "metrica": "ligacoes_realizadas", "valor": 4, "conta": None},
+            {"data": "2026-09-01", "id_user": 2, "metrica": "inscricoes_realizadas", "valor": 2, "conta": None},
+            {"data": "2026-09-01", "id_user": 2, "metrica": "ligacoes_agendadas", "valor": 7, "conta": None},
+        ],
+    )
+    totais = banco_mod.buscar_totais("sdr", [2], date(2026, 9, 1), date(2026, 9, 1))
+    assert totais.realizado[(2, "ligacoes_realizadas")] == 4
+    assert totais.realizado[(2, "inscricoes_realizadas")] == 2
+    assert (2, "ligacoes_agendadas") not in totais.realizado
+    assert totais.linhas_cargo_cruzado == 1
+
+
+def test_closer_soma_ligacoes_agendadas_e_inscricoes(monkeypatch):
+    _mockar_query(
+        monkeypatch,
+        [
+            {"data": "2026-09-01", "id_user": 1, "metrica": "ligacoes_agendadas", "valor": 3, "conta": None},
+            {"data": "2026-09-01", "id_user": 1, "metrica": "inscricoes_realizadas", "valor": 1, "conta": None},
+        ],
+    )
+    totais = banco_mod.buscar_totais("closer", [1], date(2026, 9, 1), date(2026, 9, 1))
+    assert totais.realizado[(1, "ligacoes_agendadas")] == 3
+    assert totais.realizado[(1, "inscricoes_realizadas")] == 1
+    assert totais.linhas_cargo_cruzado == 0
 
 
 def test_serie_diaria_pre_populada_com_zero_em_todo_dia_do_intervalo(monkeypatch):

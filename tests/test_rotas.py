@@ -67,6 +67,7 @@ def test_comercial_sdr_200(monkeypatch):
     corpo = resposta.json()
     assert corpo["periodo"]["inicio"] == "2026-09-01"
     assert len(corpo["pessoas"]) == 1  # só o Nathan é sdr
+    assert set(corpo["dias_uteis"]) == {"decorridos", "total"}
 
 
 def test_comercial_closer_200(monkeypatch):
@@ -84,7 +85,7 @@ def test_geral_200_periodo_atual(monkeypatch):
     resposta = _client(monkeypatch).get("/geral")
     assert resposta.status_code == 200
     corpo = resposta.json()
-    assert len(corpo["cards"]) == 6
+    assert len(corpo["cards"]) == 7
     assert corpo["eventos"] == []  # `events` vazia no fake de query
     assert len(corpo["pessoas"]) == 2
 
