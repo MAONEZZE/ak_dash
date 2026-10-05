@@ -17,7 +17,7 @@
 create or replace view dash.vw_metricas as
 with sdr_manual as (
   select s.id_user,
-         case when s.key_data_ref_user ~ '^\d{2}/\d{2}/\d{4}'
+         case when s.key_data_ref_user ~ '^[0-9]{2}/[0-9]{2}/[0-9]{4}'
               then to_date(left(s.key_data_ref_user, 10), 'DD/MM/YYYY') end as data,
          s.fups, s.numeros_captados, s.ligacoes_realizadas, s.reunioes_agendadas,
          s.indicacoes, s.inscricoes_realizadas
@@ -25,7 +25,7 @@ with sdr_manual as (
 ),
 closer_manual as (
   select c.id_user,
-         case when c.key_data_ref_user ~ '^\d{2}/\d{2}/\d{4}'
+         case when c.key_data_ref_user ~ '^[0-9]{2}/[0-9]{2}/[0-9]{4}'
               then to_date(left(c.key_data_ref_user, 10), 'DD/MM/YYYY') end as data,
          c.ligacoes_agendadas, c.ligacoes_realizadas, c.reunioes_agendadas,
          c.reunioes_realizadas, c.indicacoes, c.inscricoes_realizadas
@@ -33,7 +33,7 @@ closer_manual as (
 ),
 linkedin as (
   select d.id_user,
-         case when d.key_data_ref_user ~ '^\d{2}/\d{2}/\d{4}'
+         case when d.key_data_ref_user ~ '^[0-9]{2}/[0-9]{2}/[0-9]{4}'
               then to_date(left(d.key_data_ref_user, 10), 'DD/MM/YYYY') end as data,
          d.conta_usuario,
          d.conexoes_enviadas, d.conexoes_aceitas, d.abordagens, d.in_mails
@@ -84,3 +84,6 @@ select l.data, l.id_user, u.nome, c.cargo, l.conta_usuario as conta, v.metrica, 
  where l.data is not null and v.valor is not null;
 
 grant select on dash.vw_metricas to service_role;
+
+-- Recarrega o cache do PostgREST pra view aparecer na hora (sem isso, 404 até o reload automático).
+notify pgrst, 'reload schema';
