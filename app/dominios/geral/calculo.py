@@ -103,21 +103,16 @@ def _meta_card_empresa(
     recadastrar quando alguém entra ou sai — e agora acompanha também quem
     tem meta maior que o colega, coisa que a meta por cargo achatava.
 
-    `None` se QUALQUER pessoa da composição estiver sem meta cadastrada (ou
-    se a composição for vazia) — nunca a meta de parte do time contra um
-    realizado que soma o time inteiro.
+    Quem está sem meta fica fora da soma, mas o realizado do card continua
+    sendo o do time inteiro (decisão do usuário, 2026-10-05). `None` só se
+    ninguém da composição tiver meta, ou se a composição for vazia.
     """
-    if not composicao:
-        return None
-    total = 0
-    for cargo, metrica in composicao:
-        parcial = metas.somar(
-            periodo.inicio, periodo.fim, [int(p.id) for p in pessoas_por_cargo[cargo]], metrica
-        )
-        if parcial is None:
-            return None
-        total += parcial
-    return total
+    parciais = [
+        metas.somar(periodo.inicio, periodo.fim, [int(p.id) for p in pessoas_por_cargo[cargo]], metrica)
+        for cargo, metrica in composicao
+    ]
+    com_meta = [p for p in parciais if p is not None]
+    return sum(com_meta) if com_meta else None
 
 
 def _pontuacao_por_quantidade(totais: TotaisCargo, id_user: int, cargo: str) -> float:

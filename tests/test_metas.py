@@ -247,11 +247,16 @@ def test_somar_junta_as_metas_individuais_do_grupo():
     assert _metas_do_time().somar(dia, dia, [ANA, BRUNO], "reunioes_agendadas") == 10
 
 
-def test_somar_devolve_none_se_alguem_do_grupo_nao_tem_meta():
-    # O realizado do card soma o time inteiro; meta de parte do time daria um
-    # percentual inflado. Melhor "Meta não cadastrada" do que um número errado.
+def test_somar_ignora_quem_nao_tem_meta():
+    # Decisão do usuário (2026-10-05): a meta do card é a soma de quem tem meta;
+    # o realizado continua sendo o do time inteiro.
     dia = date(2026, 9, 15)
-    assert _metas_do_time().somar(dia, dia, [ANA, BRUNO, CLOSER], "reunioes_agendadas") is None
+    assert _metas_do_time().somar(dia, dia, [ANA, BRUNO, CLOSER], "reunioes_agendadas") == 10
+
+
+def test_somar_devolve_none_se_ninguem_do_grupo_tem_meta():
+    dia = date(2026, 9, 15)
+    assert _metas_do_time().somar(dia, dia, [CLOSER], "reunioes_agendadas") is None
 
 
 def test_somar_grupo_vazio_e_zero():

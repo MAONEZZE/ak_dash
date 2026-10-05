@@ -106,19 +106,18 @@ class Metas:
         cards da empresa acham o denominador deles agora que meta é de pessoa,
         não de cargo.
 
-        `None` se QUALQUER pessoa do grupo estiver sem meta: o realizado do
-        card soma o time inteiro, então uma meta parcial compararia 7 pessoas
-        de realizado contra 3 de meta. Grupo vazio soma 0 — mesmo resultado
+        Quem está sem meta fica de fora da soma — o realizado do card continua
+        sendo o do time inteiro (decisão do usuário, 2026-10-05). `None` só
+        quando ninguém do grupo tem meta. Grupo vazio soma 0 — mesmo resultado
         que o modelo antigo dava multiplicando a meta do cargo por zero
         pessoas.
         """
-        total = 0
-        for id_user in ids_user:
-            meta = self.por_usuario(inicio, fim, id_user, metrica)
-            if meta is None:
-                return None
-            total += meta
-        return total
+        ids = list(ids_user)
+        if not ids:
+            return 0
+        metas = [self.por_usuario(inicio, fim, id_user, metrica) for id_user in ids]
+        com_meta = [m for m in metas if m is not None]
+        return sum(com_meta) if com_meta else None
 
 
 def _proximo_mes(d: date) -> date:

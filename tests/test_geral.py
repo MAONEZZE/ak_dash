@@ -386,9 +386,9 @@ def test_meta_do_card_da_empresa_e_a_soma_das_metas_do_time():
     assert card["meta"] == (4 + 6 + 4) * 22
 
 
-def test_card_sem_meta_de_alguem_do_time_fica_sem_meta():
-    # Só o Closer tem meta de reuniões agendadas: o card não pode mostrar a
-    # meta de uma pessoa contra um realizado que soma SDR + Closer.
+def test_card_com_meta_so_de_parte_do_time_usa_a_meta_de_quem_tem():
+    # Só o Closer tem meta de reuniões agendadas: a meta do card é a dele
+    # (decisão do usuário, 2026-10-05 — antes o card ficava sem meta).
     sdr = [Pessoa(id="9", nome="Nathan", cargo="sdr", email="n@x.com")]
     closer = [Pessoa(id="1", nome="Jacob", cargo="closer", email="ja@x.com")]
     metas = Metas({(date(2026, 9, 1), JACOB, "reunioes_agendadas"): 4})
@@ -398,7 +398,7 @@ def test_card_sem_meta_de_alguem_do_time_fica_sem_meta():
         metas=metas, faturamento=_faturamento_vazio(), eventos=[],
     )
     card = next(c for c in resposta["cards"] if c["metrica"] == "reunioes_agendadas")
-    assert card["meta"] is None
+    assert card["meta"] == 4 * 22
 
 
 def test_card_de_indicacoes_junta_captadas_do_sdr_com_indicacoes_do_closer():
@@ -522,6 +522,23 @@ def test_card_inscricoes_realizadas_soma_sdr_e_closer():
     )
     card = next(c for c in resposta["cards"] if c["metrica"] == "inscricoes_realizadas")
     assert card["realizado"] == 7
+
+
+def test_card_de_dois_cargos_usa_a_meta_de_quem_tem_mesmo_com_um_cargo_sem_meta():
+    # Decisão do usuário (2026-10-05): o card só fica sem meta se ninguém tiver
+    # meta. Aqui só o SDR tem meta de inscrições; os closers entram no realizado.
+    sdr = [Pessoa(id="9", nome="Nathan", cargo="sdr", email="n@x.com")]
+    closer = [Pessoa(id="1", nome="Jacob", cargo="closer", email="ja@x.com")]
+    resposta = _montar(
+        pessoas_sdr=sdr, pessoas_closer=closer,
+        totais_sdr=_totais({(9, "inscricoes_realizadas"): 2}),
+        totais_closer=_totais({(1, "inscricoes_realizadas"): 5}),
+        metas=Metas({(date(2026, 9, 1), 9, "inscricoes_realizadas"): 4}),
+        faturamento=_faturamento_vazio(), eventos=[],
+    )
+    card = next(c for c in resposta["cards"] if c["metrica"] == "inscricoes_realizadas")
+    assert card["realizado"] == 7
+    assert card["meta"] == 4 * 22
 
 
 def test_colunas_do_sdr_na_tabela():
