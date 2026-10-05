@@ -18,7 +18,7 @@ from datetime import date
 from app.dominios.comercial.banco import TotaisCargo
 from app.dominios.pessoas.banco import Pessoa
 from app.metas import Metas
-from app.metricas import NOME_EXIBICAO, metricas_do_cargo
+from app.metricas import metricas_do_cargo, nome_exibicao
 from app.periodo import Periodo, dias_uteis_decorridos
 from app.pontuacao import atribuir_ranking, calcular_pontuacao
 
@@ -79,7 +79,7 @@ def montar_resposta_comercial(
             metricas_saida.append(
                 {
                     "metrica": chave_metrica,
-                    "nome_exibicao": NOME_EXIBICAO[chave_metrica],
+                    "nome_exibicao": nome_exibicao(chave_metrica, cargo),
                     "meta_periodo": meta_periodo,
                     "realizado": realizado,
                     "status": status,

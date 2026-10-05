@@ -229,9 +229,23 @@ def test_colunas_do_sdr_trocam_ligacoes_agendadas_por_realizadas_e_ganham_inscri
     colunas = [m["metrica"] for m in resposta.corpo["pessoas"][0]["metricas"]]
     assert colunas == [
         "conexoes_enviadas", "conexoes_aceitas", "abordagens", "in_mails",
-        "fups", "numeros_captados", "ligacoes_realizadas", "reunioes_agendadas", "indicacoes",
-        "inscricoes_realizadas",
+        "fups", "numeros_captados", "inscricoes_realizadas", "ligacoes_realizadas", "indicacoes",
+        "reunioes_agendadas",
     ]
+
+
+def test_indicacoes_do_sdr_se_chamam_indicacoes_captadas_e_do_closer_so_indicacoes():
+    sdr = montar_resposta_comercial(
+        periodo=_periodo_mes(), cargo="sdr", pessoas_cargo=[_pessoa("9", "Nathan", "sdr", "nathan@x.com")],
+        totais=_totais({}, {}), metas=Metas({}), emails_filtro=None, hoje=date(2026, 9, 14),
+    )
+    closer = montar_resposta_comercial(
+        periodo=_periodo_mes(), cargo="closer", pessoas_cargo=[_pessoa("1", "Jacob", "closer", "jacob@x.com")],
+        totais=_totais({}, {}), metas=Metas({}), emails_filtro=None, hoje=date(2026, 9, 14),
+    )
+    nome = lambda r: next(m["nome_exibicao"] for m in r.corpo["pessoas"][0]["metricas"] if m["metrica"] == "indicacoes")
+    assert nome(sdr) == "Indicações Captadas"
+    assert nome(closer) == "Indicações"
 
 
 def test_colunas_do_closer_ganham_ligacoes_agendadas_e_inscricoes():

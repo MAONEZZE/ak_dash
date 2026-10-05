@@ -22,10 +22,10 @@ METRICAS_SDR: tuple[str, ...] = (
     "in_mails",
     "fups",
     "numeros_captados",
-    "ligacoes_realizadas",
-    "reunioes_agendadas",
-    "indicacoes",
     "inscricoes_realizadas",
+    "ligacoes_realizadas",
+    "indicacoes",
+    "reunioes_agendadas",
 )
 
 METRICAS_CLOSER: tuple[str, ...] = (
@@ -56,6 +56,22 @@ NOME_EXIBICAO: dict[str, str] = {
     "inscritos": "Inscritos",
     "aprovados": "Aprovados",
 }
+
+
+# No SDR a indicação é captada (o closer só "indica"): mesmo nome de coluna,
+# rótulo diferente por cargo.
+_NOME_EXIBICAO_SDR: dict[str, str] = {"indicacoes": "Indicações Captadas"}
+
+
+def nome_exibicao(metrica: str, cargo: str | None = None) -> str:
+    """Rótulo da métrica na tela. `cargo` só muda o rótulo onde o nome difere
+
+    entre SDR e Closer; sem cargo (cards da empresa que somam os dois) vale o
+    nome geral.
+    """
+    if cargo == "sdr" and metrica in _NOME_EXIBICAO_SDR:
+        return _NOME_EXIBICAO_SDR[metrica]
+    return NOME_EXIBICAO[metrica]
 
 
 def metricas_do_cargo(cargo: str) -> tuple[str, ...]:

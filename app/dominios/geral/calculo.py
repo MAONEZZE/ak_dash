@@ -12,7 +12,7 @@ from app.dominios.comercial.banco import TotaisCargo
 from app.dominios.geral.banco import EventoInscricoes, Faturamento
 from app.dominios.pessoas.banco import Pessoa
 from app.metas import Metas
-from app.metricas import NOME_EXIBICAO
+from app.metricas import NOME_EXIBICAO, nome_exibicao
 from app.periodo import Periodo, dias_uteis_decorridos
 from app.pontuacao import atribuir_ranking
 
@@ -140,7 +140,7 @@ def _montar_pessoa(
         "metricas": [
             {
                 "metrica": m["metrica"],
-                "nome_exibicao": NOME_EXIBICAO[m["metrica"]],
+                "nome_exibicao": nome_exibicao(m["metrica"], cargo),
                 "realizado": m["realizado"],
                 "meta": m["meta_periodo"],
             }
