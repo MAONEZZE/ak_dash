@@ -99,7 +99,8 @@ class EventoInscricoes:
     """Um evento de `SED.events` + as contagens de `SED.registrations` dele.
 
     `inscritos` conta TODAS as inscrições do evento, qualquer status;
-    `aprovados`, só os `approved` — daí `aprovados <= inscritos` sempre.
+    `aprovados`, só os `approved`; `pendentes`, só os `pending` — os dois
+    são subconjuntos de `inscritos`.
     `capacidade` é `None` quando o evento não tem limite cadastrado.
     """
 
@@ -109,6 +110,7 @@ class EventoInscricoes:
     capacidade: int | None
     inscritos: int
     aprovados: int
+    pendentes: int = 0
 
 
 def _instante_utc(momento: datetime) -> str:
@@ -170,6 +172,7 @@ def buscar_confrarias_do_mes(inicio: date, fim: date) -> list[EventoInscricoes]:
 
     inscritos = Counter(r.get("event_id") for r in inscricoes)
     aprovados = Counter(r.get("event_id") for r in inscricoes if r.get("status") == "approved")
+    pendentes = Counter(r.get("event_id") for r in inscricoes if r.get("status") == "pending")
 
     return [
         EventoInscricoes(
@@ -179,6 +182,7 @@ def buscar_confrarias_do_mes(inicio: date, fim: date) -> list[EventoInscricoes]:
             capacidade=e.get("capacity"),
             inscritos=inscritos[e["id"]],
             aprovados=aprovados[e["id"]],
+            pendentes=pendentes[e["id"]],
         )
         for e in eventos
     ]

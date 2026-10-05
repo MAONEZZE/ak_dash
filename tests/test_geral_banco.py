@@ -149,6 +149,7 @@ def test_inscritos_conta_toda_inscricao_inclusive_recusada(monkeypatch):
     (evento,) = banco_mod.buscar_confrarias_do_mes(date(2026, 9, 1), date(2026, 9, 30))
     assert evento.inscritos == 4
     assert evento.aprovados == 1
+    assert evento.pendentes == 2  # só `pending`: recusado não é pendente
     assert evento.capacidade == 50
 
 
@@ -159,7 +160,7 @@ def test_evento_sem_inscricao_sai_com_zero_nao_com_erro(monkeypatch):
         [{"event_id": "outro", "status": "approved"}],
     )
     (evento,) = banco_mod.buscar_confrarias_do_mes(date(2026, 9, 1), date(2026, 9, 30))
-    assert (evento.inscritos, evento.aprovados, evento.capacidade) == (0, 0, None)
+    assert (evento.inscritos, evento.aprovados, evento.pendentes, evento.capacidade) == (0, 0, 0, None)
 
 
 def test_filtra_confraria_do_mes_inteiro_e_nao_filtra_status(monkeypatch):

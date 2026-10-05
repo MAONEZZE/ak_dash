@@ -253,8 +253,8 @@ def test_eventos_saem_na_resposta_na_ordem_recebida():
         metas=Metas({}), faturamento=_faturamento_vazio(), eventos=eventos,
     )
     assert resposta["eventos"] == [
-        {"id": "a", "titulo": "Imersão", "data": "2026-09-20T19:00:00", "capacidade": 50, "inscritos": 31, "aprovados": 12},
-        {"id": "b", "titulo": "Workshop", "data": "2026-09-27T09:00:00", "capacidade": None, "inscritos": 4, "aprovados": 0},
+        {"id": "a", "titulo": "Imersão", "data": "2026-09-20T19:00:00", "capacidade": 50, "inscritos": 31, "aprovados": 12, "pendentes": 0},
+        {"id": "b", "titulo": "Workshop", "data": "2026-09-27T09:00:00", "capacidade": None, "inscritos": 4, "aprovados": 0, "pendentes": 0},
     ]
 
 

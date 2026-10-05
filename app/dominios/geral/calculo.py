@@ -303,6 +303,7 @@ def montar_resposta_geral(
                 "capacidade": e.capacidade,
                 "inscritos": e.inscritos,
                 "aprovados": e.aprovados,
+                "pendentes": e.pendentes,
             }
             for e in eventos
         ],
