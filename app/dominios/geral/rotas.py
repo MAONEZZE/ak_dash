@@ -8,7 +8,7 @@ from app.auth import exigir_usuario
 from app.cache import obter_ou_calcular
 from app.config import settings
 from app.dominios.comercial.banco import buscar_totais
-from app.dominios.geral.banco import buscar_confrarias_do_mes, buscar_faturamento
+from app.dominios.geral.banco import buscar_confrarias_do_mes, buscar_dripify_por_conta, buscar_faturamento
 from app.dominios.geral.calculo import montar_resposta_geral, montar_termometro
 from app.fontes.banco import iniciar_registro_de_falhas, tabelas_com_falha
 from app.dominios.pessoas.banco import listar_ativas
@@ -111,6 +111,12 @@ def get_geral(
         lambda: buscar_confrarias_do_mes(mes_corrente.inicio, mes_corrente.fim),
     )
 
+    contas_dripify = obter_ou_calcular(
+        f"dripify_contas:{chave_periodo}",
+        settings.cache_ttl_metricas_segundos,
+        lambda: buscar_dripify_por_conta(periodo_saida.inicio, periodo_saida.fim),
+    )
+
     resposta = montar_resposta_geral(
         periodo_metas=periodo_metas,
         periodo_saida=periodo_saida,
@@ -124,6 +130,7 @@ def get_geral(
         faturamento_mes=faturamento_mes,
         eventos=eventos,
         termometro=termometro,
+        contas_dripify=contas_dripify,
     )
     resposta["avisos"] += [f"fonte_indisponivel:{t}" for t in tabelas_com_falha()]
     return resposta

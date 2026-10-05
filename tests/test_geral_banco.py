@@ -178,7 +178,7 @@ def test_filtra_confraria_do_mes_inteiro_e_nao_filtra_status(monkeypatch):
     assert chamadas[1]["filtros"]["event_id"] == 'in.("e1")'
 
 
-def test_no_maximo_vinte_eventos_e_na_ordem_do_banco(monkeypatch):
+def test_no_maximo_dez_eventos_e_na_ordem_do_banco(monkeypatch):
     _mockar_duas_queries(
         monkeypatch,
         [
@@ -188,7 +188,7 @@ def test_no_maximo_vinte_eventos_e_na_ordem_do_banco(monkeypatch):
         [],
     )
     eventos = banco_mod.buscar_confrarias_do_mes(date(2026, 9, 1), date(2026, 9, 30))
-    assert [e.id for e in eventos] == [f"e{i}" for i in range(1, 21)]
+    assert [e.id for e in eventos] == [f"e{i}" for i in range(1, 11)]
 
 
 def test_sem_confraria_no_mes_nao_consulta_inscricoes(monkeypatch):
@@ -218,3 +218,52 @@ def test_limites_do_mes_nunca_usam_offset_numerico(monkeypatch):
     valor = chamadas[0]["filtros"]["and"]
     assert '"2027-01-01T03:00:00Z"' in valor
     assert "+" not in valor
+
+
+# --- buscar_dripify_por_conta (dash.metricas_dripify, uma conta por id_user)
+
+
+def _mockar_dripify(monkeypatch, linhas: list[dict], usuarios: list[dict]) -> list[dict]:
+    chamadas: list[dict] = []
+
+    def _fake_query(tabela, filtros=None, *a, **k):
+        chamadas.append({"tabela": tabela, "filtros": filtros or {}})
+        return linhas if tabela == "metricas_dripify" else usuarios
+
+    monkeypatch.setattr(banco_mod, "query", _fake_query)
+    return chamadas
+
+
+def _drip(id_user: int, chave: str, aceitas: int | None, captados: int | None) -> dict:
+    return {"id_user": id_user, "key_data_ref_user": chave, "conexoes_aceitas": aceitas, "numeros_captados": captados}
+
+
+def test_dripify_soma_por_conta_so_dentro_do_periodo(monkeypatch):
+    _mockar_dripify(
+        monkeypatch,
+        [
+            _drip(1, "01/10/2026-jacob", 20, 10),
+            _drip(1, "05/10/2026-jacob", 20, 20),
+            _drip(1, "30/09/2026-jacob", 99, 99),  # fora: dia anterior ao início
+            _drip(1, "06/10/2026-jacob", 99, 99),  # fora: dia seguinte ao fim
+            _drip(3, "02/10/2026-alex", 50, None),
+        ],
+        [{"id": 1, "nome": "Jacob"}, {"id": 3, "nome": "Alex"}],
+    )
+    contas = banco_mod.buscar_dripify_por_conta(date(2026, 10, 1), date(2026, 10, 5))
+    assert contas == [
+        banco_mod.ContaDripify(conta="Alex", conexoes_aceitas=50, numeros_captados=0),
+        banco_mod.ContaDripify(conta="Jacob", conexoes_aceitas=40, numeros_captados=30),
+    ]
+
+
+def test_dripify_ignora_chave_sem_data_e_nao_busca_nomes_sem_conta(monkeypatch):
+    chamadas = _mockar_dripify(monkeypatch, [_drip(1, "sem-data", 5, 5), _drip(None, "01/10/2026-x", 5, 5)], [])
+    assert banco_mod.buscar_dripify_por_conta(date(2026, 10, 1), date(2026, 10, 31)) == []
+    assert [c["tabela"] for c in chamadas] == ["metricas_dripify"]
+
+
+def test_dripify_conta_sem_usuario_ganha_rotulo_neutro(monkeypatch):
+    _mockar_dripify(monkeypatch, [_drip(7, "01/10/2026-x", 1, 0)], [])
+    [conta] = banco_mod.buscar_dripify_por_conta(date(2026, 10, 1), date(2026, 10, 31))
+    assert conta.conta == "Conta 7"

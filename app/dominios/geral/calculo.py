@@ -1,7 +1,7 @@
 """Monta a resposta de `GET /geral`: 6 cards (2 escuros de faturamento + 4
 
-claros somados de `dash.vw_metricas`), as Confrarias do mês (tabelas de
-eventos do SED), o termômetro de faturamento do mês e as pessoas com
+claros somados de `dash.vw_metricas`), as Confrarias do mês (tabela de
+eventos do SED), as contas do Dripify do período, o termômetro de faturamento do mês e as pessoas com
 pontuação/ranking pros dois pódios (SDR e Closer) do frontend.
 """
 from __future__ import annotations
@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import date
 
 from app.dominios.comercial.banco import TotaisCargo
-from app.dominios.geral.banco import EventoInscricoes, Faturamento
+from app.dominios.geral.banco import ContaDripify, EventoInscricoes, Faturamento
 from app.dominios.pessoas.banco import Pessoa
 from app.metas import Metas
 from app.metricas import NOME_EXIBICAO, nome_exibicao
@@ -160,6 +160,7 @@ def montar_resposta_geral(
     faturamento_mes: Faturamento,
     eventos: list[EventoInscricoes],
     termometro: dict | None = None,
+    contas_dripify: list[ContaDripify] | None = None,
 ) -> dict:
     """`periodo_metas` é o período pedido por inteiro (dia/mês/ano completo,
 
@@ -180,7 +181,8 @@ def montar_resposta_geral(
     objeto.
 
     `eventos` ignora o período pedido: são as Confrarias do mês corrente,
-    independentes do recorte de datas da página.
+    independentes do recorte de datas da página. `contas_dripify` segue o
+    recorte (`periodo_saida`), como os cards claros.
     """
     dias_decorridos = dias_uteis_decorridos(periodo_metas.inicio, periodo_metas.fim, hoje=hoje)
     dias_totais = dias_uteis_decorridos(periodo_metas.inicio, periodo_metas.fim, hoje=periodo_metas.fim)
@@ -303,6 +305,10 @@ def montar_resposta_geral(
                 "aprovados": e.aprovados,
             }
             for e in eventos
+        ],
+        "contas_dripify": [
+            {"conta": c.conta, "conexoes_aceitas": c.conexoes_aceitas, "numeros_captados": c.numeros_captados}
+            for c in contas_dripify or []
         ],
         "pessoas": pessoas_saida,
         "termometro": termometro,

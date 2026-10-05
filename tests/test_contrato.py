@@ -52,7 +52,7 @@ def test_schema_respostacargo_tem_os_campos_que_o_bff_produz():
 def test_schema_respostageral_tem_os_campos_que_o_bff_produz():
     spec = _carregar_openapi()
     campos = set(spec["components"]["schemas"]["RespostaGeral"]["required"])
-    assert campos == {"periodo", "dias_uteis", "cards", "eventos", "pessoas", "avisos"}
+    assert campos == {"periodo", "dias_uteis", "cards", "eventos", "contas_dripify", "pessoas", "avisos"}
 
 
 def test_schema_respostafinanceiro_tem_os_campos_que_o_bff_produz():
