@@ -67,3 +67,17 @@ def test_resultado_de_consulta_bem_sucedida_fica_no_cache(monkeypatch):
     cache.obter_ou_calcular("metas", 60, lambda: _query("metricas_metas"))
     cache.obter_ou_calcular("metas", 60, lambda: _query("metricas_metas"))
     assert len(chamadas) == 1
+
+
+def test_tabela_que_falhou_fica_registrada_pra_virar_aviso(monkeypatch):
+    def _get(*a, **k):
+        return httpx.Response(404, json={"code": "PGRST205"}, request=httpx.Request("GET", "https://exemplo.supabase.co"))
+
+    monkeypatch.setattr(banco.httpx, "get", _get)
+    banco.iniciar_registro_de_falhas()
+    assert _query("vw_metricas") == []
+    assert _query("vw_metricas") == []
+    assert banco.tabelas_com_falha() == ["vw_metricas"]
+
+    banco.iniciar_registro_de_falhas()
+    assert banco.tabelas_com_falha() == []

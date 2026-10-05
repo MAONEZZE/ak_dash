@@ -8,11 +8,12 @@ from app.auth import exigir_usuario
 from app.cache import obter_ou_calcular
 from app.config import settings
 from app.dominios.comercial.banco import buscar_totais
-from app.dominios.geral.banco import buscar_eventos_proximos, buscar_faturamento
-from app.dominios.geral.calculo import montar_resposta_geral
+from app.dominios.geral.banco import buscar_confrarias_do_mes, buscar_faturamento
+from app.dominios.geral.calculo import montar_resposta_geral, montar_termometro
+from app.fontes.banco import iniciar_registro_de_falhas, tabelas_com_falha
 from app.dominios.pessoas.banco import listar_ativas
 from app.metas import buscar_metas
-from app.periodo import Periodo, agora_sp, hoje_sp, resolver_periodo, semana_iso
+from app.periodo import Periodo, hoje_sp, resolver_periodo, semana_iso
 
 router = APIRouter(tags=["geral"])
 
@@ -33,6 +34,7 @@ def get_geral(
     periodo: str = Query(default="atual"),
     _usuario: dict = Depends(exigir_usuario),
 ) -> dict:
+    iniciar_registro_de_falhas()
     hoje = hoje_sp()
     valor = periodo if periodo != "atual" else _valor_atual(granularidade, hoje)
     try:
@@ -65,11 +67,7 @@ def get_geral(
         settings.cache_ttl_metricas_segundos,
         lambda: buscar_totais("closer", [int(p.id) for p in pessoas_closer], periodo_saida.inicio, periodo_saida.fim),
     )
-    metas = obter_ou_calcular(
-        f"metas:{periodo_metas.inicio.isoformat()}:{periodo_metas.fim.isoformat()}",
-        settings.cache_ttl_metricas_segundos,
-        lambda: buscar_metas(periodo_metas.inicio, periodo_metas.fim),
-    )
+    metas = obter_ou_calcular("metas", settings.cache_ttl_metricas_segundos, buscar_metas)
     ids_closer = [int(p.id) for p in pessoas_closer]
     faturamento = obter_ou_calcular(
         f"faturamento:{chave_periodo}",
@@ -94,15 +92,26 @@ def get_geral(
             lambda: buscar_faturamento(inicio_mes, fim_mes, ids_closer),
         )
 
-    # Fora do período da página de propósito: os cards de Inscritos/Aprovados
-    # mostram os próximos eventos (futuro), não o recorte de datas selecionado.
-    agora = agora_sp()
+    # Termômetro e Confrarias são sempre do mês CORRENTE, fora do filtro de
+    # data — mesmo sob Mês navegado pra outro mês.
+    mes_corrente = resolver_periodo("mes", _valor_atual("mes", hoje))
+    if (inicio_mes, fim_mes) == (mes_corrente.inicio, hoje):
+        faturamento_mes_corrente = faturamento_mes
+    else:
+        faturamento_mes_corrente = obter_ou_calcular(
+            f"faturamento:{mes_corrente.inicio.isoformat()}:{hoje.isoformat()}",
+            settings.cache_ttl_metricas_segundos,
+            lambda: buscar_faturamento(mes_corrente.inicio, hoje, ids_closer),
+        )
+    termometro = montar_termometro(faturamento_mes_corrente)
+
     eventos = obter_ou_calcular(
-        f"eventos_proximos:{agora.date().isoformat()}",
+        f"confrarias:{mes_corrente.inicio.isoformat()}",
         settings.cache_ttl_metricas_segundos,
-        lambda: buscar_eventos_proximos(agora),
+        lambda: buscar_confrarias_do_mes(mes_corrente.inicio, mes_corrente.fim),
     )
-    return montar_resposta_geral(
+
+    resposta = montar_resposta_geral(
         periodo_metas=periodo_metas,
         periodo_saida=periodo_saida,
         hoje=hoje,
@@ -114,4 +123,7 @@ def get_geral(
         faturamento=faturamento,
         faturamento_mes=faturamento_mes,
         eventos=eventos,
+        termometro=termometro,
     )
+    resposta["avisos"] += [f"fonte_indisponivel:{t}" for t in tabelas_com_falha()]
+    return resposta

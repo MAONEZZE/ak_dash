@@ -1,10 +1,7 @@
 """Monta a resposta de `/comercial/{sdr,closer}` a partir de `vw_metricas` + `dash.metricas_metas`.
 
-Pontuação (decisão de produto, substitui a gamificação antiga de "1 ponto
-por dia×métrica que bateu a meta diária"): `Σ(realizado/meta × 100) /
-qtd_metricas`, escala 0–100, SEM cap, contra a meta cheia do período — só
-calculada quando TODAS as métricas do cargo têm meta cadastrada pra aquela
-pessoa; caso contrário `None` (nunca uma média parcial disfarçada de total).
+Pontuação: a mesma do dash inteiro — Σ realizado × peso por cargo, ver
+`app/pontuacao.py`. Não depende de meta.
 
 A meta é de cada PESSOA (`dash.user_metas`), não mais do cargo: dois SDRs do
 mesmo squad podem ser cobrados por números diferentes, e o ranking continua
@@ -23,17 +20,10 @@ from app.periodo import Periodo, dias_uteis_decorridos
 from app.pontuacao import atribuir_ranking, calcular_pontuacao
 
 
-# Métricas exibidas que NÃO entram na pontuação (decisão de produto,
-# 02/10/2026): entraram depois e a regra de pontuação não mudou por elas.
-_FORA_DA_PONTUACAO = {
-    "sdr": {"ligacoes_realizadas", "inscricoes_realizadas"},
-    "closer": {"ligacoes_agendadas", "inscricoes_realizadas"},
-}
-
 
 def _status(realizado: int, meta_periodo: int | None, dias_com_lancamento: int) -> str:
-    # Meta 0 = não cobrado nesta métrica (mesma regra de `pontuacao.py`):
-    # sem isso, `realizado >= 0` sempre bate e a métrica aparece "atingida".
+    # Meta 0 = métrica aberta, sem cobrança: sem isso, `realizado >= 0`
+    # sempre bate e a métrica aparece "atingida".
     if dias_com_lancamento == 0:
         return "sem_preenchimento"
     if meta_periodo is None or meta_periodo == 0:
@@ -99,9 +89,7 @@ def montar_resposta_comercial(
                 "metas_atingidas": {"atingidas": atingidas, "total": len(metricas_saida)},
                 "metricas": metricas_saida,
                 "contas_origem": totais.contas_por_pessoa.get(id_user, []),
-                "pontuacao_total": calcular_pontuacao(
-                    [m for m in metricas_saida if m["metrica"] not in _FORA_DA_PONTUACAO.get(cargo, set())]
-                ),
+                "pontuacao_total": calcular_pontuacao(cargo, {m["metrica"]: m["realizado"] for m in metricas_saida}),
             }
         )
 

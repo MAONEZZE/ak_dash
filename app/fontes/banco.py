@@ -43,6 +43,23 @@ def falhas_na_thread() -> int:
     return getattr(_local, "falhas", 0)
 
 
+def iniciar_registro_de_falhas() -> None:
+    """Zera a lista de tabelas que falharam nesta thread — chamado no começo
+
+    de cada requisição, já que o pool de threads do FastAPI reaproveita
+    thread entre requisições.
+    """
+    _local.tabelas_com_falha = []
+
+
+def tabelas_com_falha() -> list[str]:
+    """Tabelas que degradaram pra vazio desde `iniciar_registro_de_falhas` —
+
+    viram aviso visível no dash, em vez de um 0 silencioso.
+    """
+    return list(dict.fromkeys(getattr(_local, "tabelas_com_falha", [])))
+
+
 def _get(url: str, params: dict[str, str], headers: dict[str, str]) -> httpx.Response:
     for tentativa in range(1, _TENTATIVAS + 1):
         try:
@@ -76,6 +93,7 @@ def query(
     url_base = url_base if url_base is not None else settings.supabase_url
     service_key = service_key if service_key is not None else settings.supabase_service_key
     if not url_base or not service_key:
+        _local.tabelas_com_falha = [*getattr(_local, "tabelas_com_falha", []), tabela]
         return []
 
     headers = {
@@ -104,5 +122,6 @@ def query(
         return linhas
     except httpx.HTTPError:
         _local.falhas = falhas_na_thread() + 1
+        _local.tabelas_com_falha = [*getattr(_local, "tabelas_com_falha", []), tabela]
         logger.warning("Consulta Supabase à tabela '%s' falhou — degradando para vazio", tabela, exc_info=True)
         return []

@@ -4,7 +4,7 @@ from datetime import date
 
 import pytest
 
-from app.periodo import agora_sp, dias_uteis_decorridos, resolver_periodo, semana_iso
+from app.periodo import dias_uteis_decorridos, resolver_periodo, semana_iso
 
 
 def test_resolver_periodo_dia():
@@ -80,9 +80,17 @@ def test_semana_tem_5_dias_uteis():
     assert dias_uteis_decorridos(p.inicio, p.fim, hoje=p.fim) == 5
 
 
-# O corte de `buscar_eventos_proximos` precisa de um instante inequívoco:
-# ingênuo, o valor seria interpretado como UTC e adiantaria o filtro em 3h.
-def test_agora_sp_tem_fuso():
-    agora = agora_sp()
-    assert agora.tzinfo is not None
-    assert agora.utcoffset() is not None
+def test_resolver_periodo_custom():
+    p = resolver_periodo("custom", "2026-09-28..2026-10-02")
+    assert (p.granularidade, p.inicio, p.fim) == ("custom", date(2026, 9, 28), date(2026, 10, 2))
+
+
+def test_resolver_periodo_custom_de_um_dia_so():
+    p = resolver_periodo("custom", "2026-10-02..2026-10-02")
+    assert p.inicio == p.fim == date(2026, 10, 2)
+
+
+@pytest.mark.parametrize("valor", ["2026-10-02", "2026-10-05..2026-10-01", "x..y"])
+def test_resolver_periodo_custom_invalido(valor):
+    with pytest.raises(ValueError):
+        resolver_periodo("custom", valor)

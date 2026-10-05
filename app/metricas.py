@@ -53,6 +53,9 @@ NOME_EXIBICAO: dict[str, str] = {
     # Métricas financeiras (fora de vw_metricas, ver dominios/geral/banco.py)
     "faturamento": "Faturamento",
     "liquidado": "Liquidado",
+    "faturamento_base": "Faturamento Base",
+    "liquidado_base": "Liquidado Base",
+    "oportunidade": "Oportunidade",
     "inscritos": "Inscritos",
     "aprovados": "Aprovados",
 }

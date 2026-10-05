@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.auth import exigir_usuario
 from app.cache import obter_ou_calcular
 from app.config import settings
+from app.fontes.banco import iniciar_registro_de_falhas, tabelas_com_falha
 from app.dominios.financeiro.banco import buscar_vendas_detalhadas
 from app.dominios.financeiro.calculo import montar_resposta_financeiro
 from app.periodo import Periodo, hoje_sp, resolver_periodo, semana_iso
@@ -30,6 +31,7 @@ def get_financeiro(
     periodo: str = Query(default="atual"),
     _usuario: dict = Depends(exigir_usuario),
 ) -> dict:
+    iniciar_registro_de_falhas()
     hoje = hoje_sp()
     valor = periodo if periodo != "atual" else _valor_atual(granularidade, hoje)
     try:
@@ -59,4 +61,6 @@ def get_financeiro(
         settings.cache_ttl_metricas_segundos,
         lambda: buscar_vendas_detalhadas(periodo_saida.inicio, periodo_saida.fim),
     )
-    return montar_resposta_financeiro(periodo_saida, vendas)
+    resposta = montar_resposta_financeiro(periodo_saida, vendas)
+    resposta["avisos"] = [f"fonte_indisponivel:{t}" for t in tabelas_com_falha()]
+    return resposta

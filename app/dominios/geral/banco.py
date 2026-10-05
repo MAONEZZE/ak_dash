@@ -9,10 +9,10 @@ O card da empresa soma TODA venda do período, inclusive de quem já saiu do
 time (`ids_pessoas` não filtra a consulta). Por pessoa, agrupa
 `liquido_entrada` por `user_closer`; venda sem `user_closer` entra no total
 da empresa e em ninguém. `inscritos`/`aprovados` continuam sempre `None`
-aqui — não existem nesta tabela, vêm do SED (ver `buscar_eventos_proximos`).
+aqui — não existem nesta tabela, vêm do SED (ver `buscar_confrarias_do_mes`).
 
 Também lê o SEGUNDO Supabase (`SED.events`/`SED.registrations`), que
-alimenta os cards de Inscritos/Aprovados — ver `buscar_eventos_proximos`.
+alimenta as tabelas de Confrarias da Geral — ver `buscar_confrarias_do_mes`.
 
 As métricas de atividade (números captados, ligações, reuniões, indicações)
 NÃO passam por aqui: a Geral lê as mesmas `buscar_totais`/`dash.vw_metricas`
@@ -22,16 +22,20 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 
 from app.config import settings
+from app.periodo import TZ_SP
 from app.fontes.banco import query
 
 CHAVES_FATURAMENTO = ("faturamento", "liquidado", "inscritos", "aprovados")
 
-# Cards de Inscritos/Aprovados: os N próximos eventos de `SED.events` giram
-# no card, um por vez. 2 é decisão de produto (2 barrinhas no rodapé).
-LIMITE_EVENTOS = 2
+# Tabelas de Confrarias da Geral: 10 por tabela, duas tabelas — corta em 20.
+LIMITE_EVENTOS = 20
+
+# A Geral só mostra as Confrarias (decisão do usuário, 2026-10-05). `ilike`
+# com `*` dos dois lados = "contém", sem diferenciar maiúsculas.
+FILTRO_TITULO_EVENTOS = "ilike.*confraria akeel*"
 
 # "Inscrito" = TODA linha de `SED.registrations` do evento, seja qual for o
 # status — o card mede captação (quanta gente se inscreveu), não ocupação de
@@ -117,32 +121,31 @@ def _instante_utc(momento: datetime) -> str:
     return momento.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def buscar_eventos_proximos(agora: datetime) -> list[EventoInscricoes]:
-    """Próximos `LIMITE_EVENTOS` eventos do segundo Supabase (`SED.events`),
+def buscar_confrarias_do_mes(inicio: date, fim: date) -> list[EventoInscricoes]:
+    """Confrarias ("confraria akeel" no título) de `inicio` a `fim` (o mês
+    corrente inteiro, inclusive as que já passaram) do segundo Supabase
+    (`SED.events`), por data crescente, com a contagem de inscrições de cada
+    uma — no máximo `LIMITE_EVENTOS`.
 
-    por data crescente, com a contagem de inscrições de cada um.
-
-    Evento sem `event_date` fica de fora — o filtro `gte` já o descarta no
-    banco, e sem data não haveria como ordená-lo na fila nem rotulá-lo no
-    card. Sem as envs `SUPABASE_INSCRICOES_*`, `query()` devolve vazio e a
-    lista sai `[]` — o card degrada pra estado vazio, nunca derruba /geral.
-
-    `agora` chega com fuso e o filtro é montado em UTC com sufixo `Z`. Esse
-    formato é correto nos dois esquemas possíveis da coluna, o que permite
-    migrar `event_date` para `timestamptz` sem tocar aqui:
+    Os limites são meia-noite de São Paulo convertida pra UTC com sufixo `Z`.
+    Esse formato é correto nos dois esquemas possíveis da coluna:
 
     - sendo `timestamp` sem fuso, o Postgres descarta o `Z` e compara relógio
       de parede contra relógio de parede — e a coluna guarda UTC, porque é
       assim que o Prisma grava;
     - sendo `timestamptz`, o `Z` é respeitado e a comparação é de instantes.
 
-    Mandar o horário de São Paulo aqui (com ou sem fuso) quebraria o primeiro
-    caso, adiantando o corte em 3h.
+    Os valores vão entre aspas dentro do `and=(...)`: `:` é reservado na
+    árvore lógica do PostgREST. Sem as envs `SUPABASE_INSCRICOES_*`,
+    `query()` devolve vazio e a lista sai `[]` — nunca derruba /geral.
     """
+    de = _instante_utc(datetime.combine(inicio, time.min, tzinfo=TZ_SP))
+    ate = _instante_utc(datetime.combine(fim + timedelta(days=1), time.min, tzinfo=TZ_SP))
     eventos = query(
         "events",
         {
-            "event_date": f"gte.{_instante_utc(agora)}",
+            "and": f'(event_date.gte."{de}",event_date.lt."{ate}")',
+            "title": FILTRO_TITULO_EVENTOS,
             "order": "event_date.asc",
         },
         schema=settings.supabase_inscricoes_schema or "public",

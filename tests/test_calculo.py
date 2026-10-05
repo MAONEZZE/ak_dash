@@ -8,9 +8,8 @@ from app.dominios.pessoas.banco import Pessoa
 from app.metas import Metas
 from app.periodo import Periodo
 
-# Metas são por PESSOA: `dash.metricas_metas` diz que a métrica tem meta
-# naquele mês e `dash.user_metas` guarda o valor de cada um. A chave de
-# `Metas` é (mês, id_user, métrica) — não existe mais chave por cargo.
+# Metas são por PESSOA: a chave de `Metas` é (id_user, métrica) e o valor é
+# a meta diária atual, que vale pra qualquer período.
 
 
 def _pessoa(id_: str, nome: str, cargo: str, email: str) -> Pessoa:
@@ -34,7 +33,7 @@ def _periodo_mes():
     return Periodo("mes", date(2026, 9, 1), date(2026, 9, 30))
 
 
-def test_sem_meta_cadastrada_status_e_sem_meta_e_pontuacao_none():
+def test_sem_meta_cadastrada_status_e_sem_meta_mas_pontua_igual():
     pessoa = _pessoa("9", "Nathan", "sdr", "nathan@x.com")
     totais = _totais(realizado={(9, "numeros_captados"): 312}, dias_com_lancamento={(9, "numeros_captados"): 8})
     metas = Metas({})
@@ -46,8 +45,9 @@ def test_sem_meta_cadastrada_status_e_sem_meta_e_pontuacao_none():
     metrica = next(m for m in resposta.corpo["pessoas"][0]["metricas"] if m["metrica"] == "numeros_captados")
     assert metrica["status"] == "sem_meta"
     assert metrica["meta_periodo"] is None
-    assert resposta.corpo["pessoas"][0]["pontuacao_total"] is None
-    assert resposta.corpo["pessoas"][0]["posicao"] is None
+    # Pontuação não depende de meta: 312 números captados × 7.
+    assert resposta.corpo["pessoas"][0]["pontuacao_total"] == 312 * 7
+    assert resposta.corpo["pessoas"][0]["posicao"] == 1
     assert "metas_nao_cadastradas" in resposta.corpo["avisos"]
 
 
@@ -56,7 +56,7 @@ def test_meta_de_um_colega_nao_vaza_pra_quem_nao_tem_a_dele():
     # dash.user_metas fica sem meta, mesmo com o colega de cargo tendo uma.
     pessoa = _pessoa("9", "Nathan", "sdr", "nathan@x.com")
     totais = _totais(realizado={(9, "numeros_captados"): 312}, dias_com_lancamento={(9, "numeros_captados"): 8})
-    metas = Metas({(date(2026, 9, 1), 2, "numeros_captados"): 20})  # meta do SDR de id 2
+    metas = Metas({(2, "numeros_captados"): 20})  # meta do SDR de id 2
 
     resposta = montar_resposta_comercial(
         periodo=_periodo_mes(), cargo="sdr", pessoas_cargo=[pessoa], totais=totais,
@@ -78,8 +78,8 @@ def test_duas_pessoas_do_mesmo_cargo_podem_ter_metas_diferentes():
     )
     # Diárias × 22 dias úteis de set/2026: A cobra 440, B cobra 660.
     metas = Metas({
-        (date(2026, 9, 1), 2, "numeros_captados"): 20,
-        (date(2026, 9, 1), 4, "numeros_captados"): 30,
+        (2, "numeros_captados"): 20,
+        (4, "numeros_captados"): 30,
     })
 
     resposta = montar_resposta_comercial(
@@ -100,7 +100,7 @@ def test_zero_dias_com_lancamento_e_sem_preenchimento_mesmo_com_meta():
     pessoa = _pessoa("9", "Nathan", "sdr", "nathan@x.com")
     totais = _totais(realizado={}, dias_com_lancamento={})
     # Meta cadastrada é DIÁRIA: 20/dia × 22 dias úteis de set/2026 = 440 no mês.
-    metas = Metas({(date(2026, 9, 1), 9, "numeros_captados"): 20})
+    metas = Metas({(9, "numeros_captados"): 20})
 
     resposta = montar_resposta_comercial(
         periodo=_periodo_mes(), cargo="sdr", pessoas_cargo=[pessoa], totais=totais,
@@ -119,8 +119,8 @@ def test_status_atingido_e_abaixo_da_meta():
     # Diárias: numero 20/dia (440 no mês, realizado 500 -> atingido) e
     # ligações realizadas 5/dia (110 no mês, realizado 10 -> abaixo).
     metas = Metas({
-        (date(2026, 9, 1), 9, "numeros_captados"): 20,
-        (date(2026, 9, 1), 9, "ligacoes_realizadas"): 5,
+        (9, "numeros_captados"): 20,
+        (9, "ligacoes_realizadas"): 5,
     })
 
     resposta = montar_resposta_comercial(
@@ -137,7 +137,7 @@ def test_meta_zero_e_sem_meta_nao_atingido():
     # `realizado >= 0` sempre bate, então sem essa regra viraria "atingido" à toa.
     pessoa = _pessoa("9", "Nathan", "sdr", "nathan@x.com")
     totais = _totais(realizado={(9, "numeros_captados"): 0}, dias_com_lancamento={(9, "numeros_captados"): 8})
-    metas = Metas({(date(2026, 9, 1), 9, "numeros_captados"): 0})
+    metas = Metas({(9, "numeros_captados"): 0})
 
     resposta = montar_resposta_comercial(
         periodo=_periodo_mes(), cargo="sdr", pessoas_cargo=[pessoa], totais=totais,
@@ -146,20 +146,6 @@ def test_meta_zero_e_sem_meta_nao_atingido():
     metrica = next(m for m in resposta.corpo["pessoas"][0]["metricas"] if m["metrica"] == "numeros_captados")
     assert metrica["meta_periodo"] == 0
     assert metrica["status"] == "sem_meta"
-
-
-def test_pontuacao_so_quando_todas_as_metricas_do_cargo_tem_meta():
-    # Meta só pra "numeros_captados" não basta: as outras que pontuam também precisam.
-    pessoa = _pessoa("9", "Nathan", "sdr", "nathan@x.com")
-    totais = _totais(realizado={(9, "numeros_captados"): 400}, dias_com_lancamento={(9, "numeros_captados"): 8})
-    # Meta cadastrada é DIÁRIA: 20/dia × 22 dias úteis de set/2026 = 440 no mês.
-    metas = Metas({(date(2026, 9, 1), 9, "numeros_captados"): 20})
-
-    resposta = montar_resposta_comercial(
-        periodo=_periodo_mes(), cargo="sdr", pessoas_cargo=[pessoa], totais=totais,
-        metas=metas, emails_filtro=None, hoje=date(2026, 9, 14),
-    )
-    assert resposta.corpo["pessoas"][0]["pontuacao_total"] is None
 
 
 def test_filtro_de_pessoas_por_email_restringe_saida():
@@ -180,8 +166,8 @@ def test_ranking_dense_rank_entre_pessoas_com_pontuacao():
     # Todas as métricas de SDR com meta (de cada um) pra pontuação existir.
     from app.metricas import METRICAS_SDR
 
-    # 100/dia × 22 = 2200 no mês; realizado 2200 -> 100 pts, 1100 -> 50 pts.
-    valores_meta = {(date(2026, 9, 1), pid, m): 100 for pid in (2, 4) for m in METRICAS_SDR}
+    # Pesos do SDR somam 44 (15+10+7+7+5): 2200 em cada -> 96800, 1100 -> 48400.
+    valores_meta = {(pid, m): 100 for pid in (2, 4) for m in METRICAS_SDR}
     metas = Metas(valores_meta)
     realizado = {(2, m): 2200 for m in METRICAS_SDR} | {(4, m): 1100 for m in METRICAS_SDR}
     dias = {(pid, m): 8 for pid in (2, 4) for m in METRICAS_SDR}
@@ -192,7 +178,7 @@ def test_ranking_dense_rank_entre_pessoas_com_pontuacao():
         metas=metas, emails_filtro=None, hoje=date(2026, 9, 14),
     )
     por_email = {p["email"]: p for p in resposta.corpo["pessoas"]}
-    assert por_email["a@x.com"]["pontuacao_total"] == 100.0
+    assert por_email["a@x.com"]["pontuacao_total"] == 2200 * 44
     assert por_email["a@x.com"]["posicao"] == 1
     assert por_email["b@x.com"]["posicao"] == 2
 
@@ -202,7 +188,7 @@ def test_linhas_cargo_cruzado_gera_aviso():
     totais = TotaisCargo(realizado={}, dias_com_lancamento={}, serie_diaria={}, contas_por_pessoa={}, linhas_cargo_cruzado=3)
     resposta = montar_resposta_comercial(
         periodo=_periodo_mes(), cargo="sdr", pessoas_cargo=[pessoa], totais=totais,
-        metas=Metas({(date(2026, 9, 1), 9, "x"): 1}), emails_filtro=None, hoje=date(2026, 9, 14),
+        metas=Metas({(9, "x"): 1}), emails_filtro=None, hoje=date(2026, 9, 14),
     )
     assert any("3 linha" in a for a in resposta.corpo["avisos"])
 
@@ -264,38 +250,6 @@ def test_colunas_do_closer_ganham_ligacoes_agendadas_e_inscricoes():
     assert nomes["ligacoes_realizadas"] == "Ligações Realizadas"
 
 
-def test_metricas_novas_nao_entram_na_pontuacao_do_sdr():
-    # Decisão de produto: ligações realizadas e inscrições aparecem, mas não
-    # pontuam — então quem não tem meta nelas continua com pontuação.
-    from app.metricas import METRICAS_SDR
-
-    pessoa = _pessoa("9", "Nathan", "sdr", "nathan@x.com")
-    pontuam = [m for m in METRICAS_SDR if m not in ("ligacoes_realizadas", "inscricoes_realizadas")]
-    metas = Metas({(date(2026, 9, 1), 9, m): 10 for m in pontuam})  # 220 no mês
-    realizado = {(9, m): 220 for m in pontuam} | {(9, "ligacoes_realizadas"): 9999}
-    totais = _totais(realizado=realizado, dias_com_lancamento={(9, m): 8 for m in METRICAS_SDR})
-
-    resposta = montar_resposta_comercial(
-        periodo=_periodo_mes(), cargo="sdr", pessoas_cargo=[pessoa], totais=totais,
-        metas=metas, emails_filtro=None, hoje=date(2026, 9, 14),
-    )
-    assert resposta.corpo["pessoas"][0]["pontuacao_total"] == 100.0
-
-
-def test_metricas_novas_nao_entram_na_pontuacao_do_closer():
-    pessoa = _pessoa("1", "Jacob", "closer", "jacob@x.com")
-    pontuam = ("ligacoes_realizadas", "reunioes_agendadas", "reunioes_realizadas", "indicacoes")
-    metas = Metas({(date(2026, 9, 1), 1, m): 10 for m in pontuam})
-    realizado = {(1, m): 110 for m in pontuam} | {(1, "inscricoes_realizadas"): 9999, (1, "ligacoes_agendadas"): 9999}
-    totais = _totais(realizado=realizado, dias_com_lancamento={(1, m): 8 for m in pontuam})
-
-    resposta = montar_resposta_comercial(
-        periodo=_periodo_mes(), cargo="closer", pessoas_cargo=[pessoa], totais=totais,
-        metas=metas, emails_filtro=None, hoje=date(2026, 9, 14),
-    )
-    assert resposta.corpo["pessoas"][0]["pontuacao_total"] == 50.0
-
-
 def test_dias_uteis_do_mes_parcial():
     # Setembro/2026: dia 1 é terça. Até 14/09 (segunda) são 10 dias úteis; o mês inteiro tem 22.
     resposta = montar_resposta_comercial(
@@ -319,3 +273,14 @@ def test_dias_uteis_de_mes_futuro_decorridos_zero():
         metas=Metas({}), emails_filtro=None, hoje=date(2026, 8, 20),
     )
     assert resposta.corpo["dias_uteis"] == {"decorridos": 0, "total": 22}
+
+
+def test_pontuacao_da_comercial_usa_os_pesos_do_cargo():
+    pessoa = _pessoa("1", "Jacob", "closer", "jacob@x.com")
+    realizado = {(1, "reunioes_realizadas"): 2, (1, "ligacoes_agendadas"): 1, (1, "inscricoes_realizadas"): 1}
+    totais = _totais(realizado=realizado, dias_com_lancamento={k: 1 for k in realizado})
+    resposta = montar_resposta_comercial(
+        periodo=_periodo_mes(), cargo="closer", pessoas_cargo=[pessoa], totais=totais,
+        metas=Metas({}), emails_filtro=None, hoje=date(2026, 9, 14),
+    )
+    assert resposta.corpo["pessoas"][0]["pontuacao_total"] == 2 * 15 + 3 + 15

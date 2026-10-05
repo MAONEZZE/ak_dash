@@ -13,23 +13,9 @@ def hoje_sp() -> date:
     return datetime.now(TZ_SP).date()
 
 
-def agora_sp() -> datetime:
-    """Agora em São Paulo, COM fuso.
-
-    Já foi ingênuo, para casar com `SED.events.event_date` sendo `timestamp`
-    sem fuso. Era errado: o Prisma grava aquela coluna em UTC, então comparar
-    com o relógio de parede de São Paulo adiantava o corte em 3h e deixava
-    eventos já começados aparecendo como "próximos".
-
-    Quem monta o filtro é que decide o formato do instante — ver
-    `buscar_eventos_proximos`. Aqui só devolvemos um instante inequívoco.
-    """
-    return datetime.now(TZ_SP)
-
-
 @dataclass(frozen=True)
 class Periodo:
-    granularidade: str  # "dia" | "semana" | "mes" | "ano"
+    granularidade: str  # "dia" | "semana" | "mes" | "ano" | "custom"
     inicio: date
     fim: date
 
@@ -83,7 +69,18 @@ def resolver_periodo(granularidade: str, valor: str) -> Periodo:
             raise ValueError("periodo inválido para granularidade 'ano': esperado AAAA") from exc
         return Periodo("ano", date(ano, 1, 1), date(ano, 12, 31))
 
-    raise ValueError(f"granularidade inválida: '{granularidade}' (esperado dia, semana, mes ou ano)")
+    if granularidade == "custom":
+        # Intervalo livre do calendário do filtro: "AAAA-MM-DD..AAAA-MM-DD", fim incluso.
+        try:
+            inicio_str, fim_str = valor.split("..")
+            inicio, fim = date.fromisoformat(inicio_str), date.fromisoformat(fim_str)
+        except ValueError as exc:
+            raise ValueError("periodo inválido para granularidade 'custom': esperado AAAA-MM-DD..AAAA-MM-DD") from exc
+        if fim < inicio:
+            raise ValueError("periodo inválido para granularidade 'custom': fim antes do início")
+        return Periodo("custom", inicio, fim)
+
+    raise ValueError(f"granularidade inválida: '{granularidade}' (esperado dia, semana, mes, ano ou custom)")
 
 
 def dias_uteis_decorridos(inicio: date, fim: date, hoje: date | None = None) -> int:

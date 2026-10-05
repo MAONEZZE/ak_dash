@@ -11,12 +11,19 @@ from app.periodo import Periodo
 _CARDS = ("faturamento", "liquidado")
 
 
+def _valor(venda: dict, chave: str) -> float:
+    if chave == "faturamento":
+        return venda["valor_bruto_contrato"]
+    # Liquidado = os dois pagamentos da venda, mesma conta do card da Geral.
+    return venda["liquido_entrada"] + venda.get("liquido_pgto_2", 0)
+
+
 def montar_resposta_financeiro(periodo: Periodo, vendas: list[dict]) -> dict:
     cards = [
         {
             "metrica": chave,
             "nome_exibicao": NOME_EXIBICAO[chave],
-            "realizado": sum(v["valor_bruto_contrato" if chave == "faturamento" else "liquido_entrada"] for v in vendas),
+            "realizado": sum(_valor(v, chave) for v in vendas),
         }
         for chave in _CARDS
     ]

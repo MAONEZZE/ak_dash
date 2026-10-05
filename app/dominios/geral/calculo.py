@@ -1,7 +1,7 @@
-"""Monta a resposta de `GET /geral`: 7 cards (2 escuros de faturamento + 5
+"""Monta a resposta de `GET /geral`: 6 cards (2 escuros de faturamento + 4
 
-claros somados de `dash.vw_metricas`), os próximos eventos que alimentam os
-cards de Inscritos/Aprovados, tabela de pessoas (colunas por cargo) e
+claros somados de `dash.vw_metricas`), as Confrarias do mês (tabelas de
+eventos do SED), o termômetro de faturamento do mês e as pessoas com
 pontuação/ranking pros dois pódios (SDR e Closer) do frontend.
 """
 from __future__ import annotations
@@ -14,35 +14,13 @@ from app.dominios.pessoas.banco import Pessoa
 from app.metas import Metas
 from app.metricas import NOME_EXIBICAO, nome_exibicao
 from app.periodo import Periodo, dias_uteis_decorridos
-from app.pontuacao import atribuir_ranking
+from app.pontuacao import atribuir_ranking, calcular_pontuacao
 
 # Colunas da tabela de pessoas, por cargo (decisão de produto).
 _METRICAS_SDR_TABELA = (
     "numeros_captados", "ligacoes_realizadas", "reunioes_agendadas", "indicacoes", "inscricoes_realizadas",
 )
 
-# Métricas que ENTRAM NA PONTUAÇÃO (e, por consequência, no pódio) — nem toda
-# coluna da tabela conta. A pontuação da Geral é a SOMA BRUTA do realizado
-# dessas métricas × `_PONTOS_POR_UNIDADE`, lido direto de `vw_metricas` (não
-# depende de meta cadastrada — ver `_pontuacao_por_quantidade`).
-# `liquidado` fica de fora por decisão de produto: é métrica financeira, não
-# de atividade, e não faz sentido somada junto com contagens de
-# reunião/indicação numa única pontuação. Segue visível na tabela, só não pontua. `reunioes_agendadas` entrou em
-# 24/09/2026: sem ela, no filtro Dia o pódio ficava todo em 0 nas horas em
-# que a única atividade lançada era reunião agendada.
-# `ligacoes_agendadas` saiu do SDR em 02/10/2026 (a coluna deixou de existir
-# em `dash.metricas_sdrs`). As métricas novas — `ligacoes_realizadas` do SDR,
-# `ligacoes_agendadas` do closer e `inscricoes_realizadas` dos dois — aparecem
-# na tabela mas não pontuam (decisão de produto).
-# Denominador fixo por cargo: todo closer é medido pelas mesmas métricas,
-# senão o ranking compararia somas de tamanhos diferentes.
-_METRICAS_PONTUACAO = {
-    "sdr": ("numeros_captados", "reunioes_agendadas", "indicacoes"),
-    "closer": ("reunioes_agendadas", "reunioes_realizadas", "indicacoes"),
-}
-
-# Cada unidade de atividade vale 10 pontos (decisão de produto, 24/09/2026).
-_PONTOS_POR_UNIDADE = 10
 
 # Inscritos/Aprovados saíram daqui: viraram `eventos` na resposta — não são
 # mais um número do período, e sim os próximos eventos girando no card.
@@ -55,19 +33,21 @@ _PONTOS_POR_UNIDADE = 10
 # continuam com a meta somada por pessoa.
 _COMPOSICAO_CARDS_ESCUROS: tuple[str, ...] = ("faturamento", "liquidado")
 
+# Meta de faturamento do mês do termômetro — fixa por enquanto (decisão do
+# usuário, 2026-10-05), até existir meta de faturamento cadastrada no banco.
+META_FATURAMENTO_MES = 380_000
+
 # Card claro da empresa -> (cargo, métrica) que o compõem. Uma definição só
-# para o realizado E para a meta: era a duplicação entre os dois que fazia
-# "Reuniões Agendadas" somar o realizado de 4 closers contra a meta de 7
-# pessoas. Reuniões agendadas, indicações e inscrições são de SDR + Closer;
-# números captados, só de SDR; ligações agendadas, só de Closer (desde
-# 02/10/2026, quando a coluna saiu de `dash.metricas_sdrs`). A ordem aqui é a
-# ordem dos cards na tela.
+# para o realizado E para a meta. A ordem aqui é a ordem dos cards na tela
+# (linha 2 da Geral, decisão do usuário 2026-10-05). `oportunidade` é a soma
+# de indicações + inscrições + números captados do time.
+_INDICACOES = (("sdr", "indicacoes"), ("closer", "indicacoes"))
+_INSCRICOES = (("sdr", "inscricoes_realizadas"), ("closer", "inscricoes_realizadas"))
 _COMPOSICAO_CARDS_CLAROS: dict[str, tuple[tuple[str, str], ...]] = {
-    "numeros_captados": (("sdr", "numeros_captados"),),
-    "ligacoes_agendadas": (("closer", "ligacoes_agendadas"),),
     "reunioes_agendadas": (("sdr", "reunioes_agendadas"), ("closer", "reunioes_agendadas")),
-    "indicacoes": (("sdr", "indicacoes"), ("closer", "indicacoes")),
-    "inscricoes_realizadas": (("sdr", "inscricoes_realizadas"), ("closer", "inscricoes_realizadas")),
+    "ligacoes_realizadas": (("sdr", "ligacoes_realizadas"), ("closer", "ligacoes_realizadas")),
+    "inscricoes_realizadas": _INSCRICOES,
+    "oportunidade": _INDICACOES + _INSCRICOES + (("sdr", "numeros_captados"),),
 }
 
 
@@ -110,20 +90,38 @@ def _meta_card_empresa(
     parciais = [
         metas.somar(periodo.inicio, periodo.fim, [int(p.id) for p in pessoas_por_cargo[cargo]], metrica)
         for cargo, metrica in composicao
+        if pessoas_por_cargo[cargo]  # cargo sem ninguém ativo não "tem meta 0"
     ]
     com_meta = [p for p in parciais if p is not None]
     return sum(com_meta) if com_meta else None
 
 
-def _pontuacao_por_quantidade(totais: TotaisCargo, id_user: int, cargo: str) -> float:
-    """Soma bruta do realizado das métricas de pontuação do cargo, × 10 — nunca
+def _realizado_composicao(
+    composicao: tuple[tuple[str, str], ...],
+    totais_por_cargo: dict[str, TotaisCargo],
+    pessoas_por_cargo: dict[str, list[Pessoa]],
+) -> int:
+    return sum(
+        totais_por_cargo[cargo].realizado.get((int(pessoa.id), metrica), 0)
+        for cargo, metrica in composicao
+        for pessoa in pessoas_por_cargo[cargo]
+    )
 
-    `None` (métrica sem linha no período conta 0). Diferente de `/comercial/*`
-    (`calcular_pontuacao`, % da meta), a pontuação da Geral não depende de
-    meta cadastrada — é assim que todo mundo do cargo entra no ranking.
+
+def _pontuacao(totais: TotaisCargo, id_user: int, cargo: str) -> int:
+    """Σ realizado × peso do cargo (`app/pontuacao.py`) — não depende de meta."""
+    return calcular_pontuacao(cargo, {metrica: v for (uid, metrica), v in totais.realizado.items() if uid == id_user})
+
+
+def montar_termometro(faturamento_mes_corrente: Faturamento) -> dict:
+    """Faturamento do mês CORRENTE (nunca o navegado nem o recorte pedido)
+
+    contra `META_FATURAMENTO_MES`.
     """
-    unidades = sum(totais.realizado.get((id_user, metrica), 0) for metrica in _METRICAS_PONTUACAO[cargo])
-    return unidades * _PONTOS_POR_UNIDADE
+    return {
+        "realizado": faturamento_mes_corrente.empresa.get("faturamento") or 0,
+        "meta": META_FATURAMENTO_MES,
+    }
 
 
 def _montar_pessoa(
@@ -161,6 +159,7 @@ def montar_resposta_geral(
     faturamento: Faturamento,
     faturamento_mes: Faturamento,
     eventos: list[EventoInscricoes],
+    termometro: dict | None = None,
 ) -> dict:
     """`periodo_metas` é o período pedido por inteiro (dia/mês/ano completo,
 
@@ -180,8 +179,8 @@ def montar_resposta_geral(
     ver o comentário em `rotas.py`. Sob granularidade Mês os dois são o mesmo
     objeto.
 
-    `eventos` é a única parte da resposta que ignora o período pedido: são os
-    próximos eventos (futuro), independentes do recorte de datas da página.
+    `eventos` ignora o período pedido: são as Confrarias do mês corrente,
+    independentes do recorte de datas da página.
     """
     dias_decorridos = dias_uteis_decorridos(periodo_metas.inicio, periodo_metas.fim, hoje=hoje)
     dias_totais = dias_uteis_decorridos(periodo_metas.inicio, periodo_metas.fim, hoje=periodo_metas.fim)
@@ -207,11 +206,7 @@ def montar_resposta_geral(
     totais_por_cargo = {"sdr": totais_sdr, "closer": totais_closer}
 
     for chave, composicao in _COMPOSICAO_CARDS_CLAROS.items():
-        realizado = sum(
-            totais_por_cargo[cargo].realizado.get((int(pessoa.id), metrica), 0)
-            for cargo, metrica in composicao
-            for pessoa in pessoas_por_cargo[cargo]
-        )
+        realizado = _realizado_composicao(composicao, totais_por_cargo, pessoas_por_cargo)
         meta = _meta_card_empresa(metas, periodo_metas, composicao, pessoas_por_cargo)
         cards.append(
             {
@@ -243,7 +238,7 @@ def montar_resposta_geral(
             for chave in _METRICAS_SDR_TABELA
         ]
         pessoas_saida.append(_montar_pessoa(
-            pessoa, "sdr", metricas_calc, _pontuacao_por_quantidade(totais_sdr, id_user, "sdr"), nomes_repetidos
+            pessoa, "sdr", metricas_calc, _pontuacao(totais_sdr, id_user, "sdr"), nomes_repetidos
         ))
 
     for pessoa in pessoas_closer:
@@ -277,7 +272,7 @@ def montar_resposta_geral(
             },
         ]
         pessoas_saida.append(_montar_pessoa(
-            pessoa, "closer", metricas_calc, _pontuacao_por_quantidade(totais_closer, id_user, "closer"), nomes_repetidos
+            pessoa, "closer", metricas_calc, _pontuacao(totais_closer, id_user, "closer"), nomes_repetidos
         ))
 
     # Um ranking por cargo (contrato: SDR só contra SDR, Closer só contra Closer).
@@ -310,5 +305,6 @@ def montar_resposta_geral(
             for e in eventos
         ],
         "pessoas": pessoas_saida,
+        "termometro": termometro,
         "avisos": avisos,
     }

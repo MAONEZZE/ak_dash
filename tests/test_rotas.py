@@ -85,7 +85,8 @@ def test_geral_200_periodo_atual(monkeypatch):
     resposta = _client(monkeypatch).get("/geral")
     assert resposta.status_code == 200
     corpo = resposta.json()
-    assert len(corpo["cards"]) == 7
+    assert len(corpo["cards"]) == 6
+    assert corpo["termometro"]["meta"] == 380_000
     assert corpo["eventos"] == []  # `events` vazia no fake de query
     assert len(corpo["pessoas"]) == 2
 

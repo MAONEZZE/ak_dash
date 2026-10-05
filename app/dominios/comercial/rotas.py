@@ -8,6 +8,7 @@ from app.config import settings
 from app.dominios.comercial.banco import buscar_totais
 from app.dominios.comercial.calculo import montar_resposta_comercial
 from app.dominios.pessoas.banco import listar_ativas
+from app.fontes.banco import iniciar_registro_de_falhas, tabelas_com_falha
 from app.metas import buscar_metas
 from app.periodo import hoje_sp, resolver_periodo
 
@@ -25,6 +26,7 @@ def _resolver_periodo_ou_400(granularidade: str, periodo: str):
 
 
 def _comercial(granularidade: str, periodo_str: str, pessoas: list[str] | None, cargo: str) -> dict:
+    iniciar_registro_de_falhas()
     periodo = _resolver_periodo_ou_400(granularidade, periodo_str)
     emails_filtro = set(pessoas) if pessoas else None
 
@@ -40,11 +42,7 @@ def _comercial(granularidade: str, periodo_str: str, pessoas: list[str] | None, 
         settings.cache_ttl_metricas_segundos,
         lambda: buscar_totais(cargo, ids, periodo.inicio, periodo.fim),
     )
-    metas = obter_ou_calcular(
-        f"metas:{chave_periodo}",
-        settings.cache_ttl_metricas_segundos,
-        lambda: buscar_metas(periodo.inicio, periodo.fim),
-    )
+    metas = obter_ou_calcular("metas", settings.cache_ttl_metricas_segundos, buscar_metas)
     resultado = montar_resposta_comercial(
         periodo=periodo,
         cargo=cargo,
@@ -54,6 +52,7 @@ def _comercial(granularidade: str, periodo_str: str, pessoas: list[str] | None, 
         emails_filtro=emails_filtro,
         hoje=hoje_sp(),
     )
+    resultado.corpo["avisos"] += [f"fonte_indisponivel:{t}" for t in tabelas_com_falha()]
     return resultado.corpo
 
 

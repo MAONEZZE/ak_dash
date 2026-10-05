@@ -3,57 +3,44 @@ from __future__ import annotations
 from app.pontuacao import atribuir_ranking, calcular_pontuacao
 
 
-def test_pontuacao_none_quando_lista_vazia():
-    assert calcular_pontuacao([]) is None
+def test_pontuacao_sdr_soma_realizado_vezes_peso():
+    realizado = {
+        "inscricoes_realizadas": 1,  # 15
+        "ligacoes_realizadas": 2,  # 20
+        "numeros_captados": 1,  # 7
+        "reunioes_agendadas": 3,  # 21
+        "indicacoes": 1,  # 5
+        "fups": 50,  # não pontua
+    }
+    assert calcular_pontuacao("sdr", realizado) == 68
 
 
-def test_pontuacao_none_quando_qualquer_metrica_sem_meta():
-    metricas = [
-        {"realizado": 100, "meta_periodo": 200},
-        {"realizado": 50, "meta_periodo": None},
-    ]
-    assert calcular_pontuacao(metricas) is None
+def test_pontuacao_closer_soma_realizado_vezes_peso():
+    realizado = {
+        "reunioes_realizadas": 1,  # 15
+        "inscricoes_realizadas": 1,  # 15
+        "ligacoes_realizadas": 1,  # 10
+        "reunioes_agendadas": 1,  # 5
+        "indicacoes": 1,  # 5
+        "ligacoes_agendadas": 1,  # 3
+    }
+    assert calcular_pontuacao("closer", realizado) == 53
 
 
-def test_pontuacao_none_quando_qualquer_metrica_sem_realizado():
-    metricas = [
-        {"realizado": 100, "meta_periodo": 200},
-        {"realizado": None, "meta_periodo": 50},
-    ]
-    assert calcular_pontuacao(metricas) is None
+def test_sdr_nao_pontua_ligacao_agendada():
+    assert calcular_pontuacao("sdr", {"ligacoes_agendadas": 10}) == 0
 
 
-def test_pontuacao_media_sem_cap():
-    # 312/400*100=78; 200/100*100=200 (sem cap) -> média 139.
-    metricas = [
-        {"realizado": 312, "meta_periodo": 400},
-        {"realizado": 200, "meta_periodo": 100},
-    ]
-    assert calcular_pontuacao(metricas) == 139.0
-
-
-def test_pontuacao_meta_zero_sai_da_media():
-    # Meta 0 = não cobrado nesta métrica: só a de meta 200 entra na média.
-    metricas = [
-        {"realizado": 50, "meta_periodo": 0},
-        {"realizado": 100, "meta_periodo": 200},
-    ]
-    assert calcular_pontuacao(metricas) == 50.0
-
-
-def test_pontuacao_todas_metas_zero_fica_sem_pontuacao():
-    metricas = [
-        {"realizado": 0, "meta_periodo": 0},
-        {"realizado": 10, "meta_periodo": 0},
-    ]
-    assert calcular_pontuacao(metricas) is None
+def test_metrica_sem_valor_conta_zero():
+    assert calcular_pontuacao("closer", {"reunioes_realizadas": None}) == 0
+    assert calcular_pontuacao("closer", {}) == 0
 
 
 def test_ranking_dense_rank_com_empate_e_sem_pontuacao_fica_de_fora():
     pessoas = [
-        {"nome": "a", "pontuacao": 80.0},
-        {"nome": "b", "pontuacao": 80.0},
-        {"nome": "c", "pontuacao": 50.0},
+        {"nome": "a", "pontuacao": 80},
+        {"nome": "b", "pontuacao": 80},
+        {"nome": "c", "pontuacao": 50},
         {"nome": "d", "pontuacao": None},
     ]
     atribuir_ranking(pessoas, "pontuacao")
