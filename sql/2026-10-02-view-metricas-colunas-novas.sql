@@ -13,75 +13,77 @@
 -- Formato longo, joins e filtro por cargo (`users.id_cargo`) são os mesmos.
 --
 -- Sem drop/alter: a view não existe mais, `create or replace` só a cria.
+-- Apelidos longos (sdr/clo/drip) de propósito: no SQL Editor do Supabase o
+-- autocompletar engolia texto depois de `d.` ao colar.
 
 create or replace view dash.vw_metricas as
 with sdr_manual as (
-  select s.id_user,
-         case when s.key_data_ref_user ~ '^[0-9]{2}/[0-9]{2}/[0-9]{4}'
-              then to_date(left(s.key_data_ref_user, 10), 'DD/MM/YYYY') end as data,
-         s.fups, s.numeros_captados, s.ligacoes_realizadas, s.reunioes_agendadas,
-         s.indicacoes, s.inscricoes_realizadas
-    from dash.metricas_sdrs s
+  select sdr.id_user,
+         case when sdr.key_data_ref_user ~ '^[0-9]{2}/[0-9]{2}/[0-9]{4}'
+              then to_date(left(sdr.key_data_ref_user, 10), 'DD/MM/YYYY') end as data,
+         sdr.fups, sdr.numeros_captados, sdr.ligacoes_realizadas, sdr.reunioes_agendadas,
+         sdr.indicacoes, sdr.inscricoes_realizadas
+    from dash.metricas_sdrs sdr
 ),
 closer_manual as (
-  select c.id_user,
-         case when c.key_data_ref_user ~ '^[0-9]{2}/[0-9]{2}/[0-9]{4}'
-              then to_date(left(c.key_data_ref_user, 10), 'DD/MM/YYYY') end as data,
-         c.ligacoes_agendadas, c.ligacoes_realizadas, c.reunioes_agendadas,
-         c.reunioes_realizadas, c.indicacoes, c.inscricoes_realizadas
-    from dash.metricas_closers c
+  select clo.id_user,
+         case when clo.key_data_ref_user ~ '^[0-9]{2}/[0-9]{2}/[0-9]{4}'
+              then to_date(left(clo.key_data_ref_user, 10), 'DD/MM/YYYY') end as data,
+         clo.ligacoes_agendadas, clo.ligacoes_realizadas, clo.reunioes_agendadas,
+         clo.reunioes_realizadas, clo.indicacoes, clo.inscricoes_realizadas
+    from dash.metricas_closers clo
 ),
 linkedin as (
-  select d.id_user,
-         case when d.key_data_ref_user ~ '^[0-9]{2}/[0-9]{2}/[0-9]{4}'
-              then to_date(left(d.key_data_ref_user, 10), 'DD/MM/YYYY') end as data,
-         d.conta_usuario,
-         d.conexoes_enviadas, d.conexoes_aceitas, d.abordagens, d.in_mails
-    from dash.metricas_dripify d
+  select drip.id_user,
+         case when drip.key_data_ref_user ~ '^[0-9]{2}/[0-9]{2}/[0-9]{4}'
+              then to_date(left(drip.key_data_ref_user, 10), 'DD/MM/YYYY') end as data,
+         drip.conta_usuario,
+         drip.conexoes_enviadas, drip.conexoes_aceitas, drip.abordagens, drip.in_mails
+    from dash.metricas_dripify drip
 )
-select s.data, s.id_user, u.nome, c.cargo, null::text as conta, v.metrica, v.valor
-  from sdr_manual s
-  join dash.users u on u.id = s.id_user
-  join dash.metricas_cargo c on c.id = u.id_cargo and c.cargo = 'sdr'
+select sm.data, sm.id_user, usr.nome, cg.cargo, null::text as conta, v.metrica, v.valor
+  from sdr_manual sm
+  join dash.users usr on usr.id = sm.id_user
+  join dash.metricas_cargo cg on cg.id = usr.id_cargo and cg.cargo = 'sdr'
  cross join lateral (values
-        ('fups',                  s.fups),
-        ('numeros_captados',      s.numeros_captados),
-        ('ligacoes_realizadas',   s.ligacoes_realizadas),
-        ('reunioes_agendadas',    s.reunioes_agendadas),
-        ('indicacoes',            s.indicacoes),
-        ('inscricoes_realizadas', s.inscricoes_realizadas)
+        ('fups',                  sm.fups),
+        ('numeros_captados',      sm.numeros_captados),
+        ('ligacoes_realizadas',   sm.ligacoes_realizadas),
+        ('reunioes_agendadas',    sm.reunioes_agendadas),
+        ('indicacoes',            sm.indicacoes),
+        ('inscricoes_realizadas', sm.inscricoes_realizadas)
       ) as v(metrica, valor)
- where s.data is not null and v.valor is not null
+ where sm.data is not null and v.valor is not null
 
 union all
 
-select c2.data, c2.id_user, u.nome, c.cargo, null::text as conta, v.metrica, v.valor
-  from closer_manual c2
-  join dash.users u on u.id = c2.id_user
-  join dash.metricas_cargo c on c.id = u.id_cargo and c.cargo = 'closer'
+select cm.data, cm.id_user, usr.nome, cg.cargo, null::text as conta, v.metrica, v.valor
+  from closer_manual cm
+  join dash.users usr on usr.id = cm.id_user
+  join dash.metricas_cargo cg on cg.id = usr.id_cargo and cg.cargo = 'closer'
  cross join lateral (values
-        ('ligacoes_agendadas',    c2.ligacoes_agendadas),
-        ('ligacoes_realizadas',   c2.ligacoes_realizadas),
-        ('reunioes_agendadas',    c2.reunioes_agendadas),
-        ('reunioes_realizadas',   c2.reunioes_realizadas),
-        ('indicacoes',            c2.indicacoes),
-        ('inscricoes_realizadas', c2.inscricoes_realizadas)
+        ('ligacoes_agendadas',    cm.ligacoes_agendadas),
+        ('ligacoes_realizadas',   cm.ligacoes_realizadas),
+        ('reunioes_agendadas',    cm.reunioes_agendadas),
+        ('reunioes_realizadas',   cm.reunioes_realizadas),
+        ('indicacoes',            cm.indicacoes),
+        ('inscricoes_realizadas', cm.inscricoes_realizadas)
       ) as v(metrica, valor)
- where c2.data is not null and v.valor is not null
+ where cm.data is not null and v.valor is not null
 
 union all
 
-select l.data, l.id_user, u.nome, c.cargo, l.conta_usuario as conta, v.metrica, v.valor
-  from linkedin l
-  join dash.users u on u.id = l.id_user
-  join dash.metricas_cargo c on c.id = u.id_cargo and c.cargo = 'sdr'
+select li.data, li.id_user, usr.nome, cg.cargo, li.conta_usuario as conta, v.metrica, v.valor
+  from linkedin li
+  join dash.users usr on usr.id = li.id_user
+  join dash.metricas_cargo cg on cg.id = usr.id_cargo and cg.cargo = 'sdr'
  cross join lateral (values
-        ('conexoes_enviadas', l.conexoes_enviadas),
-        ('conexoes_aceitas',  l.conexoes_aceitas),
-        ('abordagens',        l.abordagens),
-        ('in_mails',          l.in_mails)
+        ('conexoes_enviadas', li.conexoes_enviadas),
+        ('conexoes_aceitas',  li.conexoes_aceitas),
+        ('abordagens',        li.abordagens),
+        ('in_mails',          li.in_mails)
       ) as v(metrica, valor)
- where l.data is not null and v.valor is not null;
+ where li.data is not null and v.valor is not null;
 
 grant select on dash.vw_metricas to service_role;
 
