@@ -27,7 +27,10 @@ select id, nome, nullif(email, ''), imagem_url, coalesce(active, true), coalesce
   from dash.users
  where id not in (9, 10)
 on conflict (id) do nothing;
-select setval(pg_get_serial_sequence('dash2.users', 'id'), (select max(id) from dash2.users));
+-- Sequência acima do maior id de dash também: sem isso o próximo usuário novo
+-- reusa o 9/10 (Nathan/Jonathan) e herda as métricas deles numa reexecução.
+select setval(pg_get_serial_sequence('dash2.users', 'id'),
+              greatest((select max(id) from dash2.users), (select max(id) from dash.users)));
 
 -- 2. Cargos: o de dash.users.id_cargo + dripify pra quem tem linha em dash.metricas_dripify
 insert into dash2.user_cargos (id_user, cargo)
