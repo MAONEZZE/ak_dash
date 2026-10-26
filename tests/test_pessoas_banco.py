@@ -33,3 +33,17 @@ def test_pessoa_sem_email_aparece_com_email_none(monkeypatch):
     monkeypatch.setattr(pessoas_banco_mod, "query", fake_query)
 
     assert listar_ativas() == [Pessoa(id="11", nome="Juca", cargo="sdr", email=None, imagem_url=None)]
+
+
+def test_usuario_sem_cargo_nao_aparece(monkeypatch):
+    tabelas = {
+        "users": [{"id": 3, "nome": "Alex", "email": "a@x.com", "imagem_url": None, "active": True}],
+        "user_cargos": [],
+    }
+
+    def fake_query(tabela, filtros=None, schema="dash", colunas="*", **kwargs):
+        return tabelas.get(tabela, [])
+
+    monkeypatch.setattr(pessoas_banco_mod, "query", fake_query)
+
+    assert listar_ativas() == []
