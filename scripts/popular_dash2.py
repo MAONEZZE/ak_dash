@@ -44,7 +44,7 @@ class Aba:
 
 
 def _inteiro(valor) -> int | None:
-    if valor is None or isinstance(valor, (bool, str)):
+    if isinstance(valor, bool) or not isinstance(valor, (int, float)):
         return None
     return int(valor)
 
@@ -63,4 +63,11 @@ def ler_aba(ws) -> Aba | None:
         if (v := _inteiro(linha_meta[indice].value)) is not None
     }
     dias: dict[int, dict[str, int | None]] = {}
+    for linha in ws.iter_rows(min_row=3):
+        dia = _inteiro(linha[0].value)
+        if dia is None or not 1 <= dia <= 31:
+            continue
+        valores = {coluna: _inteiro(linha[indice].value) for indice, coluna in colunas.items()}
+        if any(v is not None for v in valores.values()):
+            dias[dia] = valores
     return Aba(pessoa=ws.title.strip(), metas=metas, dias=dias)

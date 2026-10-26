@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 import openpyxl
 
 from scripts import popular_dash2
@@ -26,3 +28,24 @@ def test_ler_aba_mapeia_cabecalho_e_le_meta_diaria():
     aba = popular_dash2.ler_aba(ws)
 
     assert aba == popular_dash2.Aba(pessoa="Isaque", metas={"fups": 50, "numeros_captados": 3}, dias={})
+
+
+def test_ler_aba_le_dias_preenchidos_e_pula_vazios_e_total():
+    ws = _aba(
+        "Thalyson",
+        [
+            ["Dia", "Ligações Agendada", "Reuniões Realizada"],
+            ["Meta diária", 0, 4],
+            [None, None, None],
+            [1, 0, 5],
+            [2, None, None],
+            [3.0, 2, None],
+            ["TOTAL", 2, 5],
+            [datetime(2026, 10, 4), 1, 1],
+        ],
+    )
+
+    aba = popular_dash2.ler_aba(ws)
+
+    assert aba.dias == {1: {"ligacoes_agendadas": 0, "reunioes_realizadas": 5}, 3: {"ligacoes_agendadas": 2, "reunioes_realizadas": None}}
+    assert aba.metas == {"ligacoes_agendadas": 0, "reunioes_realizadas": 4}
