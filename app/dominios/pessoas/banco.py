@@ -15,7 +15,7 @@ class Pessoa:
     id: str
     nome: str
     cargo: str
-    email: str
+    email: str | None
     imagem_url: str | None = None
 
 
@@ -32,10 +32,9 @@ def listar_ativas() -> list[Pessoa]:
             id=str(r["id"]),
             nome=r.get("nome") or "",
             cargo=cargo,
-            email=r["email"],
+            email=r.get("email") or None,
             imagem_url=r.get("imagem_url"),
         )
         for r in usuarios
         for cargo in cargos_por_user.get(r["id"], [])
-        if r.get("email")
     ]
