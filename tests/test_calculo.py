@@ -284,3 +284,20 @@ def test_pontuacao_da_comercial_usa_os_pesos_do_cargo():
         metas=Metas({}), emails_filtro=None, hoje=date(2026, 9, 14),
     )
     assert resposta.corpo["pessoas"][0]["pontuacao_total"] == 2 * 15 + 3 + 15
+
+
+def test_comercial_sdr_usa_meta_do_cargo_sdr():
+    # Uma pessoa com meta de seller (2) e meta de sdr (4) na mesma métrica: a
+    # linha da tela de SDR tem que usar a de sdr. Período de um dia útil (14/09/2026),
+    # então a meta diária vale cheia.
+    pessoa = _pessoa("4", "Jennifer", "sdr", "j@x.com")
+    totais = _totais(realizado={(4, "indicacoes"): 3}, dias_com_lancamento={(4, "indicacoes"): 1})
+    metas = Metas({(4, "sdr", "indicacoes"): 4, (4, "seller", "indicacoes"): 2})
+
+    resposta = montar_resposta_comercial(
+        periodo=Periodo("dia", date(2026, 9, 14), date(2026, 9, 14)), cargo="sdr",
+        pessoas_cargo=[pessoa], totais=totais, metas=metas, emails_filtro=None,
+        hoje=date(2026, 9, 14),
+    )
+    metrica = next(m for m in resposta.corpo["pessoas"][0]["metricas"] if m["metrica"] == "indicacoes")
+    assert metrica["meta_periodo"] == 4
