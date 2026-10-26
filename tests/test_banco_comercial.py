@@ -14,13 +14,13 @@ def test_soma_realizado_e_conta_dias_distintos(monkeypatch):
     _mockar_query(
         monkeypatch,
         [
-            {"data": "2026-09-01", "id_user": 9, "metrica": "numeros_captados", "valor": 10, "conta": "jonathan"},
-            {"data": "2026-09-02", "id_user": 9, "metrica": "numeros_captados", "valor": 20, "conta": "jonathan"},
+            {"data": "2026-09-01", "id_user": 9, "metrica": "ligacoes_efetuadas", "valor": 10, "conta": "jonathan"},
+            {"data": "2026-09-02", "id_user": 9, "metrica": "ligacoes_efetuadas", "valor": 20, "conta": "jonathan"},
         ],
     )
     totais = banco_mod.buscar_totais("sdr", [9], date(2026, 9, 1), date(2026, 9, 3))
-    assert totais.realizado[(9, "numeros_captados")] == 30
-    assert totais.dias_com_lancamento[(9, "numeros_captados")] == 2
+    assert totais.realizado[(9, "ligacoes_efetuadas")] == 30
+    assert totais.dias_com_lancamento[(9, "ligacoes_efetuadas")] == 2
     assert totais.contas_por_pessoa[9] == ["jonathan"]
 
 
@@ -32,12 +32,12 @@ def test_metrica_fora_do_conjunto_do_cargo_e_descartada_e_contada(monkeypatch):
         monkeypatch,
         [
             {"data": "2026-09-01", "id_user": 2, "metrica": "reunioes_realizadas", "valor": 5, "conta": "x"},
-            {"data": "2026-09-01", "id_user": 2, "metrica": "numeros_captados", "valor": 3, "conta": "x"},
+            {"data": "2026-09-01", "id_user": 2, "metrica": "ligacoes_efetuadas", "valor": 3, "conta": "x"},
         ],
     )
     totais = banco_mod.buscar_totais("sdr", [2], date(2026, 9, 1), date(2026, 9, 1))
     assert (2, "reunioes_realizadas") not in totais.realizado
-    assert totais.realizado[(2, "numeros_captados")] == 3
+    assert totais.realizado[(2, "ligacoes_efetuadas")] == 3
     assert totais.linhas_cargo_cruzado == 1
 
 
@@ -73,12 +73,12 @@ def test_closer_soma_ligacoes_agendadas_e_inscricoes(monkeypatch):
 
 
 def test_serie_diaria_pre_populada_com_zero_em_todo_dia_do_intervalo(monkeypatch):
-    _mockar_query(monkeypatch, [{"data": "2026-09-02", "id_user": 9, "metrica": "numeros_captados", "valor": 7, "conta": "x"}])
+    _mockar_query(monkeypatch, [{"data": "2026-09-02", "id_user": 9, "metrica": "ligacoes_efetuadas", "valor": 7, "conta": "x"}])
     totais = banco_mod.buscar_totais("sdr", [9], date(2026, 9, 1), date(2026, 9, 3))
     assert set(totais.serie_diaria) == {date(2026, 9, 1), date(2026, 9, 2), date(2026, 9, 3)}
-    assert totais.serie_diaria[date(2026, 9, 1)]["numeros_captados"] == 0
-    assert totais.serie_diaria[date(2026, 9, 2)]["numeros_captados"] == 7
-    assert totais.serie_diaria[date(2026, 9, 3)]["numeros_captados"] == 0
+    assert totais.serie_diaria[date(2026, 9, 1)]["ligacoes_efetuadas"] == 0
+    assert totais.serie_diaria[date(2026, 9, 2)]["ligacoes_efetuadas"] == 7
+    assert totais.serie_diaria[date(2026, 9, 3)]["ligacoes_efetuadas"] == 0
 
 
 def test_sem_ids_devolve_vazio_sem_consultar(monkeypatch):
