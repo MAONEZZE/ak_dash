@@ -1,13 +1,13 @@
-"""Leitura de `dash.vw_metricas` — granularidade diária, formato longo
+"""Leitura de `dash2.vw_metricas` — granularidade diária, formato longo
 
 (`data, id_user, nome, cargo, conta, metrica, valor`). Fonte única das duas
 páginas: a view lê as tabelas de origem em tempo real
 (`metricas_sdrs`/`metricas_closers`/`metricas_dripify`), com a data extraída
-de `key_data_ref_user` e o cargo vindo de `users.id_cargo` — ver
-sql/2026-09-15-view-metricas.sql.
+de `key_data_ref_user` e o cargo vindo da tabela de origem — ver
+sql/2026-09-15-view-metricas.sql. A coluna `conta` vem sempre null.
 
-A view já filtra por cargo, então métrica fora do conjunto do cargo não
-deveria aparecer. Se aparecer, a linha é descartada aqui via
+A consulta já filtra a view pelo cargo pedido, então métrica fora do conjunto
+do cargo não deveria aparecer. Se aparecer, a linha é descartada aqui via
 `metricas_do_cargo`, contada (não usuário-a-usuário, senão o aviso vira
 ruído) e reportada em bloco pra quem monta a resposta decidir se avisa.
 """
@@ -53,6 +53,7 @@ def buscar_totais(cargo: str, ids: list[int], inicio: date, fim: date) -> Totais
         {
             "id_user": f"in.({','.join(str(i) for i in ids)})",
             "and": f"(data.gte.{inicio.isoformat()},data.lte.{fim.isoformat()})",
+            "cargo": f"eq.{cargo}",
         },
         colunas="data,id_user,metrica,valor,conta",
     )

@@ -100,3 +100,17 @@ def test_pessoa_sem_nenhuma_linha_fica_de_fora_dos_dicionarios(monkeypatch):
     totais = banco_mod.buscar_totais("closer", [10], date(2026, 9, 1), date(2026, 9, 1))
     assert (10, "indicacoes") not in totais.realizado
     assert (10, "indicacoes") not in totais.dias_com_lancamento
+
+
+def test_consulta_filtra_a_view_pelo_cargo(monkeypatch):
+    chamadas = []
+
+    def _fake_query(tabela, filtros, **k):
+        chamadas.append((tabela, filtros))
+        return []
+
+    monkeypatch.setattr(banco_mod, "query", _fake_query)
+    banco_mod.buscar_totais("sdr", [4], date(2026, 10, 1), date(2026, 10, 2))
+    tabela, filtros = chamadas[0]
+    assert tabela == "vw_metricas"
+    assert filtros["cargo"] == "eq.sdr"
