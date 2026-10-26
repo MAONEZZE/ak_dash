@@ -65,3 +65,10 @@ def test_linhas_metricas_monta_chave_e_descarta_dia_inexistente():
     linhas = popular_dash2.linhas_metricas(aba, 6, "Letícia", 2026, 9)
 
     assert linhas == [{"id_user": 6, "data": date(2026, 9, 5), "key_data_ref_user": "05/09/2026-letícia", "abordagens": 31}]
+
+
+def test_resolver_usuario_ignora_acento_e_caixa():
+    usuarios = [{"id": 6, "nome": "Letícia"}, {"id": 1, "nome": "Jacob"}]
+
+    assert popular_dash2.resolver_usuario("LETICIA", usuarios) == {"id": 6, "nome": "Letícia"}
+    assert popular_dash2.resolver_usuario("Juca", usuarios) is None

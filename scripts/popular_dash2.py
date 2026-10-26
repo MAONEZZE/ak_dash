@@ -93,3 +93,8 @@ def linhas_metricas(aba: Aba, id_user: int, nome_user: str, ano: int, mes: int) 
             }
         )
     return linhas
+
+
+def resolver_usuario(nome_aba: str, usuarios: list[dict]) -> dict | None:
+    alvo = normalizar(nome_aba)
+    return next((u for u in sorted(usuarios, key=lambda u: u["id"]) if normalizar(u["nome"]) == alvo), None)
