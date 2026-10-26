@@ -11,7 +11,6 @@ from datetime import date
 from fastapi.testclient import TestClient
 
 from app import cache
-from app import cargos as cargos_mod
 from app import metas as metas_mod
 from app.auth import exigir_usuario
 from app.dominios.comercial import banco as comercial_banco_mod
@@ -21,25 +20,24 @@ from app.dominios.geral import rotas as geral_rotas_mod
 from app.dominios.pessoas import banco as pessoas_banco_mod
 from app.main import app
 
-# O cargo vem de `users.id_cargo` -> `dash.metricas_cargo`, não mais de uma
-# coluna de texto em `users`.
+# Pessoas vêm de `dash2.users` + `dash2.user_cargos` (um vínculo por cargo).
 _USERS = [
-    {"id": 9, "nome": "Nathan", "id_cargo": 2, "email": "nathan@x.com", "imagem_url": None, "active": True},
-    {"id": 1, "nome": "Jacob", "id_cargo": 1, "email": "jacob@x.com", "imagem_url": None, "active": True},
+    {"id": 9, "nome": "Nathan", "email": "nathan@x.com", "imagem_url": None, "active": True},
+    {"id": 1, "nome": "Jacob", "email": "jacob@x.com", "imagem_url": None, "active": True},
 ]
-_CARGOS = [{"id": 1, "cargo": "closer"}, {"id": 2, "cargo": "sdr"}, {"id": 3, "cargo": "empresa"}]
+_USER_CARGOS = [{"id_user": 9, "cargo": "sdr"}, {"id_user": 1, "cargo": "closer"}]
 
 
 def _fake_query(tabela, filtros=None, schema="dash", colunas="*", **kwargs):
     if tabela == "users":
         return _USERS
-    if tabela == "metricas_cargo":
-        return _CARGOS
+    if tabela == "user_cargos":
+        return _USER_CARGOS
     return []
 
 
 def _sobrescrever_query(monkeypatch) -> None:
-    for mod in (pessoas_banco_mod, comercial_banco_mod, geral_banco_mod, financeiro_banco_mod, metas_mod, cargos_mod):
+    for mod in (pessoas_banco_mod, comercial_banco_mod, geral_banco_mod, financeiro_banco_mod, metas_mod):
         monkeypatch.setattr(mod, "query", _fake_query)
 
 
@@ -130,7 +128,7 @@ def test_geral_em_dia_busca_faturamento_do_dia_e_do_mes_corrente(monkeypatch):
             intervalos.append((filtros or {})["and"])
         return _fake_query(tabela, filtros, schema, colunas, **kwargs)
 
-    for mod in (pessoas_banco_mod, comercial_banco_mod, geral_banco_mod, financeiro_banco_mod, metas_mod, cargos_mod):
+    for mod in (pessoas_banco_mod, comercial_banco_mod, geral_banco_mod, financeiro_banco_mod, metas_mod):
         monkeypatch.setattr(mod, "query", query_espiã)
     cache.invalidar()
     app.dependency_overrides[exigir_usuario] = lambda: {"sub": "dev"}
