@@ -195,14 +195,6 @@ class ContaDripify:
     numeros_captados: int
 
 
-def _data_da_chave(chave: str | None) -> date | None:
-    """`key_data_ref_user` é "DD/MM/AAAA-nome" — mesma regra da `vw_metricas`."""
-    try:
-        return datetime.strptime((chave or "")[:10], "%d/%m/%Y").date()
-    except ValueError:
-        return None
-
-
 def buscar_dripify_por_conta(inicio: date, fim: date) -> list[ContaDripify]:
     """Conexões aceitas e números captados de cada conta do LinkedIn
     (`dash.metricas_dripify`, uma conta por `id_user`) somados de `inicio` a
@@ -210,15 +202,18 @@ def buscar_dripify_por_conta(inicio: date, fim: date) -> list[ContaDripify]:
 
     Lê a tabela direto, não a `vw_metricas`: a view só emite Dripify de quem é
     SDR, e as contas rodam também no nome de closers e de quem já saiu do
-    time (Jacob, Mariana...). A data só existe dentro de `key_data_ref_user`
-    (texto), então o filtro de período é feito aqui, não no PostgREST.
+    time (Jacob, Mariana...). A data é a coluna `data`, então o período vai
+    pro PostgREST.
     """
-    linhas = query("metricas_dripify", colunas="id_user,key_data_ref_user,conexoes_aceitas,numeros_captados")
+    linhas = query(
+        "metricas_dripify",
+        {"and": f"(data.gte.{inicio.isoformat()},data.lte.{fim.isoformat()})"},
+        colunas="id_user,data,conexoes_aceitas,numeros_captados",
+    )
 
     somas: dict[int, list[int]] = {}
     for r in linhas:
-        dia = _data_da_chave(r.get("key_data_ref_user"))
-        if r.get("id_user") is None or dia is None or not inicio <= dia <= fim:
+        if r.get("id_user") is None:
             continue
         soma = somas.setdefault(int(r["id_user"]), [0, 0])
         soma[0] += r.get("conexoes_aceitas") or 0
