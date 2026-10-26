@@ -62,7 +62,7 @@ def montar_resposta_comercial(
         for chave_metrica in colunas:
             realizado = totais.realizado.get((id_user, chave_metrica), 0)
             dias_com_lancamento = totais.dias_com_lancamento.get((id_user, chave_metrica), 0)
-            meta_periodo = metas.por_usuario(periodo.inicio, periodo.fim, id_user, chave_metrica)
+            meta_periodo = metas.por_usuario(periodo.inicio, periodo.fim, id_user, cargo, chave_metrica)
             status = _status(realizado, meta_periodo, dias_com_lancamento)
             if status == "atingido":
                 atingidas += 1

@@ -88,7 +88,7 @@ def _meta_card_empresa(
     ninguém da composição tiver meta, ou se a composição for vazia.
     """
     parciais = [
-        metas.somar(periodo.inicio, periodo.fim, [int(p.id) for p in pessoas_por_cargo[cargo]], metrica)
+        metas.somar(periodo.inicio, periodo.fim, [int(p.id) for p in pessoas_por_cargo[cargo]], cargo, metrica)
         for cargo, metrica in composicao
         if pessoas_por_cargo[cargo]  # cargo sem ninguém ativo não "tem meta 0"
     ]
@@ -225,8 +225,8 @@ def montar_resposta_geral(
     todos_nomes = [p.nome for p in pessoas_sdr] + [p.nome for p in pessoas_closer]
     nomes_repetidos = {nome for nome in todos_nomes if todos_nomes.count(nome) > 1}
 
-    def meta_de(id_user: int, chave: str) -> int | None:
-        return metas.por_usuario(periodo_metas.inicio, periodo_metas.fim, id_user, chave)
+    def meta_de(id_user: int, cargo: str, chave: str) -> int | None:
+        return metas.por_usuario(periodo_metas.inicio, periodo_metas.fim, id_user, cargo, chave)
 
     pessoas_saida = []
     for pessoa in pessoas_sdr:
@@ -235,7 +235,7 @@ def montar_resposta_geral(
             {
                 "metrica": chave,
                 "realizado": totais_sdr.realizado.get((id_user, chave), 0),
-                "meta_periodo": meta_de(id_user, chave),
+                "meta_periodo": meta_de(id_user, "sdr", chave),
             }
             for chave in _METRICAS_SDR_TABELA
         ]
@@ -250,27 +250,27 @@ def montar_resposta_geral(
             {
                 "metrica": "reunioes_realizadas",
                 "realizado": totais_closer.realizado.get((id_user, "reunioes_realizadas"), 0),
-                "meta_periodo": meta_de(id_user, "reunioes_realizadas"),
+                "meta_periodo": meta_de(id_user, "closer", "reunioes_realizadas"),
             },
             {
                 "metrica": "liquidado",
                 "realizado": financeiro.get("liquidado"),
-                "meta_periodo": meta_de(id_user, "liquidado"),
+                "meta_periodo": meta_de(id_user, "closer", "liquidado"),
             },
             {
                 "metrica": "reunioes_agendadas",
                 "realizado": totais_closer.realizado.get((id_user, "reunioes_agendadas"), 0),
-                "meta_periodo": meta_de(id_user, "reunioes_agendadas"),
+                "meta_periodo": meta_de(id_user, "closer", "reunioes_agendadas"),
             },
             {
                 "metrica": "indicacoes",
                 "realizado": totais_closer.realizado.get((id_user, "indicacoes"), 0),
-                "meta_periodo": meta_de(id_user, "indicacoes"),
+                "meta_periodo": meta_de(id_user, "closer", "indicacoes"),
             },
             {
                 "metrica": "inscricoes_realizadas",
                 "realizado": totais_closer.realizado.get((id_user, "inscricoes_realizadas"), 0),
-                "meta_periodo": meta_de(id_user, "inscricoes_realizadas"),
+                "meta_periodo": meta_de(id_user, "closer", "inscricoes_realizadas"),
             },
         ]
         pessoas_saida.append(_montar_pessoa(

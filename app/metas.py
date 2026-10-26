@@ -1,22 +1,20 @@
-"""Leitura das metas — valor DIÁRIO por (PESSOA, métrica).
+"""Leitura das metas — valor DIÁRIO por (PESSOA, cargo, métrica).
 
-Duas tabelas: `dash.metricas_metas` diz qual métrica cada meta mede
-(`id`, `metrica`) e `dash.user_metas` guarda O VALOR de cada pessoa pra
-aquela meta (`id_user`, `id_meta`, `valor_meta`).
+Fonte: `dash2.metas`, uma linha por (`id_user`, `cargo`, `metrica`) com o
+`valor_diario`, preenchido pela planilha.
 
 A meta ATUAL vale pra qualquer período (decisão do usuário, 2026-10-05): não
 há mais meta "do mês". Antes a meta era datada por `user_metas.atualizado_em`
-e editar todas em 05/10 deixou setembro inteiro sem meta. Duas linhas da
-mesma pessoa/métrica: vale a atualizada por último.
+e editar todas em 05/10 deixou setembro inteiro sem meta.
 
-`valor_meta` é a meta de UM DIA ÚTIL daquela pessoa (ex: 4 números
-captados/dia). A meta de um período é `valor_meta × dias úteis do período` —
-ver `Metas.por_usuario`.
+`valor_diario` é a meta de UM DIA ÚTIL daquela pessoa naquele cargo (ex: 4
+números captados/dia). A meta de um período é `valor_diario × dias úteis do
+período` — ver `Metas.por_usuario`.
 
 A meta dos cards da empresa NÃO vem de uma linha própria: é a SOMA das metas
 das pessoas ativas que compõem o card (ver `dominios/geral/calculo.py`).
 
-Sem linha cadastrada é `None`; linha com `valor_meta = 0` é `0` — o
+Sem linha cadastrada é `None`; linha com `valor_diario = 0` é `0` — o
 frontend mostra os dois como métrica aberta (barra azul).
 """
 from __future__ import annotations
@@ -40,27 +38,27 @@ def dias_uteis_no_periodo(inicio: date, fim: date) -> int:
 
 @dataclass(frozen=True)
 class Metas:
-    # (id_user, metrica) -> meta diária
-    _valores: dict[tuple[int, str], int]
+    # (id_user, cargo, metrica) -> meta diária
+    _valores: dict[tuple[int, str, str], int]
 
     @property
     def vazio(self) -> bool:
         return not self._valores
 
-    def diaria(self, id_user: int, metrica: str) -> int | None:
-        return self._valores.get((id_user, metrica))
+    def diaria(self, id_user: int, cargo: str, metrica: str) -> int | None:
+        return self._valores.get((id_user, cargo, metrica))
 
-    def por_usuario(self, inicio: date, fim: date, id_user: int, metrica: str) -> int | None:
-        """Meta DAQUELA pessoa no intervalo: diária × dias úteis. `None` se a
+    def por_usuario(self, inicio: date, fim: date, id_user: int, cargo: str, metrica: str) -> int | None:
+        """Meta DAQUELA pessoa, naquele cargo, no intervalo: diária × dias úteis.
 
-        pessoa não tem meta cadastrada nessa métrica.
+        `None` se a pessoa não tem meta cadastrada nessa métrica e cargo.
         """
-        diaria = self.diaria(id_user, metrica)
+        diaria = self.diaria(id_user, cargo, metrica)
         if diaria is None:
             return None
         return diaria * dias_uteis_no_periodo(inicio, fim)
 
-    def somar(self, inicio: date, fim: date, ids_user: Iterable[int], metrica: str) -> int | None:
+    def somar(self, inicio: date, fim: date, ids_user: Iterable[int], cargo: str, metrica: str) -> int | None:
         """Meta de um GRUPO — a soma das metas individuais. Quem está sem meta
 
         fica de fora da soma. `None` só quando ninguém do grupo tem meta.
@@ -69,36 +67,17 @@ class Metas:
         ids = list(ids_user)
         if not ids:
             return 0
-        metas = [self.por_usuario(inicio, fim, id_user, metrica) for id_user in ids]
+        metas = [self.por_usuario(inicio, fim, id_user, cargo, metrica) for id_user in ids]
         com_meta = [m for m in metas if m is not None]
         return sum(com_meta) if com_meta else None
 
 
 def buscar_metas() -> Metas:
-    linhas = query("metricas_metas")
-    metrica_por_meta = {
-        int(r["id"]): str(r["metrica"]) for r in linhas if r.get("id") is not None and r.get("metrica") is not None
-    }
-    if not metrica_por_meta:
-        return Metas({})
-
-    ids = ",".join(str(i) for i in sorted(metrica_por_meta))
-    vinculos = query("user_metas", {"id_meta": f"in.({ids})"})
-
-    valores: dict[tuple[int, str], int] = {}
-    atualizado_por_chave: dict[tuple[int, str], str] = {}
-    for v in vinculos:
-        id_meta, id_user, valor = v.get("id_meta"), v.get("id_user"), v.get("valor_meta")
-        if id_meta is None or id_user is None or valor is None:
+    linhas = query("metas", colunas="id_user,cargo,metrica,valor_diario")
+    valores: dict[tuple[int, str, str], int] = {}
+    for r in linhas:
+        id_user, cargo, metrica, valor = r.get("id_user"), r.get("cargo"), r.get("metrica"), r.get("valor_diario")
+        if id_user is None or cargo is None or metrica is None or valor is None:
             continue
-        metrica = metrica_por_meta.get(int(id_meta))
-        if metrica is None:
-            continue
-        chave = (int(id_user), metrica)
-        marca = str(v.get("atualizado_em") or "")
-        if chave in valores and marca < atualizado_por_chave[chave]:
-            continue
-        valores[chave] = int(valor)
-        atualizado_por_chave[chave] = marca
-
+        valores[(int(id_user), str(cargo), str(metrica))] = int(valor)
     return Metas(valores)
