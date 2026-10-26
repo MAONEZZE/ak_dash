@@ -1,6 +1,6 @@
 """Monta a resposta de `GET /geral`: 6 cards (2 escuros de faturamento + 4
 
-claros somados de `dash.vw_metricas`), as Confrarias do mês (tabela de
+claros somados de `dash2.vw_metricas`), as Confrarias do mês (tabela de
 eventos do SED), as contas do Dripify do período, o termômetro de faturamento do mês e as pessoas com
 pontuação/ranking pros dois pódios (SDR e Closer) do frontend.
 """
@@ -18,7 +18,7 @@ from app.pontuacao import atribuir_ranking, calcular_pontuacao
 
 # Colunas da tabela de pessoas, por cargo (decisão de produto).
 _METRICAS_SDR_TABELA = (
-    "numeros_captados", "ligacoes_realizadas", "reunioes_agendadas", "indicacoes", "inscricoes_realizadas",
+    "ligacoes_realizadas", "reunioes_agendadas", "indicacoes", "inscricoes_realizadas",
 )
 
 
@@ -40,14 +40,15 @@ META_FATURAMENTO_MES = 380_000
 # Card claro da empresa -> (cargo, métrica) que o compõem. Uma definição só
 # para o realizado E para a meta. A ordem aqui é a ordem dos cards na tela
 # (linha 2 da Geral, decisão do usuário 2026-10-05). `oportunidade` é a soma
-# de indicações + inscrições + números captados do time.
+# de indicações + inscrições do time (SDR não capta mais números, então
+# `numeros_captados` não compõe mais nenhum card).
 _INDICACOES = (("sdr", "indicacoes"), ("closer", "indicacoes"))
 _INSCRICOES = (("sdr", "inscricoes_realizadas"), ("closer", "inscricoes_realizadas"))
 _COMPOSICAO_CARDS_CLAROS: dict[str, tuple[tuple[str, str], ...]] = {
     "reunioes_agendadas": (("sdr", "reunioes_agendadas"), ("closer", "reunioes_agendadas")),
     "ligacoes_realizadas": (("sdr", "ligacoes_realizadas"), ("closer", "ligacoes_realizadas")),
     "inscricoes_realizadas": _INSCRICOES,
-    "oportunidade": _INDICACOES + _INSCRICOES + (("sdr", "numeros_captados"),),
+    "oportunidade": _INDICACOES + _INSCRICOES,
 }
 
 
