@@ -49,3 +49,11 @@ def test_ler_aba_le_dias_preenchidos_e_pula_vazios_e_total():
 
     assert aba.dias == {1: {"ligacoes_agendadas": 0, "reunioes_realizadas": 5}, 3: {"ligacoes_agendadas": 2, "reunioes_realizadas": None}}
     assert aba.metas == {"ligacoes_agendadas": 0, "reunioes_realizadas": 4}
+
+
+def test_ler_aba_ignora_dashboard_e_tira_prefixo_linkedin():
+    dashboard = _aba("Dashboard SDR", [["Dia", "Abordagens"]])
+    linkedin = _aba("Linkedin Jacob", [["Dia", "Abordagens"], ["Meta diária", 20]])
+
+    assert popular_dash2.ler_aba(dashboard) is None
+    assert popular_dash2.ler_aba(linkedin).pessoa == "Jacob"

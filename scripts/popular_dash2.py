@@ -5,6 +5,7 @@ com o dia na coluna A. Abas "Dashboard…" são ignoradas.
 """
 from __future__ import annotations
 
+import re
 import unicodedata
 from dataclasses import dataclass
 
@@ -50,6 +51,8 @@ def _inteiro(valor) -> int | None:
 
 
 def ler_aba(ws) -> Aba | None:
+    if normalizar(ws.title).startswith("dashboard"):
+        return None
     cabecalho = next(ws.iter_rows(min_row=1, max_row=1))
     colunas = {
         indice: COLUNA_POR_CABECALHO[normalizar(c.value)]
@@ -70,4 +73,4 @@ def ler_aba(ws) -> Aba | None:
         valores = {coluna: _inteiro(linha[indice].value) for indice, coluna in colunas.items()}
         if any(v is not None for v in valores.values()):
             dias[dia] = valores
-    return Aba(pessoa=ws.title.strip(), metas=metas, dias=dias)
+    return Aba(pessoa=re.sub(r"(?i)^linkedin\s+", "", ws.title.strip()), metas=metas, dias=dias)
