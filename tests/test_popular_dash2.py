@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
 import openpyxl
 
@@ -57,3 +57,11 @@ def test_ler_aba_ignora_dashboard_e_tira_prefixo_linkedin():
 
     assert popular_dash2.ler_aba(dashboard) is None
     assert popular_dash2.ler_aba(linkedin).pessoa == "Jacob"
+
+
+def test_linhas_metricas_monta_chave_e_descarta_dia_inexistente():
+    aba = popular_dash2.Aba(pessoa="Leticia", metas={}, dias={5: {"abordagens": 31}, 31: {"abordagens": 1}})
+
+    linhas = popular_dash2.linhas_metricas(aba, 6, "Letícia", 2026, 9)
+
+    assert linhas == [{"id_user": 6, "data": date(2026, 9, 5), "key_data_ref_user": "05/09/2026-letícia", "abordagens": 31}]

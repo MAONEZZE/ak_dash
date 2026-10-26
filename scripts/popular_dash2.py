@@ -8,6 +8,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
+from datetime import date
 
 
 def normalizar(texto) -> str:
@@ -74,3 +75,21 @@ def ler_aba(ws) -> Aba | None:
         if any(v is not None for v in valores.values()):
             dias[dia] = valores
     return Aba(pessoa=re.sub(r"(?i)^linkedin\s+", "", ws.title.strip()), metas=metas, dias=dias)
+
+
+def linhas_metricas(aba: Aba, id_user: int, nome_user: str, ano: int, mes: int) -> list[dict]:
+    linhas: list[dict] = []
+    for d, valores in sorted(aba.dias.items()):
+        try:
+            dia = date(ano, mes, d)
+        except ValueError:
+            continue
+        linhas.append(
+            {
+                "id_user": id_user,
+                "data": dia,
+                "key_data_ref_user": f"{dia:%d/%m/%Y}-{nome_user.lower()}",
+                **valores,
+            }
+        )
+    return linhas
