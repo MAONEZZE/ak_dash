@@ -47,6 +47,29 @@ class Settings:
     cache_ttl_pessoas_segundos: int = field(
         default_factory=lambda: int(os.getenv("CACHE_TTL_PESSOAS_SEGUNDOS", "60"))
     )
+    # Workers das planilhas (app/workers.py): só sobem com WORKERS_ATIVOS=true;
+    # worker sem ID de planilha não sobe.
+    workers_ativos: bool = field(
+        default_factory=lambda: os.getenv("WORKERS_ATIVOS", "false").strip().lower() == "true"
+    )
+    worker_intervalo_segundos: float = field(
+        default_factory=lambda: float(os.getenv("WORKER_INTERVALO_SEGUNDOS", "5"))
+    )
+    google_service_account_json: str | None = field(
+        default_factory=lambda: os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON") or None
+    )
+    planilha_sellers_id: str | None = field(
+        default_factory=lambda: os.getenv("PLANILHA_SELLERS_ID") or None
+    )
+    planilha_sdrs_id: str | None = field(
+        default_factory=lambda: os.getenv("PLANILHA_SDRS_ID") or None
+    )
+    planilha_closers_id: str | None = field(
+        default_factory=lambda: os.getenv("PLANILHA_CLOSERS_ID") or None
+    )
+    planilha_dripify_id: str | None = field(
+        default_factory=lambda: os.getenv("PLANILHA_DRIPIFY_ID") or None
+    )
 
 
 settings = Settings()
