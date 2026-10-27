@@ -125,3 +125,28 @@ def test_estado_inicial_vem_do_banco(monkeypatch):
     assert _sem_carimbo(banco.upserts[0][1]) == [
         {"id_user": 12, "data": "2026-10-07", "key_data_ref_user": "07/10/2026-isaque", "fups": None, "numeros_captados": None, "indicacoes": None},
     ]
+
+
+def test_meta_alterada_regrava_e_meta_apagada_e_removida(monkeypatch):
+    banco = _Banco({
+        "users": [{"id": 12, "nome": "Isaque"}],
+        "user_cargos": [{"id_user": 12}],
+        "metas": [{"id_user": 12, "metrica": "fups", "valor_diario": 50}, {"id_user": 12, "metrica": "numeros_captados", "valor_diario": 3}],
+    })
+    _instalar(monkeypatch, banco)
+    w, _ = _worker([("Isaque", [CABECALHO, ["Meta diária", None, 0]])])
+
+    w.ciclo()
+
+    assert banco.apagados == [("metas", {"id_user": "eq.12", "cargo": "eq.seller", "metrica": "eq.fups"})]
+    metas_upsert = [u for u in banco.upserts if u[0] == "metas"]
+    assert len(metas_upsert) == 1
+    assert _sem_carimbo(metas_upsert[0][1]) == [{"id_user": 12, "cargo": "seller", "metrica": "numeros_captados", "valor_diario": 0}]
+
+    banco.upserts.clear()
+    banco.apagados.clear()
+
+    w.ciclo()
+
+    assert banco.apagados == []
+    assert banco.upserts == []

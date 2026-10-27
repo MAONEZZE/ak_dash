@@ -114,6 +114,9 @@ class Worker:
             for chave, v in metas_desejadas.items():
                 if self.metas.get(chave) != v:
                     metas_novas[chave] = v
+            for i, m in list(self.metas):
+                if i == u["id"] and (i, m) not in metas_desejadas:
+                    metas_apagadas.append((i, m))
 
         carimbo = self.agora().isoformat()
         gravou = False
