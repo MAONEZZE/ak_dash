@@ -2,6 +2,7 @@ import logging
 from datetime import date, datetime
 
 from app import workers
+from app.periodo import TZ_SP
 
 
 class _Banco:
@@ -167,6 +168,42 @@ def test_aba_sem_usuario_ou_sem_cargo_e_pulada_com_log_unico(monkeypatch, caplog
     mensagens = [r.getMessage() for r in caplog.records]
     assert len([m for m in mensagens if "SDR2" in m]) == 1
     assert len([m for m in mensagens if "Lucas" in m]) == 1
+
+
+def test_executar_ciclo_registra_erro_e_sucesso_no_status(monkeypatch):
+    contador = {"n": 0}
+
+    class _BancoQueFalha(_Banco):
+        falhar = True
+
+        def query(self, tabela, filtros=None, schema=None, colunas="*", **kwargs):
+            if tabela == "users" and self.falhar:
+                contador["n"] += 1
+            return super().query(tabela, filtros, schema=schema, colunas=colunas, **kwargs)
+
+    banco = _BancoQueFalha({"users": [{"id": 12, "nome": "Isaque"}], "user_cargos": [{"id_user": 12}]})
+    _instalar(monkeypatch, banco)
+    monkeypatch.setattr(workers.banco, "falhas_na_thread", lambda: contador["n"])
+    w = workers.Worker(
+        SELLERS,
+        "ID_SELLERS",
+        lambda _id: [("Isaque", [CABECALHO, ["Meta diária", 50], [5, 10]])],
+        hoje=lambda: date(2026, 10, 27),
+        agora=lambda: datetime(2026, 10, 27, 10, 0, tzinfo=TZ_SP),
+    )
+
+    w.executar_ciclo()
+
+    assert w.status["ultima_leitura_ok"] is None
+    assert w.status["ultimo_erro"] == {"em": "2026-10-27T10:00:00-03:00", "mensagem": "RuntimeError: consulta a users falhou"}
+    assert banco.upserts == []
+
+    banco.falhar = False
+    w.executar_ciclo()
+
+    assert w.status["ultima_leitura_ok"] == "2026-10-27T10:00:00-03:00"
+    assert w.status["ultimo_erro"] == {"em": "2026-10-27T10:00:00-03:00", "mensagem": "RuntimeError: consulta a users falhou"}
+    assert any(tabela == "metricas_sellers" for tabela, _, _ in banco.upserts)
 
 
 def test_virada_do_mes_recarrega_estado_e_grava_no_mes_novo(monkeypatch):

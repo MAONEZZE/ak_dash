@@ -160,3 +160,12 @@ class Worker:
 
         if gravou:
             cache.invalidar()
+
+    def executar_ciclo(self) -> None:
+        try:
+            self.ciclo()
+        except Exception as erro:  # rede do Google/Supabase, 429, planilha sem acesso: não derruba o worker
+            self.status["ultimo_erro"] = {"em": self.agora().isoformat(), "mensagem": f"{type(erro).__name__}: {erro}"}
+            logger.warning("Worker %s: ciclo falhou", self.planilha.nome, exc_info=True)
+            return
+        self.status["ultima_leitura_ok"] = self.agora().isoformat()
