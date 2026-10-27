@@ -1,4 +1,5 @@
 import logging
+import threading
 from datetime import date, datetime
 
 from app import workers
@@ -204,6 +205,23 @@ def test_executar_ciclo_registra_erro_e_sucesso_no_status(monkeypatch):
     assert w.status["ultima_leitura_ok"] == "2026-10-27T10:00:00-03:00"
     assert w.status["ultimo_erro"] == {"em": "2026-10-27T10:00:00-03:00", "mensagem": "RuntimeError: consulta a users falhou"}
     assert any(tabela == "metricas_sellers" for tabela, _, _ in banco.upserts)
+
+
+def test_rodar_repete_ate_o_evento_de_parada(monkeypatch):
+    parar = threading.Event()
+    w = workers.Worker(SELLERS, "ID_SELLERS", lambda _id: [])
+    chamadas = {"n": 0}
+
+    def executar_ciclo():
+        chamadas["n"] += 1
+        if chamadas["n"] == 3:
+            parar.set()
+
+    monkeypatch.setattr(w, "executar_ciclo", executar_ciclo)
+
+    w.rodar(parar, 0)
+
+    assert chamadas["n"] == 3
 
 
 def test_virada_do_mes_recarrega_estado_e_grava_no_mes_novo(monkeypatch):

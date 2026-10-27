@@ -169,3 +169,9 @@ class Worker:
             logger.warning("Worker %s: ciclo falhou", self.planilha.nome, exc_info=True)
             return
         self.status["ultima_leitura_ok"] = self.agora().isoformat()
+
+    def rodar(self, parar: threading.Event, intervalo: float) -> None:
+        while True:
+            self.executar_ciclo()
+            if parar.wait(intervalo):
+                return
