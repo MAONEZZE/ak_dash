@@ -102,3 +102,26 @@ def test_dia_apagado_na_planilha_vira_null(monkeypatch):
     w.ciclo()
 
     assert len(banco.upserts) == 1
+
+
+def test_estado_inicial_vem_do_banco(monkeypatch):
+    banco = _Banco({
+        "users": [{"id": 12, "nome": "Isaque"}],
+        "user_cargos": [{"id_user": 12}],
+        "metricas_sellers": [
+            {"id_user": 12, "data": "2026-10-05", "key_data_ref_user": "05/10/2026-isaque", "fups": 10, "numeros_captados": 2, "indicacoes": None},
+            {"id_user": 12, "data": "2026-10-07", "key_data_ref_user": "07/10/2026-isaque", "fups": 8, "numeros_captados": None, "indicacoes": None},
+        ],
+        "metas": [{"id_user": 12, "metrica": "fups", "valor_diario": 50}],
+    })
+    _instalar(monkeypatch, banco)
+    w, _ = _worker([("Isaque", [CABECALHO, ["Meta diária", 50], [5, 10, 2]])])
+
+    w.ciclo()
+
+    assert ("metricas_sellers", {"and": "(data.gte.2026-10-01,data.lte.2026-10-31)"}, "id_user,data,key_data_ref_user,fups,numeros_captados,indicacoes") in banco.consultas
+    assert ("metas", {"cargo": "eq.seller"}, "id_user,metrica,valor_diario") in banco.consultas
+    assert len(banco.upserts) == 1
+    assert _sem_carimbo(banco.upserts[0][1]) == [
+        {"id_user": 12, "data": "2026-10-07", "key_data_ref_user": "07/10/2026-isaque", "fups": None, "numeros_captados": None, "indicacoes": None},
+    ]
