@@ -81,3 +81,24 @@ def test_ciclo_sem_mudanca_nao_grava(monkeypatch):
     assert banco.upserts == []
     assert banco.apagados == []
     assert invalidacoes == []
+
+
+def test_dia_apagado_na_planilha_vira_null(monkeypatch):
+    banco = _Banco({"users": [{"id": 12, "nome": "Isaque"}], "user_cargos": [{"id_user": 12}]})
+    _instalar(monkeypatch, banco)
+    w, fonte = _worker([("Isaque", [CABECALHO, ["Meta diária", 50], [5, 10, 2], [6, 4]])])
+    w.ciclo()
+    banco.upserts.clear()
+    fonte["abas"] = [("Isaque", [CABECALHO, ["Meta diária", 50], [5], [6, 4]])]
+
+    w.ciclo()
+
+    assert len(banco.upserts) == 1
+    assert banco.upserts[0][0] == "metricas_sellers"
+    assert _sem_carimbo(banco.upserts[0][1]) == [
+        {"id_user": 12, "data": "2026-10-05", "key_data_ref_user": "05/10/2026-isaque", "fups": None, "numeros_captados": None, "indicacoes": None},
+    ]
+
+    w.ciclo()
+
+    assert len(banco.upserts) == 1

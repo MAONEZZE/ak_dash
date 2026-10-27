@@ -103,6 +103,9 @@ class Worker:
                     "key_data_ref_user": l["key_data_ref_user"],
                     **{c: l.get(c) for c in colunas},
                 }
+            for chave, linha in self.metricas.items():
+                if linha["id_user"] == u["id"] and chave not in desejadas:
+                    desejadas[chave] = {**linha, **{c: None for c in colunas}}
             for chave, linha in desejadas.items():
                 if self.metricas.get(chave) != linha:
                     metricas_novas[chave] = linha
