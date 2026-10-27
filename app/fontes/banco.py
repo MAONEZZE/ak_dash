@@ -129,6 +129,15 @@ def query(
         return []
 
 
+def _headers_escrita(schema: str) -> dict[str, str]:
+    key = settings.supabase_service_key
+    return {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Content-Profile": schema,
+    }
+
+
 def upsert(tabela: str, linhas: list[dict], on_conflict: str, schema: str | None = None) -> None:
     """Escrita usada pelos workers das planilhas. Diferente de `query()`, erro sobe: o worker registra a falha e tenta de novo no próximo ciclo."""
     if not linhas:
@@ -136,17 +145,25 @@ def upsert(tabela: str, linhas: list[dict], on_conflict: str, schema: str | None
     schema = schema or settings.supabase_schema
     if not settings.supabase_url or not settings.supabase_service_key:
         raise RuntimeError("Supabase não configurado")
-    key = settings.supabase_service_key
     resposta = httpx.post(
         f"{settings.supabase_url}/rest/v1/{tabela}",
         params={"on_conflict": on_conflict},
         json=linhas,
-        headers={
-            "apikey": key,
-            "Authorization": f"Bearer {key}",
-            "Content-Profile": schema,
-            "Prefer": "resolution=merge-duplicates,return=minimal",
-        },
+        headers={**_headers_escrita(schema), "Prefer": "resolution=merge-duplicates,return=minimal"},
+        timeout=10.0,
+    )
+    resposta.raise_for_status()
+
+
+def apagar(tabela: str, filtros: dict[str, str], schema: str | None = None) -> None:
+    """Remove as linhas que casam com `filtros`. Erro sobe, igual a `upsert`."""
+    schema = schema or settings.supabase_schema
+    if not settings.supabase_url or not settings.supabase_service_key:
+        raise RuntimeError("Supabase não configurado")
+    resposta = httpx.delete(
+        f"{settings.supabase_url}/rest/v1/{tabela}",
+        params=filtros,
+        headers={**_headers_escrita(schema), "Prefer": "return=minimal"},
         timeout=10.0,
     )
     resposta.raise_for_status()

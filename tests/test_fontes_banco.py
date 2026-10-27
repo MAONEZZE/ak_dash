@@ -132,6 +132,34 @@ def test_upsert_envia_linhas_com_on_conflict_e_merge(monkeypatch):
     assert kwargs["headers"]["Prefer"] == "resolution=merge-duplicates,return=minimal"
 
 
+def test_apagar_envia_delete_com_filtros(monkeypatch):
+    monkeypatch.setattr(
+        banco,
+        "settings",
+        dataclasses.replace(
+            banco.settings,
+            supabase_url="https://exemplo.supabase.co",
+            supabase_service_key="chave",
+            supabase_schema="dash2",
+        ),
+    )
+    chamadas = []
+
+    def _delete(url, **kwargs):
+        chamadas.append((url, kwargs))
+        return httpx.Response(204, request=httpx.Request("DELETE", "https://exemplo.supabase.co"))
+
+    monkeypatch.setattr(banco.httpx, "delete", _delete)
+    banco.apagar("metas", {"id_user": "eq.12", "cargo": "eq.seller", "metrica": "eq.fups"})
+
+    assert len(chamadas) == 1
+    url, kwargs = chamadas[0]
+    assert url == "https://exemplo.supabase.co/rest/v1/metas"
+    assert kwargs["params"] == {"id_user": "eq.12", "cargo": "eq.seller", "metrica": "eq.fups"}
+    assert kwargs["headers"]["Content-Profile"] == "dash2"
+    assert kwargs["headers"]["Prefer"] == "return=minimal"
+
+
 def test_upsert_sem_linhas_nao_faz_chamada(monkeypatch):
     def _post(*a, **k):
         raise AssertionError("não deveria chamar o Supabase")
