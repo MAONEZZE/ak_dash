@@ -167,3 +167,23 @@ def test_aba_sem_usuario_ou_sem_cargo_e_pulada_com_log_unico(monkeypatch, caplog
     mensagens = [r.getMessage() for r in caplog.records]
     assert len([m for m in mensagens if "SDR2" in m]) == 1
     assert len([m for m in mensagens if "Lucas" in m]) == 1
+
+
+def test_virada_do_mes_recarrega_estado_e_grava_no_mes_novo(monkeypatch):
+    banco = _Banco({"users": [{"id": 12, "nome": "Isaque"}], "user_cargos": [{"id_user": 12}]})
+    _instalar(monkeypatch, banco)
+    dias = {"hoje": date(2026, 10, 31)}
+    w = workers.Worker(SELLERS, "ID_SELLERS", lambda _id: [("Isaque", [CABECALHO, ["Meta diária", 50], [1, 9]])], hoje=lambda: dias["hoje"])
+    w.ciclo()
+    banco.upserts.clear()
+    banco.consultas.clear()
+    dias["hoje"] = date(2026, 11, 1)
+
+    w.ciclo()
+
+    assert ("metricas_sellers", {"and": "(data.gte.2026-11-01,data.lte.2026-11-30)"}, "id_user,data,key_data_ref_user,fups,numeros_captados,indicacoes") in banco.consultas
+    metricas_upsert = [u for u in banco.upserts if u[0] == "metricas_sellers"]
+    assert len(metricas_upsert) == 1
+    assert _sem_carimbo(metricas_upsert[0][1]) == [
+        {"id_user": 12, "data": "2026-11-01", "key_data_ref_user": "01/11/2026-isaque", "fups": 9, "numeros_captados": None, "indicacoes": None},
+    ]
