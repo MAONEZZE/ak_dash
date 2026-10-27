@@ -127,3 +127,26 @@ def query(
         _local.tabelas_com_falha = [*getattr(_local, "tabelas_com_falha", []), tabela]
         logger.warning("Consulta Supabase à tabela '%s' falhou — degradando para vazio", tabela, exc_info=True)
         return []
+
+
+def upsert(tabela: str, linhas: list[dict], on_conflict: str, schema: str | None = None) -> None:
+    """Escrita usada pelos workers das planilhas. Diferente de `query()`, erro sobe: o worker registra a falha e tenta de novo no próximo ciclo."""
+    if not linhas:
+        return
+    schema = schema or settings.supabase_schema
+    if not settings.supabase_url or not settings.supabase_service_key:
+        raise RuntimeError("Supabase não configurado")
+    key = settings.supabase_service_key
+    resposta = httpx.post(
+        f"{settings.supabase_url}/rest/v1/{tabela}",
+        params={"on_conflict": on_conflict},
+        json=linhas,
+        headers={
+            "apikey": key,
+            "Authorization": f"Bearer {key}",
+            "Content-Profile": schema,
+            "Prefer": "resolution=merge-duplicates,return=minimal",
+        },
+        timeout=10.0,
+    )
+    resposta.raise_for_status()

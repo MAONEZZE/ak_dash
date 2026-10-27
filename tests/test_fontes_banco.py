@@ -99,3 +99,42 @@ def test_tabela_que_falhou_fica_registrada_pra_virar_aviso(monkeypatch):
 
     banco.iniciar_registro_de_falhas()
     assert banco.tabelas_com_falha() == []
+
+
+def test_upsert_envia_linhas_com_on_conflict_e_merge(monkeypatch):
+    monkeypatch.setattr(
+        banco,
+        "settings",
+        dataclasses.replace(
+            banco.settings,
+            supabase_url="https://exemplo.supabase.co",
+            supabase_service_key="chave",
+            supabase_schema="dash2",
+        ),
+    )
+    chamadas = []
+
+    def _post(url, **kwargs):
+        chamadas.append((url, kwargs))
+        return httpx.Response(201, request=httpx.Request("POST", "https://exemplo.supabase.co"))
+
+    monkeypatch.setattr(banco.httpx, "post", _post)
+    banco.upsert("metricas_sellers", [{"id_user": 1, "fups": 3}], on_conflict="key_data_ref_user")
+
+    assert len(chamadas) == 1
+    url, kwargs = chamadas[0]
+    assert url == "https://exemplo.supabase.co/rest/v1/metricas_sellers"
+    assert kwargs["params"] == {"on_conflict": "key_data_ref_user"}
+    assert kwargs["json"] == [{"id_user": 1, "fups": 3}]
+    assert kwargs["headers"]["apikey"] == "chave"
+    assert kwargs["headers"]["Authorization"] == "Bearer chave"
+    assert kwargs["headers"]["Content-Profile"] == "dash2"
+    assert kwargs["headers"]["Prefer"] == "resolution=merge-duplicates,return=minimal"
+
+
+def test_upsert_sem_linhas_nao_faz_chamada(monkeypatch):
+    def _post(*a, **k):
+        raise AssertionError("não deveria chamar o Supabase")
+
+    monkeypatch.setattr(banco.httpx, "post", _post)
+    banco.upsert("metricas_sellers", [], on_conflict="key_data_ref_user")
