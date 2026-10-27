@@ -1,7 +1,8 @@
 """Cliente mínimo do Supabase via REST (PostgREST) — só leitura, sem ORM.
 
-Tabelas reais vivem no schema `dash` (não `public`) — daí o header
-`Accept-Profile`, que o PostgREST exige pra selecionar schema fora do padrão.
+Tabelas reais vivem no schema `dash2` (configurável por `SUPABASE_SCHEMA`; `dash` é o
+antigo), não `public` — daí o header `Accept-Profile`, que o PostgREST exige pra
+selecionar schema fora do padrão.
 
 Sem credencial configurada, ou se a consulta falhar (tabela ainda não
 existe, coluna ainda não existe, rede fora, RLS bloqueando), devolve lista
@@ -74,7 +75,7 @@ def _get(url: str, params: dict[str, str], headers: dict[str, str]) -> httpx.Res
 def query(
     tabela: str,
     filtros: dict[str, str] | None = None,
-    schema: str = "dash",
+    schema: str | None = None,
     colunas: str = "*",
     *,
     url_base: str | None = None,
@@ -90,6 +91,7 @@ def query(
     `url_base`/`service_key` permitem apontar pra um segundo projeto Supabase
     (ver `settings.supabase_inscricoes_*`); por padrão usa o projeto principal.
     """
+    schema = schema or settings.supabase_schema
     url_base = url_base if url_base is not None else settings.supabase_url
     service_key = service_key if service_key is not None else settings.supabase_service_key
     if not url_base or not service_key:

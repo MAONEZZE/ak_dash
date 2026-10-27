@@ -1,3 +1,5 @@
+import dataclasses
+
 import httpx
 import pytest
 
@@ -67,6 +69,22 @@ def test_resultado_de_consulta_bem_sucedida_fica_no_cache(monkeypatch):
     cache.obter_ou_calcular("metas", 60, lambda: _query("metricas_metas"))
     cache.obter_ou_calcular("metas", 60, lambda: _query("metricas_metas"))
     assert len(chamadas) == 1
+
+
+def test_schema_padrao_vem_de_settings(monkeypatch):
+    monkeypatch.setattr(banco, "settings", dataclasses.replace(banco.settings, supabase_schema="dash_teste"))
+    headers_recebidos = []
+
+    def _get(*a, **k):
+        headers_recebidos.append(k["headers"])
+        return _resposta([])
+
+    monkeypatch.setattr(banco.httpx, "get", _get)
+    _query("users")
+    assert headers_recebidos[-1]["Accept-Profile"] == "dash_teste"
+
+    banco.query("events", schema="SED", url_base="https://exemplo.supabase.co", service_key="chave")
+    assert headers_recebidos[-1]["Accept-Profile"] == "SED"
 
 
 def test_tabela_que_falhou_fica_registrada_pra_virar_aviso(monkeypatch):

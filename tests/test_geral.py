@@ -9,8 +9,8 @@ from app.dominios.pessoas.banco import Pessoa
 from app.metas import Metas
 from app.periodo import Periodo
 
-# Metas são de PESSOA (dash.user_metas), não de cargo: a chave de `Metas` é
-# (id_user, métrica) e o valor é a meta diária atual. Os ids abaixo são os das pessoas dos cenários —
+# Metas são de PESSOA e de CARGO (dash2.metas): a chave de `Metas` é
+# (id_user, cargo, métrica) e o valor é a meta diária atual. Os ids abaixo são os das pessoas dos cenários —
 # NATHAN e JONATHAN são SDRs, JACOB é closer, como no ambiente real.
 NATHAN, JONATHAN, JACOB = 9, 2, 1
 
@@ -50,13 +50,13 @@ def test_sem_metas_cadastradas_cards_claros_mostram_realizado_e_meta_none():
     sdr = [Pessoa(id="9", nome="Nathan", cargo="sdr", email="n@x.com")]
     resposta = _montar(
         pessoas_sdr=sdr, pessoas_closer=[],
-        totais_sdr=_totais({(9, "numeros_captados"): 312}), totais_closer=_totais({}),
+        totais_sdr=_totais({(9, "ligacoes_realizadas"): 312}), totais_closer=_totais({}),
         metas=Metas({}), faturamento=_faturamento_vazio(), eventos=[],
     )
-    card_numero = next(c for c in resposta["cards"] if c["metrica"] == "oportunidade")
-    assert card_numero["realizado"] == 312
-    assert card_numero["meta"] is None
-    assert card_numero["pct"] is None
+    card_ligacoes = next(c for c in resposta["cards"] if c["metrica"] == "ligacoes_realizadas")
+    assert card_ligacoes["realizado"] == 312
+    assert card_ligacoes["meta"] is None
+    assert card_ligacoes["pct"] is None
     assert "metas_nao_cadastradas" in resposta["avisos"]
 
 
@@ -86,7 +86,7 @@ def test_cards_escuros_nunca_tem_meta_mesmo_com_metas_do_time_cadastradas():
     # composição que somava meta de closer pro Liquidado foi removida, então
     # nem cadastrando meta pra todo o time ela deve reaparecer no card.
     closer = [Pessoa(id="1", nome="Jacob", cargo="closer", email="ja@x.com")]
-    metas = Metas({(JACOB, "liquidado"): 1000})
+    metas = Metas({(JACOB, "closer", "liquidado"): 1000})
     faturamento = Faturamento(empresa={"faturamento": 500000.0, "liquidado": 90000.0, "inscritos": None, "aprovados": None}, por_pessoa={})
     resposta = _montar(
         pessoas_sdr=[], pessoas_closer=closer,
@@ -105,15 +105,15 @@ def test_cards_escuros_nunca_tem_meta_mesmo_com_metas_do_time_cadastradas():
 
 
 def test_pontuacao_e_realizado_vezes_peso_mesmo_sem_meta():
-    # Pontuação = realizado × peso do cargo, com ou sem meta (312 captados × 7).
+    # Pontuação = realizado × peso do cargo, com ou sem meta (312 ligações × 10).
     sdr = [Pessoa(id="9", nome="Nathan", cargo="sdr", email="n@x.com")]
-    metas = Metas({(NATHAN, "numeros_captados"): 400})
+    metas = Metas({(NATHAN, "sdr", "ligacoes_realizadas"): 400})
     resposta = _montar(
         pessoas_sdr=sdr, pessoas_closer=[],
-        totais_sdr=_totais({(9, "numeros_captados"): 312}), totais_closer=_totais({}),
+        totais_sdr=_totais({(9, "ligacoes_realizadas"): 312}), totais_closer=_totais({}),
         metas=metas, faturamento=_faturamento_vazio(), eventos=[],
     )
-    assert resposta["pessoas"][0]["pontuacao"] == 312 * 7
+    assert resposta["pessoas"][0]["pontuacao"] == 312 * 10
     assert resposta["pessoas"][0]["posicao"] is not None
 
 
@@ -122,17 +122,17 @@ def test_cada_pessoa_da_tabela_e_cobrada_pela_meta_dela():
     a = Pessoa(id="9", nome="Nathan", cargo="sdr", email="n@x.com")
     b = Pessoa(id="2", nome="Jonathan", cargo="sdr", email="j@x.com")
     metas = Metas({  # diárias × 22 dias úteis de set/2026
-        (NATHAN, "numeros_captados"): 20,
-        (JONATHAN, "numeros_captados"): 30,
+        (NATHAN, "sdr", "ligacoes_realizadas"): 20,
+        (JONATHAN, "sdr", "ligacoes_realizadas"): 30,
     })
     resposta = _montar(
         pessoas_sdr=[a, b], pessoas_closer=[],
-        totais_sdr=_totais({(9, "numeros_captados"): 500, (2, "numeros_captados"): 100}), totais_closer=_totais({}),
+        totais_sdr=_totais({(9, "ligacoes_realizadas"): 500, (2, "ligacoes_realizadas"): 100}), totais_closer=_totais({}),
         metas=metas, faturamento=_faturamento_vazio(), eventos=[],
     )
     por_id = {p["id_user"]: p for p in resposta["pessoas"]}
-    meta_nathan = next(m for m in por_id[9]["metricas"] if m["metrica"] == "numeros_captados")
-    meta_jonathan = next(m for m in por_id[2]["metricas"] if m["metrica"] == "numeros_captados")
+    meta_nathan = next(m for m in por_id[9]["metricas"] if m["metrica"] == "ligacoes_realizadas")
+    meta_jonathan = next(m for m in por_id[2]["metricas"] if m["metrica"] == "ligacoes_realizadas")
     assert meta_nathan["meta"] == 440
     assert meta_jonathan["meta"] == 660
 
@@ -143,14 +143,14 @@ def test_pessoa_sem_meta_propria_fica_com_meta_none_sem_erro():
         Pessoa(id="9", nome="Nathan", cargo="sdr", email="n@x.com"),
         Pessoa(id="2", nome="Jonathan", cargo="sdr", email="j@x.com"),
     ]
-    metas = Metas({(NATHAN, "numeros_captados"): 400})
+    metas = Metas({(NATHAN, "sdr", "ligacoes_realizadas"): 400})
     resposta = _montar(
         pessoas_sdr=sdr, pessoas_closer=[],
-        totais_sdr=_totais({(9, "numeros_captados"): 312, (2, "numeros_captados"): 10}), totais_closer=_totais({}),
+        totais_sdr=_totais({(9, "ligacoes_realizadas"): 312, (2, "ligacoes_realizadas"): 10}), totais_closer=_totais({}),
         metas=metas, faturamento=_faturamento_vazio(), eventos=[],
     )
     por_id = {p["id_user"]: p for p in resposta["pessoas"]}
-    metrica = next(m for m in por_id[2]["metricas"] if m["metrica"] == "numeros_captados")
+    metrica = next(m for m in por_id[2]["metricas"] if m["metrica"] == "ligacoes_realizadas")
     assert metrica["meta"] is None
 
 
@@ -205,13 +205,13 @@ def test_meta_usa_o_mes_inteiro_mesmo_com_periodo_de_saida_capado():
     # ainda não terminou — usa periodo_metas (mês inteiro), não periodo_saida.
     # Card da empresa = soma das metas do time: um SDR só, 20/dia × 22.
     sdr = [Pessoa(id="9", nome="Nathan", cargo="sdr", email="n@x.com")]
-    metas = Metas({(NATHAN, "numeros_captados"): 20})
+    metas = Metas({(NATHAN, "sdr", "ligacoes_realizadas"): 20})
     resposta = _montar(
         pessoas_sdr=sdr, pessoas_closer=[],
-        totais_sdr=_totais({(9, "numeros_captados"): 312}), totais_closer=_totais({}),
+        totais_sdr=_totais({(9, "ligacoes_realizadas"): 312}), totais_closer=_totais({}),
         metas=metas, faturamento=_faturamento_vazio(), eventos=[],
     )
-    card = next(c for c in resposta["cards"] if c["metrica"] == "oportunidade")
+    card = next(c for c in resposta["cards"] if c["metrica"] == "ligacoes_realizadas")
     assert card["meta"] == 440
 
 
@@ -289,8 +289,8 @@ def test_closer_pontua_sem_liquidado_cadastrado():
     closer = [Pessoa(id="1", nome="Jacob", cargo="closer", email="ja@x.com")]
     # Diárias: 4 reuniões realizadas/dia (88 no mês) e 15 indicações/dia (330).
     metas = Metas({
-        (JACOB, "reunioes_realizadas"): 4,
-        (JACOB, "indicacoes"): 15,
+        (JACOB, "closer", "reunioes_realizadas"): 4,
+        (JACOB, "closer", "indicacoes"): 15,
     })
     resposta = _montar(
         pessoas_sdr=[], pessoas_closer=closer,
@@ -357,9 +357,9 @@ def test_meta_do_card_da_empresa_e_a_soma_das_metas_do_time():
     ]
     closer = [Pessoa(id="1", nome="Jacob", cargo="closer", email="ja@x.com")]
     metas = Metas({
-        (NATHAN, "reunioes_agendadas"): 4,
-        (JONATHAN, "reunioes_agendadas"): 6,
-        (JACOB, "reunioes_agendadas"): 4,
+        (NATHAN, "sdr", "reunioes_agendadas"): 4,
+        (JONATHAN, "sdr", "reunioes_agendadas"): 6,
+        (JACOB, "closer", "reunioes_agendadas"): 4,
     })
     resposta = _montar(
         pessoas_sdr=sdr, pessoas_closer=closer,
@@ -375,7 +375,7 @@ def test_card_com_meta_so_de_parte_do_time_usa_a_meta_de_quem_tem():
     # (decisão do usuário, 2026-10-05 — antes o card ficava sem meta).
     sdr = [Pessoa(id="9", nome="Nathan", cargo="sdr", email="n@x.com")]
     closer = [Pessoa(id="1", nome="Jacob", cargo="closer", email="ja@x.com")]
-    metas = Metas({(JACOB, "reunioes_agendadas"): 4})
+    metas = Metas({(JACOB, "closer", "reunioes_agendadas"): 4})
     resposta = _montar(
         pessoas_sdr=sdr, pessoas_closer=closer,
         totais_sdr=_totais({}), totais_closer=_totais({}),
@@ -389,8 +389,8 @@ def test_oportunidade_junta_indicacoes_do_sdr_e_do_closer():
     sdr = [Pessoa(id="9", nome="Nathan", cargo="sdr", email="n@x.com")]
     closer = [Pessoa(id="1", nome="Jacob", cargo="closer", email="ja@x.com")]
     metas = Metas({
-        (NATHAN, "indicacoes"): 4,
-        (JACOB, "indicacoes"): 10,
+        (NATHAN, "sdr", "indicacoes"): 4,
+        (JACOB, "closer", "indicacoes"): 10,
     })
     resposta = _montar(
         pessoas_sdr=sdr, pessoas_closer=closer,
@@ -494,7 +494,7 @@ def test_card_de_dois_cargos_usa_a_meta_de_quem_tem_mesmo_com_um_cargo_sem_meta(
         pessoas_sdr=sdr, pessoas_closer=closer,
         totais_sdr=_totais({(9, "inscricoes_realizadas"): 2}),
         totais_closer=_totais({(1, "inscricoes_realizadas"): 5}),
-        metas=Metas({(9, "inscricoes_realizadas"): 4}),
+        metas=Metas({(9, "sdr", "inscricoes_realizadas"): 4}),
         faturamento=_faturamento_vazio(), eventos=[],
     )
     card = next(c for c in resposta["cards"] if c["metrica"] == "inscricoes_realizadas")
@@ -511,7 +511,7 @@ def test_colunas_do_sdr_na_tabela():
     )
     metricas = {m["metrica"]: m["realizado"] for m in resposta["pessoas"][0]["metricas"]}
     assert list(metricas) == [
-        "numeros_captados", "ligacoes_realizadas", "reunioes_agendadas", "indicacoes", "inscricoes_realizadas",
+        "ligacoes_realizadas", "reunioes_agendadas", "indicacoes", "inscricoes_realizadas",
     ]
     assert metricas["ligacoes_realizadas"] == 12
     assert metricas["inscricoes_realizadas"] == 3
@@ -528,23 +528,24 @@ def test_closer_mostra_inscricoes_realizadas_na_tabela():
     assert metrica["realizado"] == 4
 
 
-def test_oportunidade_soma_indicacoes_inscricoes_e_numeros_captados():
+def test_oportunidade_soma_indicacoes_e_inscricoes_do_sdr_e_do_closer():
+    # Ligações do SDR (4 realizadas, meta 1/dia) ficam de fora do card.
     sdr = [Pessoa(id="9", nome="Nathan", cargo="sdr", email="n@x.com")]
     closer = [Pessoa(id="1", nome="Jacob", cargo="closer", email="ja@x.com")]
     metas = Metas({
-        (NATHAN, "numeros_captados"): 1,
-        (NATHAN, "indicacoes"): 2,
-        (JACOB, "inscricoes_realizadas"): 3,
+        (NATHAN, "sdr", "ligacoes_realizadas"): 1,
+        (NATHAN, "sdr", "indicacoes"): 2,
+        (JACOB, "closer", "inscricoes_realizadas"): 3,
     })
     resposta = _montar(
         pessoas_sdr=sdr, pessoas_closer=closer,
-        totais_sdr=_totais({(9, "numeros_captados"): 4, (9, "indicacoes"): 1, (9, "inscricoes_realizadas"): 2}),
+        totais_sdr=_totais({(9, "ligacoes_realizadas"): 4, (9, "indicacoes"): 1, (9, "inscricoes_realizadas"): 2}),
         totais_closer=_totais({(1, "indicacoes"): 3, (1, "inscricoes_realizadas"): 5, (1, "reunioes_agendadas"): 99}),
         metas=metas, faturamento=_faturamento_vazio(), eventos=[],
     )
     card = next(c for c in resposta["cards"] if c["metrica"] == "oportunidade")
-    assert card["realizado"] == 4 + 1 + 2 + 3 + 5
-    assert card["meta"] == (1 + 2 + 3) * 22
+    assert card["realizado"] == 1 + 2 + 3 + 5
+    assert card["meta"] == (2 + 3) * 22
 
 
 def test_card_ligacoes_realizadas_soma_sdr_e_closer():
@@ -574,3 +575,16 @@ def test_termometro_sem_venda_no_mes_fica_em_zero():
     from app.dominios.geral.calculo import montar_termometro
 
     assert montar_termometro(_faturamento_vazio())["realizado"] == 0
+
+
+def test_oportunidade_nao_soma_numeros_captados_do_sdr():
+    sdr = [Pessoa(id="4", nome="Jennifer", cargo="sdr", email="j@x.com")]
+    resposta = _montar(
+        pessoas_sdr=sdr, pessoas_closer=[],
+        totais_sdr=_totais({(4, "numeros_captados"): 100, (4, "indicacoes"): 2}), totais_closer=_totais({}),
+        metas=Metas({}), faturamento=_faturamento_vazio(), eventos=[],
+    )
+    card = next(c for c in resposta["cards"] if c["metrica"] == "oportunidade")
+    assert card["realizado"] == 2
+    metricas = [m["metrica"] for m in resposta["pessoas"][0]["metricas"]]
+    assert metricas == ["ligacoes_realizadas", "reunioes_agendadas", "indicacoes", "inscricoes_realizadas"]

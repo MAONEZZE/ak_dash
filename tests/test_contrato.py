@@ -59,3 +59,11 @@ def test_schema_respostafinanceiro_tem_os_campos_que_o_bff_produz():
     spec = _carregar_openapi()
     campos = set(spec["components"]["schemas"]["RespostaFinanceiro"]["required"])
     assert campos == {"periodo", "cards", "vendas"}
+
+
+def test_pessoa_aceita_quatro_cargos_e_email_opcional():
+    spec = _carregar_openapi()
+    pessoa = spec["components"]["schemas"]["Pessoa"]
+    assert set(pessoa["properties"]["cargo"]["enum"]) == {"seller", "sdr", "closer", "dripify"}
+    assert "email" not in pessoa["required"]
+    assert pessoa["properties"]["email"]["nullable"] is True

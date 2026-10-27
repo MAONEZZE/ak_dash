@@ -1,16 +1,12 @@
-"""Leitura de `dash.users`: id, nome, cargo, email, active, role.
+"""Leitura de `dash2.users` + `dash2.user_cargos`: uma linha por (pessoa, cargo).
 
-O cargo saiu de `users` (era uma coluna de texto) e virou `users.id_cargo`,
-FK pra `dash.metricas_cargo`. Aqui ele é resolvido de volta pro nome ('sdr',
-'closer', 'empresa'), que é o que o resto do BFF e o contrato da API usam.
-Pessoa com `id_cargo` nulo ou apontando pra cargo inexistente fica com cargo
-`""` — some dos filtros por cargo em vez de ser chutada pra um deles.
+Pessoa com vários cargos vira várias `Pessoa`, uma por cargo. Pessoa sem
+nenhum cargo não gera linha.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.cargos import buscar_cargos
 from app.fontes.banco import query
 
 
@@ -19,21 +15,26 @@ class Pessoa:
     id: str
     nome: str
     cargo: str
-    email: str
+    email: str | None
     imagem_url: str | None = None
 
 
 def listar_ativas() -> list[Pessoa]:
-    cargo_por_id = {id_cargo: cargo for cargo, id_cargo in buscar_cargos().items()}
-    linhas = query("users", {"active": "eq.true"})
+    usuarios = query("users", {"active": "eq.true"})
+    vinculos = query("user_cargos", colunas="id_user,cargo")
+    cargos_por_user: dict[int, list[str]] = {}
+    for v in vinculos:
+        cargos_por_user.setdefault(v["id_user"], []).append(v["cargo"])
+    for cargos in cargos_por_user.values():
+        cargos.sort()
     return [
         Pessoa(
             id=str(r["id"]),
             nome=r.get("nome") or "",
-            cargo=cargo_por_id.get(r.get("id_cargo"), ""),
-            email=r["email"],
+            cargo=cargo,
+            email=r.get("email") or None,
             imagem_url=r.get("imagem_url"),
         )
-        for r in linhas
-        if r.get("email")
+        for r in usuarios
+        for cargo in cargos_por_user.get(r["id"], [])
     ]

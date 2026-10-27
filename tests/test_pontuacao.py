@@ -7,12 +7,11 @@ def test_pontuacao_sdr_soma_realizado_vezes_peso():
     realizado = {
         "inscricoes_realizadas": 1,  # 15
         "ligacoes_realizadas": 2,  # 20
-        "numeros_captados": 1,  # 7
         "reunioes_agendadas": 3,  # 21
         "indicacoes": 1,  # 5
         "fups": 50,  # não pontua
     }
-    assert calcular_pontuacao("sdr", realizado) == 68
+    assert calcular_pontuacao("sdr", realizado) == 61
 
 
 def test_pontuacao_closer_soma_realizado_vezes_peso():
@@ -29,6 +28,10 @@ def test_pontuacao_closer_soma_realizado_vezes_peso():
 
 def test_sdr_nao_pontua_ligacao_agendada():
     assert calcular_pontuacao("sdr", {"ligacoes_agendadas": 10}) == 0
+
+
+def test_sdr_nao_pontua_numeros_captados_nem_ligacoes_efetuadas():
+    assert calcular_pontuacao("sdr", {"numeros_captados": 10, "ligacoes_efetuadas": 10}) == 0
 
 
 def test_metrica_sem_valor_conta_zero():

@@ -7,6 +7,9 @@ está sem meta cadastrada. Métrica fora da tabela de pesos não pontua.
 `ligacoes_agendadas` vale 3 no closer e não entra no SDR: a coluna saiu de
 `dash.metricas_sdrs` em 02/10/2026, então não há o que somar.
 
+`numeros_captados` não pontua no SDR porque o SDR não capta mais. `ligacoes_efetuadas`
+também não pontua; a decisão fica adiada até o redesenho do frontend.
+
 Ranking: dense rank (1-based) de pontuação decrescente, só entre quem tem
 pontuação. Empate = mesma posição, sem pular número.
 """
@@ -18,7 +21,6 @@ PESOS: dict[str, dict[str, int]] = {
     "sdr": {
         "inscricoes_realizadas": 15,
         "ligacoes_realizadas": 10,
-        "numeros_captados": 7,
         "reunioes_agendadas": 7,
         "indicacoes": 5,
     },
