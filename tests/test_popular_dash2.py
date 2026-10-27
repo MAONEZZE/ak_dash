@@ -72,3 +72,38 @@ def test_resolver_usuario_ignora_acento_e_caixa():
 
     assert popular_dash2.resolver_usuario("LETICIA", usuarios) == {"id": 6, "nome": "Letícia"}
     assert popular_dash2.resolver_usuario("Juca", usuarios) is None
+
+
+class _Cursor:
+    def __init__(self):
+        self.executados: list[str] = []
+
+    def execute(self, query, params=None):
+        self.executados.append(str(query))
+        return self
+
+    def fetchall(self):
+        return [{"id": 11, "nome": "Juca"}]
+
+    def fetchone(self):
+        return None
+
+
+class _Conn:
+    def __init__(self, cur):
+        self._cur = cur
+
+    def cursor(self, row_factory=None):
+        return self._cur
+
+
+def test_gravar_pula_aba_de_pessoa_nao_cadastrada():
+    cur = _Cursor()
+    abas = [popular_dash2.Aba(pessoa="SDR2", metas={"ligacoes_efetuadas": 0}, dias={1: {"ligacoes_efetuadas": 5}})]
+
+    totais = popular_dash2.gravar(_Conn(cur), "metricas_sdrs", "sdr", abas, 2026, 10)
+
+    assert totais["puladas"] == ["SDR2"]
+    assert totais["linhas"] == 0
+    assert totais["metas"] == 0
+    assert not any("insert" in q.lower() for q in cur.executados)

@@ -137,17 +137,19 @@ def ler_planilha(caminho: Path) -> list[Aba]:
     return [a for ws in wb.worksheets if (a := ler_aba(ws)) is not None]
 
 
-def gravar(conn, tabela: str, cargo: str, abas: list[Aba], ano: int, mes: int) -> dict[str, int]:
+def gravar(conn, tabela: str, cargo: str, abas: list[Aba], ano: int, mes: int) -> dict:
     colunas_tabela = COLUNAS_POR_TABELA[tabela]
     totais: dict[str, int] = {}
     n_linhas = 0
     n_metas = 0
+    puladas: list[str] = []
     cur = conn.cursor(row_factory=dict_row)
     for aba in abas:
         usuarios = cur.execute("select id, nome from dash2.users").fetchall()
         u = resolver_usuario(aba.pessoa, usuarios)
         if u is None:
-            u = cur.execute("insert into dash2.users (nome) values (%s) returning id, nome", (aba.pessoa,)).fetchone()
+            puladas.append(aba.pessoa)
+            continue
         cur.execute(
             "insert into dash2.user_cargos (id_user, cargo) values (%s, %s) on conflict do nothing",
             (u["id"], cargo),
@@ -185,7 +187,7 @@ def gravar(conn, tabela: str, cargo: str, abas: list[Aba], ano: int, mes: int) -
                     totais.setdefault(c, 0)
                     if linha[c] is not None:
                         totais[c] += linha[c]
-    return {**totais, "linhas": n_linhas, "metas": n_metas}
+    return {**totais, "linhas": n_linhas, "metas": n_metas, "puladas": puladas}
 
 
 def main(argv: list[str]) -> int:
@@ -211,9 +213,11 @@ def main(argv: list[str]) -> int:
             abas = ler_planilha(pasta / nome)
             totais = gravar(conn, tabela, cargo, abas, ano, mes)
             for coluna, soma in totais.items():
-                if coluna not in ("linhas", "metas"):
+                if coluna not in ("linhas", "metas", "puladas"):
                     resultados.append(f"{cargo}.{coluna}={soma}")
-            resultados.append(f"{cargo}: {len(abas)} abas, {totais['linhas']} linhas, {totais['metas']} metas")
+            for nome_pulada in totais["puladas"]:
+                resultados.append(f"{cargo}: aba pulada (sem usuário cadastrado): {nome_pulada}")
+            resultados.append(f"{cargo}: {len(abas) - len(totais['puladas'])} abas, {totais['linhas']} linhas, {totais['metas']} metas")
     print("\n".join(resultados))
     return 0
 
