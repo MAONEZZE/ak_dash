@@ -1,16 +1,19 @@
 import httpx
+import google.auth.transport.requests
 
 from app.fontes import google_sheets
 
 
 class _Credenciais:
-    def __init__(self):
-        self.valid = True
-        self.token = "tok"
+    def __init__(self, valid=True, token="tok"):
+        self.valid = valid
+        self.token = token
         self.refresh_chamadas = []
 
     def refresh(self, request):
         self.refresh_chamadas.append(request)
+        self.valid = True
+        self.token = "novo"
 
 
 def test_abas_le_todas_as_abas_e_converte_celulas(monkeypatch):
@@ -63,3 +66,22 @@ def test_abas_le_todas_as_abas_e_converte_celulas(monkeypatch):
     }
     assert kwargs["headers"] == {"Authorization": "Bearer tok"}
     assert credenciais.refresh_chamadas == []
+
+
+def test_abas_renova_token_expirado_antes_da_chamada(monkeypatch):
+    chamadas = []
+
+    def _get(url, **kwargs):
+        chamadas.append((url, kwargs))
+        return httpx.Response(200, request=httpx.Request("GET", "https://sheets.googleapis.com"), json={"sheets": []})
+
+    monkeypatch.setattr(google_sheets.httpx, "get", _get)
+    credenciais = _Credenciais(valid=False, token="velho")
+
+    resultado = google_sheets.LeitorSheets(credenciais).abas("ID123")
+
+    assert len(credenciais.refresh_chamadas) == 1
+    assert isinstance(credenciais.refresh_chamadas[0], google.auth.transport.requests.Request)
+    assert len(chamadas) == 1
+    assert chamadas[0][1]["headers"] == {"Authorization": "Bearer novo"}
+    assert resultado == []
