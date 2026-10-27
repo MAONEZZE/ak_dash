@@ -6,6 +6,7 @@ rotas do FastAPI. Toda I/O de banco é substituída por `query()` monkeypatched.
 """
 from __future__ import annotations
 
+import threading
 from datetime import date
 
 from fastapi.testclient import TestClient
@@ -64,6 +65,17 @@ def test_saude_mostra_status_dos_workers(monkeypatch):
         "status": "ok",
         "workers": {"sellers": {"ultima_leitura_ok": "2026-10-27T10:00:00-03:00", "ultimo_erro": None}},
     }
+
+
+def test_lifespan_inicia_e_para_os_workers(monkeypatch):
+    eventos: list[threading.Event] = []
+    monkeypatch.setattr(workers, "iniciar", lambda config: eventos.append(threading.Event()) or eventos[-1])
+
+    with TestClient(app) as client:
+        client.get("/saude")
+
+    assert len(eventos) == 1
+    assert eventos[0].is_set() is True
 
 
 def test_pessoas_200(monkeypatch):
