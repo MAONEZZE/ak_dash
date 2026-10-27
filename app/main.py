@@ -4,6 +4,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app import workers
 from app.config import settings
 from app.dominios.comercial.rotas import router as comercial_router
 from app.dominios.financeiro.rotas import router as financeiro_router
@@ -37,4 +38,4 @@ app.include_router(financeiro_router)
 
 @app.get("/saude", tags=["infra"])
 def saude() -> dict:
-    return {"status": "ok"}
+    return {"status": "ok", "workers": {w.planilha.nome: w.status for w in workers.ATIVOS}}

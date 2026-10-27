@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from app import cache
 from app import metas as metas_mod
+from app import workers
 from app.auth import exigir_usuario
 from app.dominios.comercial import banco as comercial_banco_mod
 from app.dominios.financeiro import banco as financeiro_banco_mod
@@ -51,6 +52,18 @@ def _client(monkeypatch) -> TestClient:
 
 def test_saude():
     assert TestClient(app).get("/saude").status_code == 200
+
+
+def test_saude_mostra_status_dos_workers(monkeypatch):
+    w = workers.Worker(workers.PLANILHAS[0], "ID", lambda _id: [])
+    w.status = {"ultima_leitura_ok": "2026-10-27T10:00:00-03:00", "ultimo_erro": None}
+    monkeypatch.setattr(workers, "ATIVOS", [w])
+    resposta = TestClient(app).get("/saude")
+    assert resposta.status_code == 200
+    assert resposta.json() == {
+        "status": "ok",
+        "workers": {"sellers": {"ultima_leitura_ok": "2026-10-27T10:00:00-03:00", "ultimo_erro": None}},
+    }
 
 
 def test_pessoas_200(monkeypatch):
