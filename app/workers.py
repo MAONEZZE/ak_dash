@@ -9,7 +9,9 @@ from datetime import date, datetime
 from typing import Callable
 
 from app import cache
+from app.config import Settings
 from app.fontes import banco
+from app.fontes.google_sheets import LeitorSheets, criar_credenciais
 from app.periodo import TZ_SP, hoje_sp
 from app.planilhas import COLUNAS_POR_TABELA, ler_linhas, linhas_metricas, resolver_usuario
 
@@ -175,3 +177,27 @@ class Worker:
             self.executar_ciclo()
             if parar.wait(intervalo):
                 return
+
+
+ATIVOS: list[Worker] = []
+
+
+def iniciar(config: Settings) -> threading.Event:
+    parar = threading.Event()
+    ATIVOS.clear()
+    if not (config.workers_ativos and config.google_service_account_json and config.supabase_url and config.supabase_service_key):
+        return parar
+    ids = {
+        "sellers": config.planilha_sellers_id,
+        "sdrs": config.planilha_sdrs_id,
+        "closers": config.planilha_closers_id,
+        "dripify": config.planilha_dripify_id,
+    }
+    for p in PLANILHAS:
+        if not ids[p.nome]:
+            continue
+        w = Worker(p, ids[p.nome], LeitorSheets(criar_credenciais(config.google_service_account_json)).abas)
+        ATIVOS.append(w)
+        threading.Thread(target=w.rodar, args=(parar, config.worker_intervalo_segundos), name=f"worker-{p.nome}", daemon=True).start()
+    logger.info("Workers das planilhas ativos: %s", [w.planilha.nome for w in ATIVOS])
+    return parar

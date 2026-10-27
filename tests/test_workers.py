@@ -1,9 +1,19 @@
+import dataclasses
 import logging
 import threading
 from datetime import date, datetime
 
+import pytest
+
+from app import config
 from app import workers
 from app.periodo import TZ_SP
+
+
+@pytest.fixture(autouse=True)
+def _limpar_ativos():
+    yield
+    workers.ATIVOS.clear()
 
 
 class _Banco:
@@ -205,6 +215,39 @@ def test_executar_ciclo_registra_erro_e_sucesso_no_status(monkeypatch):
     assert w.status["ultima_leitura_ok"] == "2026-10-27T10:00:00-03:00"
     assert w.status["ultimo_erro"] == {"em": "2026-10-27T10:00:00-03:00", "mensagem": "RuntimeError: consulta a users falhou"}
     assert any(tabela == "metricas_sellers" for tabela, _, _ in banco.upserts)
+
+
+def test_iniciar_sobe_um_worker_por_planilha_configurada(monkeypatch):
+    rodados = []
+    monkeypatch.setattr(workers.Worker, "rodar", lambda self, parar, intervalo: rodados.append((self.planilha.nome, self.planilha_id, intervalo)))
+    monkeypatch.setattr(workers, "criar_credenciais", lambda texto: object())
+    base = dataclasses.replace(
+        config.settings,
+        supabase_url="https://x.supabase.co",
+        supabase_service_key="k",
+        google_service_account_json="{}",
+        planilha_sellers_id="S",
+        planilha_sdrs_id=None,
+        planilha_closers_id="C",
+        planilha_dripify_id=None,
+        worker_intervalo_segundos=5.0,
+    )
+
+    parar_desligado = workers.iniciar(dataclasses.replace(base, workers_ativos=False))
+
+    assert isinstance(parar_desligado, threading.Event)
+    assert workers.ATIVOS == []
+    assert rodados == []
+
+    parar = workers.iniciar(dataclasses.replace(base, workers_ativos=True))
+    for t in threading.enumerate():
+        if t.name.startswith("worker-"):
+            t.join(timeout=1)
+
+    assert sorted(w.planilha.nome for w in workers.ATIVOS) == ["closers", "sellers"]
+    assert sorted(rodados) == [("closers", "C", 5.0), ("sellers", "S", 5.0)]
+    assert isinstance(parar, threading.Event)
+    assert parar.is_set() is False
 
 
 def test_rodar_repete_ate_o_evento_de_parada(monkeypatch):
