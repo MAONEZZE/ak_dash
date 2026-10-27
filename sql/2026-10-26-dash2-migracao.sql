@@ -33,18 +33,25 @@ select setval(pg_get_serial_sequence('dash2.users', 'id'),
               greatest((select max(id) from dash2.users), (select max(id) from dash.users)));
 
 -- 2. Cargos: o de dash.users.id_cargo + dripify pra quem tem linha em dash.metricas_dripify
-insert into dash2.user_cargos (id_user, cargo)
-select case when u.id = 10 then 2 else u.id end, c.cargo
-  from dash.users u
-  join dash.metricas_cargo c on c.id = u.id_cargo
- where u.id <> 9 and c.cargo in ('sdr', 'closer')
-on conflict do nothing;
+-- Só na primeira migração: depois disso os cargos são mantidos à mão em dash2
+-- (ex.: Jennifer só seller), e reexecutar não pode devolver os cargos de dash.
+do $$
+begin
+  if not exists (select 1 from dash2.user_cargos) then
+    insert into dash2.user_cargos (id_user, cargo)
+    select case when u.id = 10 then 2 else u.id end, c.cargo
+      from dash.users u
+      join dash.metricas_cargo c on c.id = u.id_cargo
+     where u.id <> 9 and c.cargo in ('sdr', 'closer')
+    on conflict do nothing;
 
-insert into dash2.user_cargos (id_user, cargo)
-select distinct case when d.id_user = 10 then 2 else d.id_user end, 'dripify'
-  from dash.metricas_dripify d
- where d.id_user is not null and d.id_user <> 9
-on conflict do nothing;
+    insert into dash2.user_cargos (id_user, cargo)
+    select distinct case when d.id_user = 10 then 2 else d.id_user end, 'dripify'
+      from dash.metricas_dripify d
+     where d.id_user is not null and d.id_user <> 9
+    on conflict do nothing;
+  end if;
+end $$;
 
 -- 3. Métricas até 30/09/2026 (outubro vem das planilhas)
 insert into dash2.metricas_sdrs (id_user, data, key_data_ref_user,
