@@ -138,3 +138,27 @@ def test_upsert_sem_linhas_nao_faz_chamada(monkeypatch):
 
     monkeypatch.setattr(banco.httpx, "post", _post)
     banco.upsert("metricas_sellers", [], on_conflict="key_data_ref_user")
+
+
+def test_upsert_propaga_erro_do_postgrest(monkeypatch):
+    monkeypatch.setattr(
+        banco,
+        "settings",
+        dataclasses.replace(
+            banco.settings,
+            supabase_url="https://exemplo.supabase.co",
+            supabase_service_key="chave",
+            supabase_schema="dash2",
+        ),
+    )
+
+    def _post(*a, **k):
+        return httpx.Response(
+            400,
+            json={"message": "column x does not exist"},
+            request=httpx.Request("POST", "https://exemplo.supabase.co"),
+        )
+
+    monkeypatch.setattr(banco.httpx, "post", _post)
+    with pytest.raises(httpx.HTTPStatusError):
+        banco.upsert("metricas_sellers", [{"id_user": 1}], on_conflict="key_data_ref_user")
