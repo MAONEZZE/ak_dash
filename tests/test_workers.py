@@ -66,3 +66,18 @@ def test_primeiro_ciclo_grava_metricas_e_metas_no_mes_corrente(monkeypatch):
     ]
     assert banco.apagados == []
     assert len(invalidacoes) == 1
+
+
+def test_ciclo_sem_mudanca_nao_grava(monkeypatch):
+    banco = _Banco({"users": [{"id": 12, "nome": "Isaque"}], "user_cargos": [{"id_user": 12}]})
+    invalidacoes = _instalar(monkeypatch, banco)
+    w, _ = _worker([("Isaque", [CABECALHO, ["Meta diária", 50, 3], [5, 10, 2], [6, 4]])])
+    w.ciclo()
+    banco.upserts.clear()
+    invalidacoes.clear()
+
+    w.ciclo()
+
+    assert banco.upserts == []
+    assert banco.apagados == []
+    assert invalidacoes == []
