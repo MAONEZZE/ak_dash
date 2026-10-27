@@ -1,3 +1,4 @@
+import logging
 from datetime import date, datetime
 
 from app import workers
@@ -150,3 +151,19 @@ def test_meta_alterada_regrava_e_meta_apagada_e_removida(monkeypatch):
 
     assert banco.apagados == []
     assert banco.upserts == []
+
+
+def test_aba_sem_usuario_ou_sem_cargo_e_pulada_com_log_unico(monkeypatch, caplog):
+    banco = _Banco({"users": [{"id": 12, "nome": "Isaque"}, {"id": 13, "nome": "Lucas"}], "user_cargos": [{"id_user": 12}]})
+    _instalar(monkeypatch, banco)
+    w, _ = _worker([("SDR2", [CABECALHO, ["Meta diária", 0], [1, 5]]), ("Lucas", [CABECALHO, ["Meta diária", 10], [1, 7]])])
+
+    with caplog.at_level(logging.WARNING, logger="app.workers"):
+        w.ciclo()
+        w.ciclo()
+
+    assert banco.upserts == []
+    assert banco.apagados == []
+    mensagens = [r.getMessage() for r in caplog.records]
+    assert len([m for m in mensagens if "SDR2" in m]) == 1
+    assert len([m for m in mensagens if "Lucas" in m]) == 1

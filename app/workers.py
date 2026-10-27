@@ -93,6 +93,14 @@ class Worker:
         for aba in abas:
             u = resolver_usuario(aba.pessoa, usuarios)
             if u is None or u["id"] not in com_cargo:
+                if aba.pessoa not in self._puladas:
+                    self._puladas.add(aba.pessoa)
+                    logger.warning(
+                        "Planilha %s: aba '%s' pulada (pessoa sem cadastro em users ou sem o cargo %s em user_cargos)",
+                        self.planilha.nome,
+                        aba.pessoa,
+                        self.planilha.cargo,
+                    )
                 continue
 
             desejadas = {}
