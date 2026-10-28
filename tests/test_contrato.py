@@ -46,7 +46,26 @@ def test_bff_nao_expoe_rota_de_dado_ausente_do_contrato():
 def test_schema_respostacargo_tem_os_campos_que_o_bff_produz():
     spec = _carregar_openapi()
     campos = set(spec["components"]["schemas"]["RespostaComercial"]["required"])
-    assert campos == {"periodo", "periodo_parcial", "dias_uteis", "avisos", "pessoas", "serie_diaria"}
+    assert campos == {"periodo", "periodo_parcial", "dias_uteis", "avisos", "pessoas", "serie_diaria", "metricas_time"}
+
+
+def test_schema_metricatime_e_metrica_tem_os_indicadores():
+    schemas = _carregar_openapi()["components"]["schemas"]
+    assert set(schemas["MetricaTime"]["required"]) == {
+        "metrica",
+        "nome_exibicao",
+        "meta_periodo",
+        "realizado",
+        "pct_atingimento",
+        "falta_folga",
+        "horas_restantes",
+        "media_necessaria",
+        "previsao",
+    }
+    indicadores = {"pct_atingimento", "falta_folga", "horas_restantes", "media_necessaria", "previsao"}
+    assert indicadores <= set(schemas["Metrica"]["required"])
+    assert set(schemas["FaltaFolga"]["required"]) == {"tipo", "valor"}
+    assert set(schemas["MediaNecessaria"]["required"]) == {"valor", "unidade", "situacao"}
 
 
 def test_schema_respostageral_tem_os_campos_que_o_bff_produz():
