@@ -50,3 +50,11 @@ def test_data_em_texto_dd_mm_aaaa_e_aceita():
     vendas = planilha_financeiro.ler_base_vendas([CABECALHO, _linha({1: "23/10/2026"})], 2026)
 
     assert vendas[0].venda["data_venda"] == "2026-10-23T00:00:00"
+
+
+def test_linha_sem_id_e_ignorada():
+    vendas = planilha_financeiro.ler_base_vendas(
+        [CABECALHO, _linha(), _linha({0: ""}), [], _linha({0: 9})], 2026
+    )
+
+    assert [v.venda["id_planilha"] for v in vendas] == [8, 9]

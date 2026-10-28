@@ -60,8 +60,10 @@ def _inteiro_ou_none(valor) -> int | None:
 def ler_base_vendas(linhas: list[list], ano: int) -> list[VendaPlanilha]:
     vendas: list[VendaPlanilha] = []
     for linha in linhas[1:]:
+        if _celula(linha, 0) is None:
+            continue
         valores = [
-            _celula(linha, 0),
+            int(_celula(linha, 0)),
             f"{_data(_celula(linha, 1)).isoformat()}T00:00:00",
             _celula(linha, 4),
             None,
