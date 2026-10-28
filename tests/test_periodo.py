@@ -4,7 +4,7 @@ from datetime import date
 
 import pytest
 
-from app.periodo import dias_uteis_decorridos, resolver_periodo, semana_iso
+from app.periodo import dias_uteis_decorridos, dias_uteis_meta, resolver_periodo, semana_iso
 
 
 def test_resolver_periodo_dia():
@@ -107,3 +107,13 @@ def test_dias_uteis_totais_mes_inteiro_22_ano_inteiro_264_resto_dias_reais():
     assert periodo.dias_uteis_totais(date(2026, 9, 28), date(2026, 10, 2)) == 5
     assert periodo.dias_uteis_totais(date(2026, 9, 19), date(2026, 9, 19)) == 0
     assert periodo.dias_uteis_totais(date(2026, 12, 1), date(2026, 12, 15)) == 11
+
+
+def test_dias_uteis_meta_limita_decorridos_ao_total():
+    dez_inicio, dez_fim = date(2026, 12, 1), date(2026, 12, 31)
+    assert dias_uteis_meta(dez_inicio, dez_fim, date(2026, 12, 31)) == {"decorridos": 22, "total": 22}
+    assert dias_uteis_meta(dez_inicio, dez_fim, date(2026, 12, 15)) == {"decorridos": 11, "total": 22}
+
+    fev_inicio, fev_fim = date(2026, 2, 1), date(2026, 2, 28)
+    assert dias_uteis_meta(fev_inicio, fev_fim, date(2026, 2, 27)) == {"decorridos": 20, "total": 22}
+    assert dias_uteis_meta(fev_inicio, fev_fim, date(2026, 1, 10)) == {"decorridos": 0, "total": 22}

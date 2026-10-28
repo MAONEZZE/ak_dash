@@ -110,3 +110,9 @@ def dias_uteis_totais(inicio: date, fim: date) -> int:
     if inicio == date(inicio.year, 1, 1) and fim == date(inicio.year, 12, 31):
         return DIAS_UTEIS_MES * 12
     return dias_uteis_decorridos(inicio, fim, hoje=fim)
+
+
+def dias_uteis_meta(inicio: date, fim: date, hoje: date) -> dict[str, int]:
+    """Decorridos e total do período; decorridos nunca passa do total."""
+    total = dias_uteis_totais(inicio, fim)
+    return {"decorridos": min(dias_uteis_decorridos(inicio, fim, hoje=hoje), total), "total": total}
