@@ -1,8 +1,9 @@
-"""Leitura de `dash.metricas_faturamento` (uma linha por venda),
-`dash.cliente_faturamento` (73 clientes) e `dash.users` (closer) pra tabela
-de vendas de `/financeiro`.
+"""Leitura de `dash2.metricas_faturamento` (uma linha por venda),
+`dash2.cliente_faturamento` (73 clientes), `dash2.users` (closer) e
+`dash2.recebimentos_faturamento` (um mês de recebimento por venda) pra
+tabela de vendas de `/financeiro`.
 
-Três consultas, junção em Python — mesmo padrão de `buscar_eventos_proximos`
+Quatro consultas, junção em Python — mesmo padrão de `buscar_eventos_proximos`
 em `dominios/geral/banco.py`. Não vale a pena um `select` aninhado do
 PostgREST aqui: são tabelas pequenas e o BFF já faz esse tipo de join em
 memória em outro domínio.
@@ -49,9 +50,22 @@ def buscar_vendas_detalhadas(inicio: date, fim: date) -> list[dict]:
     ids_closers = [int(v["user_closer"]) for v in vendas if v.get("user_closer") is not None]
     closers = buscar_closers(ids_closers)
 
+    receb = query(
+        "recebimentos_faturamento",
+        {"and": f"(mes.gte.{inicio.replace(day=1).isoformat()},mes.lte.{fim.isoformat()})"},
+    )
+    por_venda: dict[int, list[dict]] = {}
+    for r in receb:
+        por_venda.setdefault(int(r["id_planilha_venda"]), []).append(
+            {"mes": r["mes"][:7], "pago": r.get("pago") or 0, "liquido": r.get("liquido") or 0}
+        )
+    for lista in por_venda.values():
+        lista.sort(key=lambda x: x["mes"])
+
     return [
         {
             "id": v["id"],
+            "id_planilha": v.get("id_planilha"),
             "data_venda": v["data_venda"],
             "cliente": clientes.get(int(v["id_cliente"])) if v.get("id_cliente") is not None else None,
             "produto": v.get("produto"),
@@ -72,6 +86,7 @@ def buscar_vendas_detalhadas(inicio: date, fim: date) -> list[dict]:
             "forma_pgto_2": v.get("forma_pgto_2"),
             "user_closer": int(v["user_closer"]) if v.get("user_closer") is not None else None,
             "closer": closers.get(int(v["user_closer"])) if v.get("user_closer") is not None else None,
+            "recebimentos": por_venda.get(v.get("id_planilha"), []),
         }
         for v in vendas
     ]

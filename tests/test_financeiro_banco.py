@@ -92,8 +92,8 @@ def test_venda_sem_id_cliente_fica_com_cliente_none_sem_consultar_a_toa(monkeypa
     )
     vendas = banco_mod.buscar_vendas_detalhadas(date(2026, 8, 1), date(2026, 8, 31))
     assert vendas[0]["cliente"] is None
-    # buscar_clientes([]) não dispara consulta — só a de metricas_faturamento.
-    assert [c["tabela"] for c in chamadas] == ["metricas_faturamento"]
+    # buscar_clientes([]) não dispara consulta — só metricas_faturamento e recebimentos.
+    assert [c["tabela"] for c in chamadas] == ["metricas_faturamento", "recebimentos_faturamento"]
 
 
 def test_periodo_sem_venda_devolve_lista_vazia(monkeypatch):
@@ -182,7 +182,7 @@ def test_venda_sem_user_closer_fica_com_closer_none_sem_consultar_users(monkeypa
     vendas = banco_mod.buscar_vendas_detalhadas(date(2026, 8, 1), date(2026, 8, 31))
     assert vendas[0]["user_closer"] is None
     assert vendas[0]["closer"] is None
-    assert [c["tabela"] for c in chamadas] == ["metricas_faturamento"]
+    assert [c["tabela"] for c in chamadas] == ["metricas_faturamento", "recebimentos_faturamento"]
 
 
 def test_buscar_closers_com_lista_vazia_nao_consulta():
@@ -258,3 +258,50 @@ def test_filtro_de_data_usa_lt_no_dia_seguinte_ao_fim(monkeypatch):
 
 def test_buscar_clientes_com_lista_vazia_nao_consulta():
     assert banco_mod.buscar_clientes([]) == {}
+
+
+def test_cada_venda_traz_recebimentos_do_periodo_em_ordem_de_mes(monkeypatch):
+    chamadas = _mockar(
+        monkeypatch,
+        {
+            "metricas_faturamento": [
+                {
+                    "id": 1,
+                    "id_planilha": 25,
+                    "data_venda": "2026-04-16T00:00:00",
+                    "id_cliente": None,
+                    "produto": None,
+                    "canal": None,
+                    "metodo_pagamento": None,
+                    "num_parcelas": None,
+                    "valor_bruto_contrato": 20000,
+                    "liquido_entrada": 18000,
+                },
+                {
+                    "id": 2,
+                    "id_planilha": 26,
+                    "data_venda": "2026-04-20T00:00:00",
+                    "id_cliente": None,
+                    "produto": None,
+                    "canal": None,
+                    "metodo_pagamento": None,
+                    "num_parcelas": None,
+                    "valor_bruto_contrato": 5000,
+                    "liquido_entrada": 4500,
+                },
+            ],
+            "recebimentos_faturamento": [
+                {"id_planilha_venda": 25, "mes": "2026-05-01", "pago": 10000, "liquido": 9000},
+                {"id_planilha_venda": 25, "mes": "2026-04-01", "pago": 10000, "liquido": 9000},
+            ],
+        },
+    )
+    vendas = banco_mod.buscar_vendas_detalhadas(date(2026, 1, 1), date(2026, 12, 31))
+    por_planilha = {v["id_planilha"]: v for v in vendas}
+    assert por_planilha[25]["recebimentos"] == [
+        {"mes": "2026-04", "pago": 10000, "liquido": 9000},
+        {"mes": "2026-05", "pago": 10000, "liquido": 9000},
+    ]
+    assert por_planilha[26]["recebimentos"] == []
+    receb = next(c for c in chamadas if c["tabela"] == "recebimentos_faturamento")
+    assert receb["filtros"] == {"and": "(mes.gte.2026-01-01,mes.lte.2026-12-31)"}
