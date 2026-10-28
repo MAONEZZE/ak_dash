@@ -277,6 +277,24 @@ def test_iniciar_sem_credencial_loga_warning_e_guarda_motivo(monkeypatch, caplog
     assert workers.MOTIVO_INATIVOS is None
 
 
+def test_iniciar_com_json_invalido_nao_levanta_e_guarda_motivo(caplog):
+    caplog.set_level(logging.WARNING)
+    base = dataclasses.replace(
+        config.settings,
+        workers_ativos=True,
+        supabase_url="https://x.supabase.co",
+        supabase_service_key="k",
+        google_service_account_json="{nao e json",
+        planilha_sellers_id="S",
+    )
+
+    workers.iniciar(base)
+
+    assert workers.ATIVOS == []
+    assert workers.MOTIVO_INATIVOS.startswith("GOOGLE_SERVICE_ACCOUNT_JSON inválido: JSONDecodeError")
+    assert any(workers.MOTIVO_INATIVOS in r.getMessage() for r in caplog.records if r.levelno == logging.WARNING)
+
+
 def test_rodar_repete_ate_o_evento_de_parada(monkeypatch):
     parar = threading.Event()
     w = workers.Worker(SELLERS, "ID_SELLERS", lambda _id: [])
