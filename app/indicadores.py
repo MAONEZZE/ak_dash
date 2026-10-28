@@ -26,3 +26,9 @@ def media_necessaria(realizado: int, meta: int | None, restantes: float, unidade
         return {"valor": None, "unidade": unidade, "situacao": situacao}
     valor = round((meta - realizado) / restantes, 1)
     return {"valor": valor, "unidade": unidade, "situacao": "pendente"}
+
+
+def previsao(realizado: int, decorridos: int, total: int) -> float | None:
+    if decorridos <= 0:
+        return None
+    return round(realizado / decorridos * total, 1)

@@ -1,6 +1,6 @@
 import pytest
 
-from app.indicadores import falta_folga, media_necessaria, pct_atingimento
+from app.indicadores import falta_folga, media_necessaria, pct_atingimento, previsao
 
 
 @pytest.mark.parametrize(
@@ -45,3 +45,15 @@ def test_falta_folga(realizado, meta, esperado):
 )
 def test_media_necessaria(realizado, meta, restantes, unidade, esperado):
     assert media_necessaria(realizado, meta, restantes, unidade) == esperado
+
+
+@pytest.mark.parametrize(
+    ("realizado", "decorridos", "total", "esperado"),
+    [
+        (30, 10, 22, 66.0),
+        (7, 3, 22, 51.3),
+        (30, 0, 22, None),
+    ],
+)
+def test_previsao(realizado, decorridos, total, esperado):
+    assert previsao(realizado, decorridos, total) == esperado
