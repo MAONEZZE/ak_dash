@@ -76,3 +76,40 @@ def test_calcular_indicadores_no_dia_usa_horas_restantes():
         "media_necessaria": {"valor": 8.6, "unidade": "hora", "situacao": "pendente"},
         "previsao": None,
     }
+
+
+def test_calcular_indicadores_na_semana_e_no_mes_usa_dias_restantes():
+    agora = datetime(2026, 10, 28, 15, 30, tzinfo=TZ_SP)
+    expediente = (time(10, 0), time(19, 0))
+
+    semana = calcular_indicadores(
+        10, 20, Periodo("semana", date(2026, 10, 26), date(2026, 11, 1)), {"decorridos": 3, "total": 5}, agora, *expediente
+    )
+    mes = calcular_indicadores(
+        30, 88, Periodo("mes", date(2026, 9, 1), date(2026, 9, 30)), {"decorridos": 10, "total": 22}, agora, *expediente
+    )
+    mes_sem_meta = calcular_indicadores(
+        0, None, Periodo("mes", date(2026, 9, 1), date(2026, 9, 30)), {"decorridos": 10, "total": 22}, agora, *expediente
+    )
+
+    assert semana == {
+        "pct_atingimento": 50.0,
+        "falta_folga": {"tipo": "falta", "valor": 10},
+        "horas_restantes": None,
+        "media_necessaria": {"valor": 5.0, "unidade": "dia", "situacao": "pendente"},
+        "previsao": None,
+    }
+    assert mes == {
+        "pct_atingimento": 34.1,
+        "falta_folga": {"tipo": "falta", "valor": 58},
+        "horas_restantes": None,
+        "media_necessaria": {"valor": 4.8, "unidade": "dia", "situacao": "pendente"},
+        "previsao": 66.0,
+    }
+    assert mes_sem_meta == {
+        "pct_atingimento": None,
+        "falta_folga": None,
+        "horas_restantes": None,
+        "media_necessaria": None,
+        "previsao": 0.0,
+    }

@@ -56,6 +56,8 @@ def calcular_indicadores(
         restantes = dias_uteis["total"] - dias_uteis["decorridos"]
         media = media_necessaria(realizado, meta, restantes, "dia")
         projecao = None
+        if periodo.granularidade == "mes":
+            projecao = previsao(realizado, dias_uteis["decorridos"], dias_uteis["total"])
     return {
         "pct_atingimento": pct_atingimento(realizado, meta),
         "falta_folga": falta_folga(realizado, meta),
