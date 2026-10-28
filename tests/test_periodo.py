@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, time
 
 import pytest
 
-from app.periodo import dias_uteis_decorridos, dias_uteis_meta, resolver_periodo, semana_iso
+from app.periodo import TZ_SP, dias_uteis_decorridos, dias_uteis_meta, horas_restantes, resolver_periodo, semana_iso
 
 
 def test_resolver_periodo_dia():
@@ -117,3 +117,18 @@ def test_dias_uteis_meta_limita_decorridos_ao_total():
     fev_inicio, fev_fim = date(2026, 2, 1), date(2026, 2, 28)
     assert dias_uteis_meta(fev_inicio, fev_fim, date(2026, 2, 27)) == {"decorridos": 20, "total": 22}
     assert dias_uteis_meta(fev_inicio, fev_fim, date(2026, 1, 10)) == {"decorridos": 0, "total": 22}
+
+
+@pytest.mark.parametrize(
+    "dia, hora, esperado",
+    [
+        (date(2026, 10, 28), (15, 30), 3.5),
+        (date(2026, 10, 28), (8, 0), 9.0),
+        (date(2026, 10, 28), (20, 0), 0.0),
+        (date(2026, 10, 27), (15, 30), 0.0),
+        (date(2026, 10, 29), (15, 30), 9.0),
+    ],
+)
+def test_horas_restantes_do_expediente(dia, hora, esperado):
+    agora = datetime(2026, 10, 28, *hora, tzinfo=TZ_SP)
+    assert horas_restantes(dia, agora, time(10, 0), time(19, 0)) == esperado

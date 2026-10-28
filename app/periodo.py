@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import calendar
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 TZ_SP = ZoneInfo("America/Sao_Paulo")
@@ -116,3 +116,17 @@ def dias_uteis_meta(inicio: date, fim: date, hoje: date) -> dict[str, int]:
     """Decorridos e total do período; decorridos nunca passa do total."""
     total = dias_uteis_totais(inicio, fim)
     return {"decorridos": min(dias_uteis_decorridos(inicio, fim, hoje=hoje), total), "total": total}
+
+
+def horas_restantes(dia: date, agora: datetime, inicio: time, fim: time) -> float:
+    """Horas de expediente que ainda sobram no `dia` a partir de `agora` (SP)."""
+    agora = agora.astimezone(TZ_SP)
+
+    def _horas(t: time) -> float:
+        return t.hour + t.minute / 60 + t.second / 3600
+
+    if dia < agora.date():
+        return 0.0
+    if dia > agora.date():
+        return round(_horas(fim) - _horas(inicio), 1)
+    return round(max(0.0, _horas(fim) - max(_horas(inicio), _horas(agora.time()))), 1)
