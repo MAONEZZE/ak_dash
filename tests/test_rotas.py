@@ -107,6 +107,16 @@ def test_comercial_sdr_200(monkeypatch):
     assert set(corpo["dias_uteis"]) == {"decorridos", "total"}
 
 
+def test_comercial_sdr_devolve_metricas_time_com_os_indicadores(monkeypatch):
+    resposta = _client(monkeypatch).get("/comercial/sdr", params={"granularidade": "mes", "periodo": "2026-09"})
+    assert resposta.status_code == 200
+    metricas_time = resposta.json()["metricas_time"]
+    assert len(metricas_time) == 5
+    chaves = {"metrica", "nome_exibicao", "meta_periodo", "realizado", "pct_atingimento", "falta_folga", "horas_restantes", "media_necessaria", "previsao"}
+    for item in metricas_time:
+        assert set(item) == chaves
+
+
 def test_comercial_closer_200(monkeypatch):
     resposta = _client(monkeypatch).get("/comercial/closer", params={"granularidade": "mes", "periodo": "2026-09"})
     assert resposta.status_code == 200
