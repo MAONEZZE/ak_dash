@@ -2,7 +2,7 @@
 
 Esta seção descreve como os fluxos n8n devem gravar no schema `dash2`.
 
-> **Atenção:** o n8n precisa ser trocado para gravar em `dash2`. Enquanto ele gravar em `dash`, o dash fica congelado em silêncio (os dados novos não aparecem e nenhum erro é exibido).
+As tabelas de métricas e `dash2.metas` são gravadas pelos workers das planilhas (`app/workers.py`), dentro do BFF, a cada `WORKER_INTERVALO_SEGUNDOS`. Os fluxos n8n de métricas devem ser desligados; o n8n continua gravando só o faturamento (d).
 
 ### (a) Tabelas de métricas
 
@@ -33,11 +33,25 @@ Uma linha por tabela de métrica. As colunas de métrica são exatamente as list
 
 As mesmas colunas de antes, agora gravadas em `dash2.metricas_faturamento` e `dash2.cliente_faturamento`.
 
-### (e) Aviso de migração
-
-O n8n precisa ser trocado para gravar em `dash2`. Enquanto gravar em `dash`, o dash fica congelado em silêncio.
-
 ### (f) Configuração
 
 - Env `SUPABASE_SCHEMA`: padrão `dash2`.
 - Para rollback, definir `SUPABASE_SCHEMA=dash`.
+
+### (g) Workers das planilhas
+
+Envs (ver `.env.example`):
+
+- `WORKERS_ATIVOS` (padrão `false`): só com `true` os workers sobem.
+- `WORKER_INTERVALO_SEGUNDOS` (padrão `5`).
+- `GOOGLE_SERVICE_ACCOUNT_JSON`: JSON da service account. Ela (`client_email`) precisa ser compartilhada como leitora em cada planilha.
+- `PLANILHA_SELLERS_ID`, `PLANILHA_SDRS_ID`, `PLANILHA_CLOSERS_ID`, `PLANILHA_DRIPIFY_ID`: worker sem ID de planilha não sobe.
+
+Comportamento:
+
+- Gravam só o que mudou, no mês corrente (America/Sao_Paulo).
+- Célula apagada → `null`. Meta apagada → linha removida de `dash2.metas`.
+- Aba de quem não está em `users` ou não tem o cargo é pulada (log).
+- Na virada do mês, a planilha precisa ser zerada no dia 1.
+- O `/saude` mostra `ultima_leitura_ok` e `ultimo_erro` por worker.
+- A carga manual agora roda com `.venv/bin/python -m scripts.popular_dash2 --mes AAAA-MM`.

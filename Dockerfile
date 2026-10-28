@@ -25,4 +25,5 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 
 # Um worker só: o cache de métricas/pessoas é em memória do processo —
 # vários workers dariam respostas com idades diferentes pro mesmo endpoint.
+# Um worker só também porque os workers das planilhas rodam como threads deste processo: vários uvicorn workers gravariam em dobro.
 CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

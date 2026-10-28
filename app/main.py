@@ -1,16 +1,26 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app import workers
 from app.config import settings
 from app.dominios.comercial.rotas import router as comercial_router
 from app.dominios.financeiro.rotas import router as financeiro_router
 from app.dominios.geral.rotas import router as geral_router
 from app.dominios.pessoas.rotas import router as pessoas_router
 
-app = FastAPI(title="Dashboard Akeel — BFF", version="0.1.0")
+@asynccontextmanager
+async def _ciclo_de_vida(_app: FastAPI):
+    parar = workers.iniciar(settings)
+    yield
+    parar.set()
+
+
+app = FastAPI(title="Dashboard Akeel — BFF", version="0.1.0", lifespan=_ciclo_de_vida)
 
 
 @app.exception_handler(HTTPException)
@@ -37,4 +47,4 @@ app.include_router(financeiro_router)
 
 @app.get("/saude", tags=["infra"])
 def saude() -> dict:
-    return {"status": "ok"}
+    return {"status": "ok", "workers": {w.planilha.nome: w.status for w in workers.ATIVOS}}
