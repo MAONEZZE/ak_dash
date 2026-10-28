@@ -94,3 +94,16 @@ def test_resolver_periodo_custom_de_um_dia_so():
 def test_resolver_periodo_custom_invalido(valor):
     with pytest.raises(ValueError):
         resolver_periodo("custom", valor)
+
+
+def test_dias_uteis_totais_mes_inteiro_22_ano_inteiro_264_resto_dias_reais():
+    from app import periodo
+
+    assert periodo.dias_uteis_totais(date(2026, 2, 1), date(2026, 2, 28)) == 22
+    assert periodo.dias_uteis_totais(date(2026, 12, 1), date(2026, 12, 31)) == 22
+    assert periodo.dias_uteis_totais(date(2026, 9, 1), date(2026, 9, 30)) == 22
+    assert periodo.dias_uteis_totais(date(2026, 1, 1), date(2026, 12, 31)) == 264
+    assert periodo.dias_uteis_totais(date(2026, 9, 14), date(2026, 9, 20)) == 5
+    assert periodo.dias_uteis_totais(date(2026, 9, 28), date(2026, 10, 2)) == 5
+    assert periodo.dias_uteis_totais(date(2026, 9, 19), date(2026, 9, 19)) == 0
+    assert periodo.dias_uteis_totais(date(2026, 12, 1), date(2026, 12, 15)) == 11

@@ -8,6 +8,8 @@ from zoneinfo import ZoneInfo
 
 TZ_SP = ZoneInfo("America/Sao_Paulo")
 
+DIAS_UTEIS_MES = 22
+
 
 def hoje_sp() -> date:
     return datetime.now(TZ_SP).date()
@@ -96,3 +98,15 @@ def dias_uteis_decorridos(inicio: date, fim: date, hoje: date | None = None) -> 
             dias += 1
         d += timedelta(days=1)
     return dias
+
+
+def dias_uteis_totais(inicio: date, fim: date) -> int:
+    """Total de dias úteis do período, sem cortar por hoje.
+
+    regra da planilha: mês tem sempre 22 dias úteis.
+    """
+    if inicio.day == 1 and (inicio.year, inicio.month) == (fim.year, fim.month) and fim.day == calendar.monthrange(fim.year, fim.month)[1]:
+        return DIAS_UTEIS_MES
+    if inicio == date(inicio.year, 1, 1) and fim == date(inicio.year, 12, 31):
+        return DIAS_UTEIS_MES * 12
+    return dias_uteis_decorridos(inicio, fim, hoje=fim)
