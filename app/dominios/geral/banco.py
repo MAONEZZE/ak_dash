@@ -14,9 +14,11 @@ O liquidado da empresa NÃO vem da venda: é a soma de
 mês em que a parcela foi recebida, não no mês em que a venda foi fechada.
 
 O card da empresa soma TODA venda do período, inclusive de quem já saiu do
-time (`ids_pessoas` não filtra a consulta). Por pessoa, agrupa
-`liquido_entrada` por `user_closer`; venda sem `user_closer` entra no total
-da empresa e em ninguém. `inscritos`/`aprovados` continuam sempre `None`
+time (`ids_pessoas` não filtra a consulta). Por pessoa, o liquidado é o de
+cada recebimento, atribuído ao `user_closer` da VENDA a que ele pertence
+(mesmo que a venda tenha sido fechada em outro mês); recebimento de venda sem
+`user_closer` entra no total da empresa e em ninguém.
+`inscritos`/`aprovados` continuam sempre `None`
 aqui — não existem nesta tabela, vêm do SED (ver `buscar_confrarias_do_mes`).
 
 Também lê o SEGUNDO Supabase (`SED.events`/`SED.registrations`), que
@@ -86,18 +88,26 @@ def buscar_faturamento(inicio: date, fim: date, ids_pessoas: list[int]) -> Fatur
     por_pessoa: dict[int, dict[str, float | None]] = {}
 
     for r in linhas:
-        liquido_venda = (r.get("liquido_entrada") or 0) + (r.get("liquido_pgto_2") or 0)
-
         empresa["faturamento"] += r.get("valor_bruto_contrato") or 0
 
-        id_user = r.get("user_closer")
+    ids = sorted({int(r["id_planilha_venda"]) for r in recebimentos})
+    closer_por_venda: dict[int, int | None] = {}
+    if ids:
+        vendas = query(
+            "metricas_faturamento",
+            {"id_planilha": f"in.({','.join(map(str, ids))})"},
+            colunas="id_planilha,user_closer",
+        )
+        closer_por_venda = {int(v["id_planilha"]): v.get("user_closer") for v in vendas}
+
+    for r in recebimentos:
+        liquido = r.get("liquido") or 0
+        empresa["liquidado"] += liquido
+        id_user = closer_por_venda.get(int(r["id_planilha_venda"]))
         if id_user is None:
             continue
         pessoa = por_pessoa.setdefault(int(id_user), {**_linha_vazia(), "liquidado": 0.0})
-        pessoa["liquidado"] += liquido_venda
-
-    for r in recebimentos:
-        empresa["liquidado"] += r.get("liquido") or 0
+        pessoa["liquidado"] += liquido
 
     return Faturamento(empresa=empresa, por_pessoa=por_pessoa)
 
