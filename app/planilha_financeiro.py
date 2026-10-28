@@ -6,6 +6,17 @@ from datetime import date, datetime, timedelta
 
 from app.planilhas import normalizar
 
+# Decisão de 2026-10-28: Jonathan é id 2, Mariana é id 5, Nathan foi removido (None).
+APELIDOS: dict[str, int | None] = {
+    "jonny": 2,
+    "jennifer": 4,
+    "jacob": 1,
+    "alex": 3,
+    "thalyson": 8,
+    "mary": 5,
+    "nathan": None,
+}
+
 COLUNAS_VENDA: list[str] = [
     "id_planilha",
     "data_venda",
@@ -70,12 +81,14 @@ def ler_base_vendas(linhas: list[list], ano: int) -> list[VendaPlanilha]:
     for linha in linhas[1:]:
         if _celula(linha, 0) is None:
             continue
+        sdr = _celula(linha, 5)
+        closer = _celula(linha, 6)
         valores = [
             int(_celula(linha, 0)),
             f"{_data(_celula(linha, 1)).isoformat()}T00:00:00",
             _celula(linha, 4),
-            None,
-            None,
+            APELIDOS.get(normalizar(sdr)) if sdr else None,
+            APELIDOS.get(normalizar(closer)) if closer else None,
             _celula(linha, 7),
             _celula(linha, 8),
             _celula(linha, 9),
@@ -98,8 +111,8 @@ def ler_base_vendas(linhas: list[list], ano: int) -> list[VendaPlanilha]:
                 venda=venda,
                 cliente_nome=_celula(linha, 2),
                 cliente_telefone=None,
-                sdr=_celula(linha, 5),
-                closer=_celula(linha, 6),
+                sdr=sdr,
+                closer=closer,
                 recebimentos=[],
             )
         )

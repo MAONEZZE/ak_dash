@@ -62,6 +62,28 @@ def test_linha_sem_id_e_ignorada():
     assert [v.venda["id_planilha"] for v in vendas] == [8, 9]
 
 
+def test_apelidos_de_sdr_e_closer_viram_id_de_users():
+    vendas = planilha_financeiro.ler_base_vendas(
+        [
+            CABECALHO,
+            _linha({0: 1, 5: "Jonny", 6: "Jacob"}),
+            _linha({0: 2, 5: "Nathan", 6: "Mary"}),
+            _linha({0: 3, 5: " jennifer ", 6: "Thalyson"}),
+            _linha({0: 4, 5: "Fulano", 6: "Alex"}),
+        ],
+        2026,
+    )
+
+    assert [(v.venda["user_sdr"], v.venda["user_closer"]) for v in vendas] == [
+        (2, 1),
+        (None, 5),
+        (4, 8),
+        (None, 3),
+    ]
+    assert vendas[3].sdr == "Fulano"
+    assert vendas[3].closer == "Alex"
+
+
 def test_cabecalho_fora_do_formato_levanta_value_error():
     with pytest.raises(ValueError, match="BASE_VENDAS"):
         planilha_financeiro.ler_base_vendas([["Data", "ID"], _linha()], 2026)
