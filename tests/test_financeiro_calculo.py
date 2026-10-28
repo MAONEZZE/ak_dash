@@ -28,14 +28,36 @@ def _venda(**over):
 
 def test_cards_somam_faturamento_e_liquidado_das_vendas():
     vendas = [
-        _venda(id=1, valor_bruto_contrato=10000, liquido_entrada=9500),
-        _venda(id=2, valor_bruto_contrato=5000, liquido_entrada=4500),
+        _venda(id=1, valor_bruto_contrato=10000, recebimentos=[{"mes": "2026-08", "pago": 0, "liquido": 9500}]),
+        _venda(id=2, valor_bruto_contrato=5000, recebimentos=[{"mes": "2026-08", "pago": 0, "liquido": 4500}]),
     ]
     resposta = montar_resposta_financeiro(_periodo(), vendas)
     card_faturamento = next(c for c in resposta["cards"] if c["metrica"] == "faturamento")
     card_liquidado = next(c for c in resposta["cards"] if c["metrica"] == "liquidado")
     assert card_faturamento["realizado"] == 15000
     assert card_liquidado["realizado"] == 14000
+
+
+def test_faturamento_conta_so_vendas_do_periodo_e_liquidado_soma_o_calendario():
+    vendas = [
+        _venda(
+            id=1,
+            data_venda="2026-08-05T00:00:00",
+            valor_bruto_contrato=10000,
+            recebimentos=[{"mes": "2026-08", "pago": 5000, "liquido": 4500}],
+        ),
+        _venda(
+            id=2,
+            data_venda="2026-03-01T00:00:00",
+            valor_bruto_contrato=60000,
+            recebimentos=[{"mes": "2026-08", "pago": 20000, "liquido": 18000}],
+        ),
+    ]
+    resposta = montar_resposta_financeiro(_periodo(), vendas)
+    card_faturamento = next(c for c in resposta["cards"] if c["metrica"] == "faturamento")
+    card_liquidado = next(c for c in resposta["cards"] if c["metrica"] == "liquidado")
+    assert card_faturamento["realizado"] == 10000
+    assert card_liquidado["realizado"] == 22500
 
 
 def test_sem_venda_os_cards_ficam_zerados_nao_none():
