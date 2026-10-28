@@ -180,12 +180,31 @@ class Worker:
 
 
 ATIVOS: list[Worker] = []
+MOTIVO_INATIVOS: str | None = None
 
 
 def iniciar(config: Settings) -> threading.Event:
+    global MOTIVO_INATIVOS
     parar = threading.Event()
     ATIVOS.clear()
-    if not (config.workers_ativos and config.google_service_account_json and config.supabase_url and config.supabase_service_key):
+    MOTIVO_INATIVOS = None
+    if not config.workers_ativos:
+        return parar
+    if not config.google_service_account_json:
+        motivo = "GOOGLE_SERVICE_ACCOUNT_JSON ausente ou ilegível no .env"
+    elif not (config.supabase_url and config.supabase_service_key):
+        motivo = "SUPABASE_URL ou SUPABASE_SERVICE_KEY ausente"
+    else:
+        motivo = None
+    if motivo:
+        MOTIVO_INATIVOS = motivo
+        logger.warning("Workers das planilhas não subiram: %s", motivo)
+        return parar
+    try:
+        credenciais = criar_credenciais(config.google_service_account_json)
+    except Exception as erro:  # o texto da exceção pode conter trecho da chave: só o tipo vai para o motivo
+        MOTIVO_INATIVOS = f"GOOGLE_SERVICE_ACCOUNT_JSON inválido: {type(erro).__name__}"
+        logger.warning("Workers das planilhas não subiram: %s", MOTIVO_INATIVOS)
         return parar
     ids = {
         "sellers": config.planilha_sellers_id,
@@ -196,7 +215,7 @@ def iniciar(config: Settings) -> threading.Event:
     for p in PLANILHAS:
         if not ids[p.nome]:
             continue
-        w = Worker(p, ids[p.nome], LeitorSheets(criar_credenciais(config.google_service_account_json)).abas)
+        w = Worker(p, ids[p.nome], LeitorSheets(credenciais).abas)
         ATIVOS.append(w)
         threading.Thread(target=w.rodar, args=(parar, config.worker_intervalo_segundos), name=f"worker-{p.nome}", daemon=True).start()
     logger.info("Workers das planilhas ativos: %s", [w.planilha.nome for w in ATIVOS])

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.auth import exigir_usuario
@@ -10,7 +12,7 @@ from app.dominios.comercial.calculo import montar_resposta_comercial
 from app.dominios.pessoas.banco import listar_ativas
 from app.fontes.banco import iniciar_registro_de_falhas, tabelas_com_falha
 from app.metas import buscar_metas
-from app.periodo import hoje_sp, resolver_periodo
+from app.periodo import TZ_SP, hoje_sp, resolver_periodo
 
 router = APIRouter(tags=["comercial"])
 
@@ -51,9 +53,22 @@ def _comercial(granularidade: str, periodo_str: str, pessoas: list[str] | None, 
         metas=metas,
         emails_filtro=emails_filtro,
         hoje=hoje_sp(),
+        agora=datetime.now(TZ_SP),
+        expediente_inicio=settings.expediente_inicio,
+        expediente_fim=settings.expediente_fim,
     )
     resultado.corpo["avisos"] += [f"fonte_indisponivel:{t}" for t in tabelas_com_falha()]
     return resultado.corpo
+
+
+@router.get("/comercial/seller")
+def get_comercial_seller(
+    granularidade: str = Query(...),
+    periodo: str = Query(...),
+    pessoas: list[str] | None = Query(default=None),
+    _usuario: dict = Depends(exigir_usuario),
+) -> dict:
+    return _comercial(granularidade, periodo, pessoas, cargo="seller")
 
 
 @router.get("/comercial/sdr")

@@ -1,4 +1,6 @@
 """Configuração: defaults dos workers das planilhas."""
+from datetime import time
+
 from app import config
 
 
@@ -42,3 +44,21 @@ def test_settings_le_envs_dos_workers(monkeypatch):
     assert s.planilha_sellers_id == "abc"
     assert s.planilha_dripify_id is None
     assert s.planilha_sdrs_id is None
+
+
+def test_expediente_padrao_10_as_19_e_lido_das_envs(monkeypatch):
+    monkeypatch.delenv("EXPEDIENTE_INICIO", raising=False)
+    monkeypatch.delenv("EXPEDIENTE_FIM", raising=False)
+
+    s = config.Settings()
+
+    assert s.expediente_inicio == time(10, 0)
+    assert s.expediente_fim == time(19, 0)
+
+    monkeypatch.setenv("EXPEDIENTE_INICIO", "09:30")
+    monkeypatch.setenv("EXPEDIENTE_FIM", "18:00")
+
+    s = config.Settings()
+
+    assert s.expediente_inicio == time(9, 30)
+    assert s.expediente_fim == time(18, 0)

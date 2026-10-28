@@ -14,6 +14,7 @@ from app.periodo import TZ_SP
 def _limpar_ativos():
     yield
     workers.ATIVOS.clear()
+    workers.MOTIVO_INATIVOS = None
 
 
 class _Banco:
@@ -248,6 +249,50 @@ def test_iniciar_sobe_um_worker_por_planilha_configurada(monkeypatch):
     assert sorted(rodados) == [("closers", "C", 5.0), ("sellers", "S", 5.0)]
     assert isinstance(parar, threading.Event)
     assert parar.is_set() is False
+
+
+def test_iniciar_sem_credencial_loga_warning_e_guarda_motivo(monkeypatch, caplog):
+    caplog.set_level(logging.WARNING)
+    base = dataclasses.replace(
+        config.settings,
+        workers_ativos=True,
+        supabase_url="https://x.supabase.co",
+        supabase_service_key="k",
+        google_service_account_json=None,
+        planilha_sellers_id="S",
+    )
+
+    workers.iniciar(base)
+
+    assert workers.ATIVOS == []
+    assert workers.MOTIVO_INATIVOS == "GOOGLE_SERVICE_ACCOUNT_JSON ausente ou ilegível no .env"
+    assert any("GOOGLE_SERVICE_ACCOUNT_JSON ausente ou ilegível no .env" in r.getMessage() for r in caplog.records if r.levelno == logging.WARNING)
+
+    workers.iniciar(dataclasses.replace(base, google_service_account_json="{}", supabase_url=None))
+
+    assert workers.MOTIVO_INATIVOS == "SUPABASE_URL ou SUPABASE_SERVICE_KEY ausente"
+
+    workers.iniciar(dataclasses.replace(base, workers_ativos=False))
+
+    assert workers.MOTIVO_INATIVOS is None
+
+
+def test_iniciar_com_json_invalido_nao_levanta_e_guarda_motivo(caplog):
+    caplog.set_level(logging.WARNING)
+    base = dataclasses.replace(
+        config.settings,
+        workers_ativos=True,
+        supabase_url="https://x.supabase.co",
+        supabase_service_key="k",
+        google_service_account_json="{nao e json",
+        planilha_sellers_id="S",
+    )
+
+    workers.iniciar(base)
+
+    assert workers.ATIVOS == []
+    assert workers.MOTIVO_INATIVOS.startswith("GOOGLE_SERVICE_ACCOUNT_JSON inválido: JSONDecodeError")
+    assert any(workers.MOTIVO_INATIVOS in r.getMessage() for r in caplog.records if r.levelno == logging.WARNING)
 
 
 def test_rodar_repete_ate_o_evento_de_parada(monkeypatch):

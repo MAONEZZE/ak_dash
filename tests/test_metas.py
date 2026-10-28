@@ -99,6 +99,12 @@ def test_mes_inteiro_multiplica_pelos_dias_uteis_do_mes():
     assert _metas().por_usuario(date(2026, 9, 1), date(2026, 9, 30), ANA, "sdr", "numeros_captados") == 88
 
 
+def test_mes_inteiro_cobra_22_dias_mesmo_com_20_ou_23_dias_reais():
+    # Fevereiro/2026 tem 20 dias úteis e dezembro/2026 tem 23; a regra da planilha cobra 22.
+    assert _metas().por_usuario(date(2026, 2, 1), date(2026, 2, 28), ANA, "sdr", "numeros_captados") == 88
+    assert _metas().por_usuario(date(2026, 12, 1), date(2026, 12, 31), ANA, "sdr", "numeros_captados") == 88
+
+
 def test_um_dia_util_devolve_a_propria_diaria():
     assert _metas().por_usuario(date(2026, 9, 15), date(2026, 9, 15), ANA, "sdr", "numeros_captados") == 4
 
@@ -111,9 +117,9 @@ def test_sabado_sozinho_nao_cobra_meta():
     assert _metas().por_usuario(date(2026, 9, 19), date(2026, 9, 19), ANA, "sdr", "numeros_captados") == 0
 
 
-def test_ano_inteiro_multiplica_pelos_dias_uteis_do_ano():
-    # 2026 tem 261 dias úteis (seg-sex, sem feriado).
-    assert _metas().por_usuario(date(2026, 1, 1), date(2026, 12, 31), ANA, "sdr", "numeros_captados") == 4 * 261
+def test_ano_inteiro_multiplica_por_22_vezes_12():
+    # Regra da planilha: 22 dias úteis por mês × 12.
+    assert _metas().por_usuario(date(2026, 1, 1), date(2026, 12, 31), ANA, "sdr", "numeros_captados") == 4 * 264
 
 
 def test_intervalo_custom_que_atravessa_meses():

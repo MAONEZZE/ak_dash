@@ -6,6 +6,7 @@ from app.dominios.comercial.banco import TotaisCargo
 from app.dominios.comercial.calculo import montar_resposta_comercial
 from app.dominios.pessoas.banco import Pessoa
 from app.metas import Metas
+from app.metricas import metricas_do_cargo, nome_exibicao
 from app.periodo import Periodo
 
 # Metas são por PESSOA: a chave de `Metas` é (id_user, cargo, métrica) e o valor é
@@ -274,6 +275,24 @@ def test_dias_uteis_de_mes_futuro_decorridos_zero():
     assert resposta.corpo["dias_uteis"] == {"decorridos": 0, "total": 22}
 
 
+def test_dias_uteis_do_mes_sao_22_com_decorridos_limitados():
+    # Dezembro/2026 tem 23 dias úteis reais, mas a regra da planilha fixa o mês em 22.
+    resposta = montar_resposta_comercial(
+        periodo=Periodo("mes", date(2026, 12, 1), date(2026, 12, 31)), cargo="sdr",
+        pessoas_cargo=[], totais=_totais({}, {}), metas=Metas({}), emails_filtro=None,
+        hoje=date(2026, 12, 31),
+    )
+    assert resposta.corpo["dias_uteis"] == {"decorridos": 22, "total": 22}
+
+    # Fevereiro/2026: 20 dias úteis reais até 27/02 (sexta); o total continua 22 pela regra da planilha.
+    resposta = montar_resposta_comercial(
+        periodo=Periodo("mes", date(2026, 2, 1), date(2026, 2, 28)), cargo="sdr",
+        pessoas_cargo=[], totais=_totais({}, {}), metas=Metas({}), emails_filtro=None,
+        hoje=date(2026, 2, 27),
+    )
+    assert resposta.corpo["dias_uteis"] == {"decorridos": 20, "total": 22}
+
+
 def test_pontuacao_da_comercial_usa_os_pesos_do_cargo():
     pessoa = _pessoa("1", "Jacob", "closer", "jacob@x.com")
     realizado = {(1, "reunioes_realizadas"): 2, (1, "ligacoes_agendadas"): 1, (1, "inscricoes_realizadas"): 1}
@@ -300,3 +319,70 @@ def test_comercial_sdr_usa_meta_do_cargo_sdr():
     )
     metrica = next(m for m in resposta.corpo["pessoas"][0]["metricas"] if m["metrica"] == "indicacoes")
     assert metrica["meta_periodo"] == 4
+
+
+def test_metrica_da_pessoa_traz_os_indicadores_da_aba_dashboard():
+    pessoa = _pessoa("9", "Nathan", "sdr", "nathan@x.com")
+    totais = _totais(realizado={(9, "inscricoes_realizadas"): 30}, dias_com_lancamento={(9, "inscricoes_realizadas"): 5})
+    metas = Metas({(9, "sdr", "inscricoes_realizadas"): 4})
+
+    resposta = montar_resposta_comercial(
+        periodo=_periodo_mes(), cargo="sdr", pessoas_cargo=[pessoa], totais=totais,
+        metas=metas, emails_filtro=None, hoje=date(2026, 9, 14),
+    )
+    por_metrica = {m["metrica"]: m for m in resposta.corpo["pessoas"][0]["metricas"]}
+
+    inscricoes = por_metrica["inscricoes_realizadas"]
+    assert inscricoes["meta_periodo"] == 88
+    assert inscricoes["pct_atingimento"] == 34.1
+    assert inscricoes["falta_folga"] == {"tipo": "falta", "valor": 58}
+    assert inscricoes["horas_restantes"] is None
+    assert inscricoes["media_necessaria"] == {"valor": 4.8, "unidade": "dia", "situacao": "pendente"}
+    assert inscricoes["previsao"] == 66.0
+
+    ligacoes = por_metrica["ligacoes_efetuadas"]
+    assert ligacoes["pct_atingimento"] is None
+    assert ligacoes["falta_folga"] is None
+    assert ligacoes["media_necessaria"] is None
+    assert ligacoes["previsao"] == 0.0
+
+
+def test_metricas_time_soma_realizado_de_todos_e_meta_de_quem_tem():
+    nathan = _pessoa("9", "Nathan", "sdr", "nathan@x.com")
+    bia = _pessoa("2", "Bia", "sdr", "bia@x.com")
+    totais = _totais(
+        realizado={(9, "inscricoes_realizadas"): 30, (2, "inscricoes_realizadas"): 10},
+        dias_com_lancamento={(9, "inscricoes_realizadas"): 5, (2, "inscricoes_realizadas"): 5},
+    )
+    # A Bia não tem meta: fica fora da soma da meta, mas o realizado dela entra.
+    metas = Metas({(9, "sdr", "inscricoes_realizadas"): 4})
+
+    resposta = montar_resposta_comercial(
+        periodo=_periodo_mes(), cargo="sdr", pessoas_cargo=[nathan, bia], totais=totais,
+        metas=metas, emails_filtro=None, hoje=date(2026, 9, 14),
+    )
+    corpo = resposta.corpo
+    assert [m["metrica"] for m in corpo["metricas_time"]] == list(metricas_do_cargo("sdr"))
+    time_inscricoes = next(m for m in corpo["metricas_time"] if m["metrica"] == "inscricoes_realizadas")
+    assert time_inscricoes == {
+        "metrica": "inscricoes_realizadas",
+        "nome_exibicao": nome_exibicao("inscricoes_realizadas", "sdr"),
+        "meta_periodo": 88,
+        "realizado": 40,
+        "pct_atingimento": 45.5,
+        "falta_folga": {"tipo": "falta", "valor": 48},
+        "horas_restantes": None,
+        "media_necessaria": {"valor": 4.0, "unidade": "dia", "situacao": "pendente"},
+        "previsao": 88.0,
+    }
+
+    resposta_filtrada = montar_resposta_comercial(
+        periodo=_periodo_mes(), cargo="sdr", pessoas_cargo=[nathan, bia], totais=totais,
+        metas=metas, emails_filtro={"nathan@x.com"}, hoje=date(2026, 9, 14),
+    )
+    filtrado = next(
+        m for m in resposta_filtrada.corpo["metricas_time"] if m["metrica"] == "inscricoes_realizadas"
+    )
+    # Com o filtro, o time é só a Nathan: o realizado da Bia não entra.
+    assert filtrado["realizado"] == 30
+    assert filtrado["meta_periodo"] == 88

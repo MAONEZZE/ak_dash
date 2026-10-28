@@ -13,7 +13,7 @@ from app.dominios.geral.banco import ContaDripify, EventoInscricoes, Faturamento
 from app.dominios.pessoas.banco import Pessoa
 from app.metas import Metas
 from app.metricas import NOME_EXIBICAO, nome_exibicao
-from app.periodo import Periodo, dias_uteis_decorridos
+from app.periodo import Periodo, dias_uteis_meta
 from app.pontuacao import atribuir_ranking, calcular_pontuacao
 
 # Colunas da tabela de pessoas, por cargo (decisão de produto).
@@ -185,8 +185,9 @@ def montar_resposta_geral(
     independentes do recorte de datas da página. `contas_dripify` segue o
     recorte (`periodo_saida`), como os cards claros.
     """
-    dias_decorridos = dias_uteis_decorridos(periodo_metas.inicio, periodo_metas.fim, hoje=hoje)
-    dias_totais = dias_uteis_decorridos(periodo_metas.inicio, periodo_metas.fim, hoje=periodo_metas.fim)
+    dias = dias_uteis_meta(periodo_metas.inicio, periodo_metas.fim, hoje)
+    dias_decorridos = dias["decorridos"]
+    dias_totais = dias["total"]
     fracao_decorrida = dias_decorridos / dias_totais if dias_totais else 0.0
 
     pessoas_por_cargo = {"sdr": pessoas_sdr, "closer": pessoas_closer}

@@ -59,11 +59,25 @@ def test_saude_mostra_status_dos_workers(monkeypatch):
     w = workers.Worker(workers.PLANILHAS[0], "ID", lambda _id: [])
     w.status = {"ultima_leitura_ok": "2026-10-27T10:00:00-03:00", "ultimo_erro": None}
     monkeypatch.setattr(workers, "ATIVOS", [w])
+    monkeypatch.setattr(workers, "MOTIVO_INATIVOS", None)
     resposta = TestClient(app).get("/saude")
     assert resposta.status_code == 200
     assert resposta.json() == {
         "status": "ok",
         "workers": {"sellers": {"ultima_leitura_ok": "2026-10-27T10:00:00-03:00", "ultimo_erro": None}},
+        "workers_motivo": None,
+    }
+
+
+def test_saude_mostra_motivo_dos_workers_inativos(monkeypatch):
+    monkeypatch.setattr(workers, "ATIVOS", [])
+    monkeypatch.setattr(workers, "MOTIVO_INATIVOS", "GOOGLE_SERVICE_ACCOUNT_JSON ausente ou ilegível no .env")
+    resposta = TestClient(app).get("/saude")
+    assert resposta.status_code == 200
+    assert resposta.json() == {
+        "status": "ok",
+        "workers": {},
+        "workers_motivo": "GOOGLE_SERVICE_ACCOUNT_JSON ausente ou ilegível no .env",
     }
 
 
@@ -93,9 +107,28 @@ def test_comercial_sdr_200(monkeypatch):
     assert set(corpo["dias_uteis"]) == {"decorridos", "total"}
 
 
+def test_comercial_sdr_devolve_metricas_time_com_os_indicadores(monkeypatch):
+    resposta = _client(monkeypatch).get("/comercial/sdr", params={"granularidade": "mes", "periodo": "2026-09"})
+    assert resposta.status_code == 200
+    metricas_time = resposta.json()["metricas_time"]
+    assert len(metricas_time) == 5
+    chaves = {"metrica", "nome_exibicao", "meta_periodo", "realizado", "pct_atingimento", "falta_folga", "horas_restantes", "media_necessaria", "previsao"}
+    for item in metricas_time:
+        assert set(item) == chaves
+
+
 def test_comercial_closer_200(monkeypatch):
     resposta = _client(monkeypatch).get("/comercial/closer", params={"granularidade": "mes", "periodo": "2026-09"})
     assert resposta.status_code == 200
+
+
+def test_comercial_seller_200_so_com_metricas_de_seller(monkeypatch):
+    monkeypatch.setattr(f"{__name__}._USER_CARGOS", [*_USER_CARGOS, {"id_user": 9, "cargo": "seller"}])
+    resposta = _client(monkeypatch).get("/comercial/seller", params={"granularidade": "mes", "periodo": "2026-09"})
+    assert resposta.status_code == 200
+    pessoas = resposta.json()["pessoas"]
+    assert [p["nome"] for p in pessoas] == ["Nathan"]
+    assert [m["metrica"] for m in pessoas[0]["metricas"]] == ["fups", "numeros_captados", "indicacoes"]
 
 
 def test_comercial_400_parametro_invalido(monkeypatch):

@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import calendar
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 TZ_SP = ZoneInfo("America/Sao_Paulo")
+
+DIAS_UTEIS_MES = 22
 
 
 def hoje_sp() -> date:
@@ -96,3 +98,35 @@ def dias_uteis_decorridos(inicio: date, fim: date, hoje: date | None = None) -> 
             dias += 1
         d += timedelta(days=1)
     return dias
+
+
+def dias_uteis_totais(inicio: date, fim: date) -> int:
+    """Total de dias úteis do período, sem cortar por hoje.
+
+    regra da planilha: mês tem sempre 22 dias úteis.
+    """
+    if inicio.day == 1 and (inicio.year, inicio.month) == (fim.year, fim.month) and fim.day == calendar.monthrange(fim.year, fim.month)[1]:
+        return DIAS_UTEIS_MES
+    if inicio == date(inicio.year, 1, 1) and fim == date(inicio.year, 12, 31):
+        return DIAS_UTEIS_MES * 12
+    return dias_uteis_decorridos(inicio, fim, hoje=fim)
+
+
+def dias_uteis_meta(inicio: date, fim: date, hoje: date) -> dict[str, int]:
+    """Decorridos e total do período; decorridos nunca passa do total."""
+    total = dias_uteis_totais(inicio, fim)
+    return {"decorridos": min(dias_uteis_decorridos(inicio, fim, hoje=hoje), total), "total": total}
+
+
+def horas_restantes(dia: date, agora: datetime, inicio: time, fim: time) -> float:
+    """Horas de expediente que ainda sobram no `dia` a partir de `agora` (SP)."""
+    agora = agora.astimezone(TZ_SP)
+
+    def _horas(t: time) -> float:
+        return t.hour + t.minute / 60 + t.second / 3600
+
+    if dia < agora.date():
+        return 0.0
+    if dia > agora.date():
+        return round(_horas(fim) - _horas(inicio), 1)
+    return round(max(0.0, _horas(fim) - max(_horas(inicio), _horas(agora.time()))), 1)
