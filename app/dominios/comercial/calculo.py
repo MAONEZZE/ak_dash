@@ -16,7 +16,7 @@ from app.dominios.comercial.banco import TotaisCargo
 from app.dominios.pessoas.banco import Pessoa
 from app.metas import Metas
 from app.metricas import metricas_do_cargo, nome_exibicao
-from app.periodo import Periodo, dias_uteis_decorridos
+from app.periodo import Periodo, dias_uteis_meta
 from app.pontuacao import atribuir_ranking, calcular_pontuacao
 
 
@@ -116,10 +116,7 @@ def montar_resposta_comercial(
         "periodo_parcial": periodo_parcial,
         # Mesmo cálculo de `/geral`: período passado sai decorridos = total,
         # período futuro sai decorridos = 0.
-        "dias_uteis": {
-            "decorridos": dias_uteis_decorridos(periodo.inicio, periodo.fim, hoje=hoje),
-            "total": dias_uteis_decorridos(periodo.inicio, periodo.fim, hoje=periodo.fim),
-        },
+        "dias_uteis": dias_uteis_meta(periodo.inicio, periodo.fim, hoje),
         "avisos": avisos,
         "pessoas": pessoas_saida,
         "serie_diaria": [

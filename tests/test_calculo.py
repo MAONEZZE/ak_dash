@@ -274,6 +274,24 @@ def test_dias_uteis_de_mes_futuro_decorridos_zero():
     assert resposta.corpo["dias_uteis"] == {"decorridos": 0, "total": 22}
 
 
+def test_dias_uteis_do_mes_sao_22_com_decorridos_limitados():
+    # Dezembro/2026 tem 23 dias úteis reais, mas a regra da planilha fixa o mês em 22.
+    resposta = montar_resposta_comercial(
+        periodo=Periodo("mes", date(2026, 12, 1), date(2026, 12, 31)), cargo="sdr",
+        pessoas_cargo=[], totais=_totais({}, {}), metas=Metas({}), emails_filtro=None,
+        hoje=date(2026, 12, 31),
+    )
+    assert resposta.corpo["dias_uteis"] == {"decorridos": 22, "total": 22}
+
+    # Fevereiro/2026: 20 dias úteis reais até 27/02 (sexta); o total continua 22 pela regra da planilha.
+    resposta = montar_resposta_comercial(
+        periodo=Periodo("mes", date(2026, 2, 1), date(2026, 2, 28)), cargo="sdr",
+        pessoas_cargo=[], totais=_totais({}, {}), metas=Metas({}), emails_filtro=None,
+        hoje=date(2026, 2, 27),
+    )
+    assert resposta.corpo["dias_uteis"] == {"decorridos": 20, "total": 22}
+
+
 def test_pontuacao_da_comercial_usa_os_pesos_do_cargo():
     pessoa = _pessoa("1", "Jacob", "closer", "jacob@x.com")
     realizado = {(1, "reunioes_realizadas"): 2, (1, "ligacoes_agendadas"): 1, (1, "inscricoes_realizadas"): 1}
