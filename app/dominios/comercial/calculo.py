@@ -10,13 +10,14 @@ comparando percentual de meta, não valor absoluto.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, time
 
 from app.dominios.comercial.banco import TotaisCargo
 from app.dominios.pessoas.banco import Pessoa
+from app.indicadores import calcular_indicadores
 from app.metas import Metas
 from app.metricas import metricas_do_cargo, nome_exibicao
-from app.periodo import Periodo, dias_uteis_meta
+from app.periodo import TZ_SP, Periodo, dias_uteis_meta
 from app.pontuacao import atribuir_ranking, calcular_pontuacao
 
 
@@ -45,12 +46,18 @@ def montar_resposta_comercial(
     metas: Metas,
     emails_filtro: set[str] | None,
     hoje: date,
+    *,
+    agora: datetime | None = None,
+    expediente_inicio: time = time(10, 0),
+    expediente_fim: time = time(19, 0),
 ) -> RespostaCargo:
     """`cargo` só decide QUAIS métricas entram nas colunas (`metricas_do_cargo`);
 
     o valor da meta vem de cada pessoa. Pessoa sem meta cadastrada numa
     métrica fica com `meta_periodo` `None` e status `sem_meta` — nunca 0.
     """
+    agora = agora or datetime.combine(hoje, time(0, 0), tzinfo=TZ_SP)
+    dias_uteis = dias_uteis_meta(periodo.inicio, periodo.fim, hoje)
     pessoas_alvo = [p for p in pessoas_cargo if emails_filtro is None or p.email in emails_filtro]
     colunas = metricas_do_cargo(cargo)
 
@@ -76,6 +83,9 @@ def montar_resposta_comercial(
                     "dias_com_lacuna": max(
                         0,
                         (periodo.fim - periodo.inicio).days + 1 - dias_com_lancamento,
+                    ),
+                    **calcular_indicadores(
+                        realizado, meta_periodo, periodo, dias_uteis, agora, expediente_inicio, expediente_fim,
                     ),
                 }
             )
@@ -116,7 +126,7 @@ def montar_resposta_comercial(
         "periodo_parcial": periodo_parcial,
         # Mesmo cálculo de `/geral`: período passado sai decorridos = total,
         # período futuro sai decorridos = 0.
-        "dias_uteis": dias_uteis_meta(periodo.inicio, periodo.fim, hoje),
+        "dias_uteis": dias_uteis,
         "avisos": avisos,
         "pessoas": pessoas_saida,
         "serie_diaria": [

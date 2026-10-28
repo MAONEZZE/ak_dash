@@ -318,3 +318,29 @@ def test_comercial_sdr_usa_meta_do_cargo_sdr():
     )
     metrica = next(m for m in resposta.corpo["pessoas"][0]["metricas"] if m["metrica"] == "indicacoes")
     assert metrica["meta_periodo"] == 4
+
+
+def test_metrica_da_pessoa_traz_os_indicadores_da_aba_dashboard():
+    pessoa = _pessoa("9", "Nathan", "sdr", "nathan@x.com")
+    totais = _totais(realizado={(9, "inscricoes_realizadas"): 30}, dias_com_lancamento={(9, "inscricoes_realizadas"): 5})
+    metas = Metas({(9, "sdr", "inscricoes_realizadas"): 4})
+
+    resposta = montar_resposta_comercial(
+        periodo=_periodo_mes(), cargo="sdr", pessoas_cargo=[pessoa], totais=totais,
+        metas=metas, emails_filtro=None, hoje=date(2026, 9, 14),
+    )
+    por_metrica = {m["metrica"]: m for m in resposta.corpo["pessoas"][0]["metricas"]}
+
+    inscricoes = por_metrica["inscricoes_realizadas"]
+    assert inscricoes["meta_periodo"] == 88
+    assert inscricoes["pct_atingimento"] == 34.1
+    assert inscricoes["falta_folga"] == {"tipo": "falta", "valor": 58}
+    assert inscricoes["horas_restantes"] is None
+    assert inscricoes["media_necessaria"] == {"valor": 4.8, "unidade": "dia", "situacao": "pendente"}
+    assert inscricoes["previsao"] == 66.0
+
+    ligacoes = por_metrica["ligacoes_efetuadas"]
+    assert ligacoes["pct_atingimento"] is None
+    assert ligacoes["falta_folga"] is None
+    assert ligacoes["media_necessaria"] is None
+    assert ligacoes["previsao"] == 0.0
