@@ -1,6 +1,10 @@
 """Indicadores da aba Dashboard das planilhas (% de atingimento, Falta/Folga, Horas restantes, Média necessária, Previsão), sem I/O."""
 from __future__ import annotations
 
+from datetime import datetime, time
+
+from app.periodo import Periodo, horas_restantes
+
 
 def pct_atingimento(realizado: int, meta: int | None) -> float | None:
     if not meta:
@@ -32,3 +36,30 @@ def previsao(realizado: int, decorridos: int, total: int) -> float | None:
     if decorridos <= 0:
         return None
     return round(realizado / decorridos * total, 1)
+
+
+def calcular_indicadores(
+    realizado: int,
+    meta: int | None,
+    periodo: Periodo,
+    dias_uteis: dict[str, int],
+    agora: datetime,
+    expediente_inicio: time,
+    expediente_fim: time,
+) -> dict:
+    if periodo.granularidade == "dia":
+        horas = horas_restantes(periodo.inicio, agora, expediente_inicio, expediente_fim)
+        media = media_necessaria(realizado, meta, horas, "hora")
+        projecao = None
+    else:
+        horas = None
+        restantes = dias_uteis["total"] - dias_uteis["decorridos"]
+        media = media_necessaria(realizado, meta, restantes, "dia")
+        projecao = None
+    return {
+        "pct_atingimento": pct_atingimento(realizado, meta),
+        "falta_folga": falta_folga(realizado, meta),
+        "horas_restantes": horas,
+        "media_necessaria": media,
+        "previsao": projecao,
+    }

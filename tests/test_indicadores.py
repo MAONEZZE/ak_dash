@@ -1,6 +1,9 @@
+from datetime import date, datetime, time
+
 import pytest
 
-from app.indicadores import falta_folga, media_necessaria, pct_atingimento, previsao
+from app.indicadores import calcular_indicadores, falta_folga, media_necessaria, pct_atingimento, previsao
+from app.periodo import Periodo, TZ_SP
 
 
 @pytest.mark.parametrize(
@@ -57,3 +60,19 @@ def test_media_necessaria(realizado, meta, restantes, unidade, esperado):
 )
 def test_previsao(realizado, decorridos, total, esperado):
     assert previsao(realizado, decorridos, total) == esperado
+
+
+def test_calcular_indicadores_no_dia_usa_horas_restantes():
+    periodo = Periodo("dia", date(2026, 10, 28), date(2026, 10, 28))
+    dias_uteis = {"decorridos": 1, "total": 1}
+    agora = datetime(2026, 10, 28, 15, 30, tzinfo=TZ_SP)
+
+    resultado = calcular_indicadores(10, 40, periodo, dias_uteis, agora, time(10, 0), time(19, 0))
+
+    assert resultado == {
+        "pct_atingimento": 25.0,
+        "falta_folga": {"tipo": "falta", "valor": 30},
+        "horas_restantes": 3.5,
+        "media_necessaria": {"valor": 8.6, "unidade": "hora", "situacao": "pendente"},
+        "previsao": None,
+    }
