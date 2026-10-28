@@ -59,11 +59,25 @@ def test_saude_mostra_status_dos_workers(monkeypatch):
     w = workers.Worker(workers.PLANILHAS[0], "ID", lambda _id: [])
     w.status = {"ultima_leitura_ok": "2026-10-27T10:00:00-03:00", "ultimo_erro": None}
     monkeypatch.setattr(workers, "ATIVOS", [w])
+    monkeypatch.setattr(workers, "MOTIVO_INATIVOS", None)
     resposta = TestClient(app).get("/saude")
     assert resposta.status_code == 200
     assert resposta.json() == {
         "status": "ok",
         "workers": {"sellers": {"ultima_leitura_ok": "2026-10-27T10:00:00-03:00", "ultimo_erro": None}},
+        "workers_motivo": None,
+    }
+
+
+def test_saude_mostra_motivo_dos_workers_inativos(monkeypatch):
+    monkeypatch.setattr(workers, "ATIVOS", [])
+    monkeypatch.setattr(workers, "MOTIVO_INATIVOS", "GOOGLE_SERVICE_ACCOUNT_JSON ausente ou ilegível no .env")
+    resposta = TestClient(app).get("/saude")
+    assert resposta.status_code == 200
+    assert resposta.json() == {
+        "status": "ok",
+        "workers": {},
+        "workers_motivo": "GOOGLE_SERVICE_ACCOUNT_JSON ausente ou ilegível no .env",
     }
 
 

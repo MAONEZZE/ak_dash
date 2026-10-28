@@ -47,4 +47,8 @@ app.include_router(financeiro_router)
 
 @app.get("/saude", tags=["infra"])
 def saude() -> dict:
-    return {"status": "ok", "workers": {w.planilha.nome: w.status for w in workers.ATIVOS}}
+    return {
+        "status": "ok",
+        "workers": {w.planilha.nome: w.status for w in workers.ATIVOS},
+        "workers_motivo": workers.MOTIVO_INATIVOS,
+    }
