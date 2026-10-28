@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from datetime import time
 
 from dotenv import load_dotenv
 
@@ -54,6 +55,13 @@ class Settings:
     )
     worker_intervalo_segundos: float = field(
         default_factory=lambda: float(os.getenv("WORKER_INTERVALO_SEGUNDOS", "5"))
+    )
+    # Expediente (America/Sao_Paulo) — base de "Horas restantes" da aba Dashboard.
+    expediente_inicio: time = field(
+        default_factory=lambda: time.fromisoformat(os.getenv("EXPEDIENTE_INICIO", "10:00"))
+    )
+    expediente_fim: time = field(
+        default_factory=lambda: time.fromisoformat(os.getenv("EXPEDIENTE_FIM", "19:00"))
     )
     google_service_account_json: str | None = field(
         default_factory=lambda: os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON") or None
