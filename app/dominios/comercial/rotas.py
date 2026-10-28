@@ -56,6 +56,16 @@ def _comercial(granularidade: str, periodo_str: str, pessoas: list[str] | None, 
     return resultado.corpo
 
 
+@router.get("/comercial/seller")
+def get_comercial_seller(
+    granularidade: str = Query(...),
+    periodo: str = Query(...),
+    pessoas: list[str] | None = Query(default=None),
+    _usuario: dict = Depends(exigir_usuario),
+) -> dict:
+    return _comercial(granularidade, periodo, pessoas, cargo="seller")
+
+
 @router.get("/comercial/sdr")
 def get_comercial_sdr(
     granularidade: str = Query(...),

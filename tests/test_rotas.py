@@ -98,6 +98,15 @@ def test_comercial_closer_200(monkeypatch):
     assert resposta.status_code == 200
 
 
+def test_comercial_seller_200_so_com_metricas_de_seller(monkeypatch):
+    monkeypatch.setattr(f"{__name__}._USER_CARGOS", [*_USER_CARGOS, {"id_user": 9, "cargo": "seller"}])
+    resposta = _client(monkeypatch).get("/comercial/seller", params={"granularidade": "mes", "periodo": "2026-09"})
+    assert resposta.status_code == 200
+    pessoas = resposta.json()["pessoas"]
+    assert [p["nome"] for p in pessoas] == ["Nathan"]
+    assert [m["metrica"] for m in pessoas[0]["metricas"]] == ["fups", "numeros_captados", "indicacoes"]
+
+
 def test_comercial_400_parametro_invalido(monkeypatch):
     resposta = _client(monkeypatch).get("/comercial/sdr", params={"granularidade": "mes", "periodo": "2026-13"})
     assert resposta.status_code == 400
