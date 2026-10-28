@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from app import planilha_financeiro
 
 
@@ -58,3 +60,10 @@ def test_linha_sem_id_e_ignorada():
     )
 
     assert [v.venda["id_planilha"] for v in vendas] == [8, 9]
+
+
+def test_cabecalho_fora_do_formato_levanta_value_error():
+    with pytest.raises(ValueError, match="BASE_VENDAS"):
+        planilha_financeiro.ler_base_vendas([["Data", "ID"], _linha()], 2026)
+    with pytest.raises(ValueError, match="BASE_VENDAS"):
+        planilha_financeiro.ler_base_vendas([], 2026)

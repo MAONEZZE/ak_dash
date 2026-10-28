@@ -4,6 +4,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
+from app.planilhas import normalizar
+
 COLUNAS_VENDA: list[str] = [
     "id_planilha",
     "data_venda",
@@ -58,6 +60,12 @@ def _inteiro_ou_none(valor) -> int | None:
 
 
 def ler_base_vendas(linhas: list[list], ano: int) -> list[VendaPlanilha]:
+    if (
+        not linhas
+        or normalizar(_celula(linhas[0], 0) or "") != "id"
+        or normalizar(_celula(linhas[0], 1) or "") != "data da venda"
+    ):
+        raise ValueError("BASE_VENDAS fora do formato esperado (A1=ID, B1=Data da Venda)")
     vendas: list[VendaPlanilha] = []
     for linha in linhas[1:]:
         if _celula(linha, 0) is None:
