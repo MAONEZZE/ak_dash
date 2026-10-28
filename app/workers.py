@@ -180,12 +180,25 @@ class Worker:
 
 
 ATIVOS: list[Worker] = []
+MOTIVO_INATIVOS: str | None = None
 
 
 def iniciar(config: Settings) -> threading.Event:
+    global MOTIVO_INATIVOS
     parar = threading.Event()
     ATIVOS.clear()
-    if not (config.workers_ativos and config.google_service_account_json and config.supabase_url and config.supabase_service_key):
+    MOTIVO_INATIVOS = None
+    if not config.workers_ativos:
+        return parar
+    if not config.google_service_account_json:
+        motivo = "GOOGLE_SERVICE_ACCOUNT_JSON ausente ou ilegível no .env"
+    elif not (config.supabase_url and config.supabase_service_key):
+        motivo = "SUPABASE_URL ou SUPABASE_SERVICE_KEY ausente"
+    else:
+        motivo = None
+    if motivo:
+        MOTIVO_INATIVOS = motivo
+        logger.warning("Workers das planilhas não subiram: %s", motivo)
         return parar
     ids = {
         "sellers": config.planilha_sellers_id,
