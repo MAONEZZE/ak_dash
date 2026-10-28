@@ -228,6 +228,21 @@ def test_dias_uteis_com_granularidade_dia():
     assert resposta["dias_uteis"] == {"decorridos": 1, "total": 1}
 
 
+def test_mes_com_23_dias_uteis_reais_usa_22_nos_dias_e_na_meta():
+    dezembro = Periodo("mes", date(2026, 12, 1), date(2026, 12, 31))
+    sdr = [Pessoa(id="9", nome="Nathan", cargo="sdr", email="n@x.com")]
+    metas = Metas({(NATHAN, "sdr", "ligacoes_realizadas"): 20})
+    resposta = _montar(
+        periodo_metas=dezembro, periodo_saida=dezembro, hoje=date(2026, 12, 31),
+        pessoas_sdr=sdr, pessoas_closer=[],
+        totais_sdr=_totais({(9, "ligacoes_realizadas"): 100}), totais_closer=_totais({}),
+        metas=metas, faturamento=_faturamento_vazio(), eventos=[],
+    )
+    assert resposta["dias_uteis"] == {"decorridos": 22, "total": 22}
+    card = next(c for c in resposta["cards"] if c["metrica"] == "ligacoes_realizadas")
+    assert card["meta"] == 440
+
+
 def test_inscritos_e_aprovados_nao_sao_mais_card_de_periodo():
     # Viraram `eventos` (próximos eventos girando no card); um valor em
     # `metricas_faturamento` com essas chaves não pode ressuscitar o card.
