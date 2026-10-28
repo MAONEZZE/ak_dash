@@ -6,6 +6,13 @@ from app import planilha_financeiro
 CABECALHO = ["ID", "Data da Venda", "Cliente", "Telefone"] + [""] * 42
 
 
+def _linha(trocas: dict[int, object] | None = None) -> list:
+    linha = [8, 46037, "Fernando Seguim", "", "LinkedIn", "", "", "Produto de Ativação", 9893.8, "À vista", 9893.8, "PIX", "", 0.1, 0, 8904.42, 1000, "Cartão", 12, 0.1949, 724.59, "Dom antecipou"] + [""] * 24
+    for indice, valor in (trocas or {}).items():
+        linha[indice] = valor
+    return linha
+
+
 def test_linha_da_base_vira_venda_com_campos_do_banco():
     linha = [8, 46037, "Fernando Seguim", "", "LinkedIn", "", "", "Produto de Ativação", 9893.8, "À vista", 9893.8, "PIX", "", 0.1, 0, 8904.42, 1000, "Cartão", 12, 0.1949, 724.59, "Dom antecipou"] + [""] * 24
 
@@ -37,3 +44,9 @@ def test_linha_da_base_vira_venda_com_campos_do_banco():
     }
     assert venda.cliente_nome == "Fernando Seguim"
     assert venda.recebimentos == []
+
+
+def test_data_em_texto_dd_mm_aaaa_e_aceita():
+    vendas = planilha_financeiro.ler_base_vendas([CABECALHO, _linha({1: "23/10/2026"})], 2026)
+
+    assert vendas[0].venda["data_venda"] == "2026-10-23T00:00:00"

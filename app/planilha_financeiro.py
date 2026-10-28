@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 COLUNAS_VENDA: list[str] = [
     "id_planilha",
@@ -48,6 +48,8 @@ def _celula(linha: list, indice: int):
 
 
 def _data(valor) -> date:
+    if isinstance(valor, str):
+        return datetime.strptime(valor.strip(), "%d/%m/%Y").date()
     return date(1899, 12, 30) + timedelta(days=int(valor))
 
 
