@@ -24,16 +24,17 @@ from datetime import date
 from typing import Iterable
 
 from app.fontes.banco import query
-from app.periodo import dias_uteis_decorridos
+from app.periodo import dias_uteis_totais
 
 
 def dias_uteis_no_periodo(inicio: date, fim: date) -> int:
-    """Dias úteis (seg-sex) em [inicio, fim] inteiro, futuro incluído — o
+    """Multiplicador da meta diária: mês inteiro = 22, ano inteiro = 264, resto = dias úteis reais.
 
-    multiplicador da meta diária. Setembro/2026 dá 22; uma semana dá 5; um
-    sábado sozinho dá 0.
+    Mês e ano seguem a regra da planilha (22 dias úteis por mês, sem olhar o
+    calendário). Qualquer outro intervalo conta os dias úteis (seg-sex) de
+    [inicio, fim]: uma semana dá 5; um sábado sozinho dá 0.
     """
-    return dias_uteis_decorridos(inicio, fim, hoje=fim)
+    return dias_uteis_totais(inicio, fim)
 
 
 @dataclass(frozen=True)
