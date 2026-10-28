@@ -305,3 +305,23 @@ def test_cada_venda_traz_recebimentos_do_periodo_em_ordem_de_mes(monkeypatch):
     assert por_planilha[26]["recebimentos"] == []
     receb = next(c for c in chamadas if c["tabela"] == "recebimentos_faturamento")
     assert receb["filtros"] == {"and": "(mes.gte.2026-01-01,mes.lte.2026-12-31)"}
+
+
+def test_venda_de_antes_do_periodo_com_recebimento_no_periodo_entra_na_lista(monkeypatch):
+    def _fake_query(tabela, filtros=None, *a, **k):
+        filtros = filtros or {}
+        if tabela == "metricas_faturamento":
+            if "and" in filtros:
+                return []
+            if filtros.get("id_planilha") == "in.(5)":
+                return [{"id": 7, "id_planilha": 5, "data_venda": "2025-11-10T00:00:00", "valor_bruto_contrato": 60000}]
+        if tabela == "recebimentos_faturamento":
+            return [{"id_planilha_venda": 5, "mes": "2026-02-01", "pago": 20000, "liquido": 18000}]
+        return []
+
+    monkeypatch.setattr(banco_mod, "query", _fake_query)
+    vendas = banco_mod.buscar_vendas_detalhadas(date(2026, 1, 1), date(2026, 12, 31))
+    assert len(vendas) == 1
+    assert vendas[0]["id_planilha"] == 5
+    assert vendas[0]["data_venda"] == "2025-11-10T00:00:00"
+    assert vendas[0]["recebimentos"] == [{"mes": "2026-02", "pago": 20000, "liquido": 18000}]

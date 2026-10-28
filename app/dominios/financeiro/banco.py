@@ -44,16 +44,25 @@ def buscar_vendas_detalhadas(inicio: date, fim: date) -> list[dict]:
         {"and": f"(data_venda.gte.{inicio.isoformat()},data_venda.lt.{fim_exclusivo.isoformat()})"},
     )
 
+    receb = query(
+        "recebimentos_faturamento",
+        {"and": f"(mes.gte.{inicio.replace(day=1).isoformat()},mes.lte.{fim.isoformat()})"},
+    )
+
+    # Venda fechada antes do período, mas com recebimento nele, precisa aparecer.
+    faltando = sorted(
+        {int(r["id_planilha_venda"]) for r in receb}
+        - {int(v["id_planilha"]) for v in vendas if v.get("id_planilha") is not None}
+    )
+    if faltando:
+        vendas = vendas + query("metricas_faturamento", {"id_planilha": f"in.({','.join(map(str, faltando))})"})
+
     ids_clientes = [int(v["id_cliente"]) for v in vendas if v.get("id_cliente") is not None]
     clientes = buscar_clientes(ids_clientes)
 
     ids_closers = [int(v["user_closer"]) for v in vendas if v.get("user_closer") is not None]
     closers = buscar_closers(ids_closers)
 
-    receb = query(
-        "recebimentos_faturamento",
-        {"and": f"(mes.gte.{inicio.replace(day=1).isoformat()},mes.lte.{fim.isoformat()})"},
-    )
     por_venda: dict[int, list[dict]] = {}
     for r in receb:
         por_venda.setdefault(int(r["id_planilha_venda"]), []).append(
