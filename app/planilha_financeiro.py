@@ -1,6 +1,7 @@
 """Leitura da aba BASE_VENDAS da planilha do financeiro (Isaac Newton2.0), sem I/O. Usado pelo WorkerFinanceiro."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
@@ -70,6 +71,16 @@ def _inteiro_ou_none(valor) -> int | None:
     return None if valor is None else int(valor)
 
 
+def _telefone(valor) -> int | None:
+    if valor is None:
+        return None
+    texto = str(int(valor)) if isinstance(valor, (int, float)) else str(valor)
+    digitos = re.sub(r"\D", "", texto)
+    if not digitos or int(digitos) == 0:
+        return None
+    return int(digitos)
+
+
 def ler_base_vendas(linhas: list[list], ano: int) -> list[VendaPlanilha]:
     if (
         not linhas
@@ -110,7 +121,7 @@ def ler_base_vendas(linhas: list[list], ano: int) -> list[VendaPlanilha]:
             VendaPlanilha(
                 venda=venda,
                 cliente_nome=_celula(linha, 2),
-                cliente_telefone=None,
+                cliente_telefone=_telefone(_celula(linha, 3)),
                 sdr=sdr,
                 closer=closer,
                 recebimentos=[],

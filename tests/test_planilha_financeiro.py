@@ -54,6 +54,21 @@ def test_data_em_texto_dd_mm_aaaa_e_aceita():
     assert vendas[0].venda["data_venda"] == "2026-10-23T00:00:00"
 
 
+def test_telefone_vira_inteiro_so_com_digitos():
+    vendas = planilha_financeiro.ler_base_vendas(
+        [
+            CABECALHO,
+            _linha({0: 1, 3: "11 94255-6237"}),
+            _linha({0: 2, 3: 11992257145}),
+            _linha({0: 3, 3: ""}),
+            _linha({0: 4, 3: "0"}),
+        ],
+        2026,
+    )
+
+    assert [v.cliente_telefone for v in vendas] == [11942556237, 11992257145, None, None]
+
+
 def test_linha_sem_id_e_ignorada():
     vendas = planilha_financeiro.ler_base_vendas(
         [CABECALHO, _linha(), _linha({0: ""}), [], _linha({0: 9})], 2026
