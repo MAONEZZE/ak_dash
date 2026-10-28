@@ -105,6 +105,23 @@ def montar_resposta_comercial(
 
     atribuir_ranking(pessoas_saida, "pontuacao_total")
 
+    ids_alvo = [int(p.id) for p in pessoas_alvo]
+    metricas_time = []
+    for chave_metrica in colunas:
+        realizado = sum(totais.realizado.get((i, chave_metrica), 0) for i in ids_alvo)
+        meta = metas.somar(periodo.inicio, periodo.fim, ids_alvo, cargo, chave_metrica)
+        metricas_time.append(
+            {
+                "metrica": chave_metrica,
+                "nome_exibicao": nome_exibicao(chave_metrica, cargo),
+                "meta_periodo": meta,
+                "realizado": realizado,
+                **calcular_indicadores(
+                    realizado, meta, periodo, dias_uteis, agora, expediente_inicio, expediente_fim,
+                ),
+            }
+        )
+
     mes_corrente_inicio = date(hoje.year, hoje.month, 1)
     periodo_parcial = periodo.fim >= mes_corrente_inicio and periodo.inicio <= hoje
 
@@ -129,6 +146,7 @@ def montar_resposta_comercial(
         "dias_uteis": dias_uteis,
         "avisos": avisos,
         "pessoas": pessoas_saida,
+        "metricas_time": metricas_time,
         "serie_diaria": [
             {"dia": dia.isoformat(), "metricas": metricas}
             for dia, metricas in sorted(totais.serie_diaria.items())
