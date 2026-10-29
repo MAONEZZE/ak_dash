@@ -364,6 +364,27 @@ def test_financeiro_primeiro_ciclo_grava_vendas_com_cliente_e_recebimentos(monke
     assert w.planilha.nome == "financeiro"
 
 
+def test_financeiro_ciclo_sem_mudanca_nao_grava(monkeypatch):
+    banco = _Banco({
+        "cliente_faturamento": [{"id": 84, "nome": "Fernando Seguim", "telefone": 11942556237}],
+        "metricas_faturamento": [],
+        "recebimentos_faturamento": [],
+    })
+    invalidacoes = _instalar(monkeypatch, banco)
+    cab_fin = ["ID", "Data da Venda"] + [""] * 44
+    linha = [8, 46037, "Fernando Seguim", "11 942556237", "", "", "Jacob", "", 9893.8, "", 9893.8, "PIX", "", 0.1, 0, 8904.42] + [""] * 6 + [9893.8, 8904.42]
+    w = workers.WorkerFinanceiro("ID_FIN", 2026, lambda _id: [("BASE_VENDAS", [cab_fin, linha])])
+    w.ciclo()
+    banco.upserts.clear()
+    invalidacoes.clear()
+
+    w.ciclo()
+
+    assert banco.upserts == []
+    assert banco.apagados == []
+    assert invalidacoes == []
+
+
 def test_financeiro_cria_cliente_novo_e_reaproveita_cliente_sem_telefone_pelo_nome(monkeypatch):
     class _BancoClientes(_Banco):
         def upsert(self, tabela, linhas, on_conflict, schema=None):
