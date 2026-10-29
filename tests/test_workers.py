@@ -362,3 +362,36 @@ def test_financeiro_primeiro_ciclo_grava_vendas_com_cliente_e_recebimentos(monke
     assert banco.apagados == []
     assert len(invalidacoes) == 1
     assert w.planilha.nome == "financeiro"
+
+
+def test_financeiro_cria_cliente_novo_e_reaproveita_cliente_sem_telefone_pelo_nome(monkeypatch):
+    class _BancoClientes(_Banco):
+        def upsert(self, tabela, linhas, on_conflict, schema=None):
+            if not linhas:
+                return
+            super().upsert(tabela, linhas, on_conflict, schema)
+            if tabela == "cliente_faturamento":
+                for l in linhas:
+                    self.tabelas[tabela].append({"telefone": None, **l, "id": 900 + len(self.tabelas[tabela])})
+
+    banco = _BancoClientes({
+        "cliente_faturamento": [{"id": 90, "nome": "Renata Perri", "telefone": 0}],
+        "metricas_faturamento": [],
+        "recebimentos_faturamento": [],
+    })
+    _instalar(monkeypatch, banco)
+    cab_fin = ["ID", "Data da Venda"] + [""] * 44
+    def linha(id_, nome, telefone):
+        return [id_, 46037, nome, telefone, "", "", "Jacob", "", 9893.8, "", 9893.8, "PIX", "", 0.1, 0, 8904.42] + [""] * 6 + [9893.8, 8904.42]
+    abas = [("BASE_VENDAS", [cab_fin, linha(1, "Ana Nova", "11 91111-1111"), linha(2, "renata perri", ""), linha(3, "Sem Fone", "")])]
+    w = workers.WorkerFinanceiro("ID_FIN", 2026, lambda _id: abas)
+
+    w.ciclo()
+
+    clientes = [(t, _sem_carimbo(l), c) for t, l, c in banco.upserts if t == "cliente_faturamento"]
+    assert clientes == [
+        ("cliente_faturamento", [{"nome": "Ana Nova", "telefone": 11911111111}], "telefone"),
+        ("cliente_faturamento", [{"nome": "Sem Fone"}], "id"),
+    ]
+    venda = next(l for t, l, _ in banco.upserts if t == "metricas_faturamento")
+    assert {l["id_planilha"]: l["id_cliente"] for l in _sem_carimbo(venda)} == {1: 901, 2: 90, 3: 902}

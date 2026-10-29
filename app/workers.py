@@ -215,15 +215,32 @@ class WorkerFinanceiro(Worker):
         }
 
     def _resolver_clientes(self, lidas: list) -> dict[int, int | None]:
-        clientes = self._consultar("cliente_faturamento", {}, "id,nome,telefone")
-        por_telefone = {c["telefone"]: c["id"] for c in clientes if c["telefone"]}
-        por_nome = {normalizar(c["nome"]): c["id"] for c in clientes}
-        resolvidos: dict[int, int | None] = {}
+        def casar() -> dict[int, int | None]:
+            clientes = self._consultar("cliente_faturamento", {}, "id,nome,telefone")
+            por_telefone = {c["telefone"]: c["id"] for c in clientes if c["telefone"]}
+            por_nome = {normalizar(c["nome"]): c["id"] for c in clientes}
+            resolvidos: dict[int, int | None] = {}
+            for v in lidas:
+                if v.cliente_telefone is not None:
+                    resolvidos[v.venda["id_planilha"]] = por_telefone.get(v.cliente_telefone)
+                else:
+                    resolvidos[v.venda["id_planilha"]] = por_nome.get(normalizar(v.cliente_nome)) if v.cliente_nome else None
+            return resolvidos
+
+        resolvidos = casar()
+        com_telefone: dict[int, dict] = {}
+        sem_telefone: dict[str, dict] = {}
         for v in lidas:
+            if resolvidos[v.venda["id_planilha"]] is not None:
+                continue
             if v.cliente_telefone is not None:
-                resolvidos[v.venda["id_planilha"]] = por_telefone.get(v.cliente_telefone)
-            else:
-                resolvidos[v.venda["id_planilha"]] = por_nome.get(normalizar(v.cliente_nome)) if v.cliente_nome else None
+                com_telefone.setdefault(v.cliente_telefone, {"nome": v.cliente_nome, "telefone": v.cliente_telefone})
+            elif v.cliente_nome:
+                sem_telefone.setdefault(normalizar(v.cliente_nome), {"nome": v.cliente_nome})
+        if com_telefone or sem_telefone:
+            banco.upsert("cliente_faturamento", list(com_telefone.values()), on_conflict="telefone")
+            banco.upsert("cliente_faturamento", list(sem_telefone.values()), on_conflict="id")
+            resolvidos = casar()
         return resolvidos
 
     def ciclo(self) -> None:
