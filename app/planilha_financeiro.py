@@ -94,8 +94,22 @@ def ler_base_vendas(linhas: list[list], ano: int) -> list[VendaPlanilha]:
             continue
         sdr = _celula(linha, 5)
         closer = _celula(linha, 6)
+        id_planilha = int(_celula(linha, 0))
+        recebimentos = []
+        for m in range(1, 13):
+            pago = _celula(linha, 22 + 2 * (m - 1)) or 0
+            liquido = _celula(linha, 23 + 2 * (m - 1)) or 0
+            if pago != 0 or liquido != 0:
+                recebimentos.append(
+                    {
+                        "id_planilha_venda": id_planilha,
+                        "mes": f"{ano:04d}-{m:02d}-01",
+                        "pago": pago,
+                        "liquido": liquido,
+                    }
+                )
         valores = [
-            int(_celula(linha, 0)),
+            id_planilha,
             f"{_data(_celula(linha, 1)).isoformat()}T00:00:00",
             _celula(linha, 4),
             APELIDOS.get(normalizar(sdr)) if sdr else None,
@@ -124,7 +138,7 @@ def ler_base_vendas(linhas: list[list], ano: int) -> list[VendaPlanilha]:
                 cliente_telefone=_telefone(_celula(linha, 3)),
                 sdr=sdr,
                 closer=closer,
-                recebimentos=[],
+                recebimentos=recebimentos,
             )
         )
     return vendas

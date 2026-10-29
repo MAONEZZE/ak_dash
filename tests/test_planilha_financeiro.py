@@ -99,6 +99,18 @@ def test_apelidos_de_sdr_e_closer_viram_id_de_users():
     assert vendas[3].closer == "Alex"
 
 
+def test_calendario_vira_recebimentos_do_ano_informado():
+    linha = _linha({0: 25, 22: 10000, 23: 9000, 24: "", 25: "", 28: 5000, 29: "", 44: "", 45: 300})
+
+    vendas = planilha_financeiro.ler_base_vendas([CABECALHO, linha], 2026)
+
+    assert vendas[0].recebimentos == [
+        {"id_planilha_venda": 25, "mes": "2026-01-01", "pago": 10000, "liquido": 9000},
+        {"id_planilha_venda": 25, "mes": "2026-04-01", "pago": 5000, "liquido": 0},
+        {"id_planilha_venda": 25, "mes": "2026-12-01", "pago": 0, "liquido": 300},
+    ]
+
+
 def test_cabecalho_fora_do_formato_levanta_value_error():
     with pytest.raises(ValueError, match="BASE_VENDAS"):
         planilha_financeiro.ler_base_vendas([["Data", "ID"], _linha()], 2026)
