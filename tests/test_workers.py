@@ -330,3 +330,35 @@ def test_virada_do_mes_recarrega_estado_e_grava_no_mes_novo(monkeypatch):
     assert _sem_carimbo(metricas_upsert[0][1]) == [
         {"id_user": 12, "data": "2026-11-01", "key_data_ref_user": "01/11/2026-isaque", "fups": 9, "numeros_captados": None, "indicacoes": None},
     ]
+
+
+def test_financeiro_primeiro_ciclo_grava_vendas_com_cliente_e_recebimentos(monkeypatch):
+    banco = _Banco({
+        "cliente_faturamento": [{"id": 84, "nome": "Fernando Seguim", "telefone": 11942556237}],
+        "metricas_faturamento": [],
+        "recebimentos_faturamento": [],
+    })
+    invalidacoes = _instalar(monkeypatch, banco)
+    cab_fin = ["ID", "Data da Venda"] + [""] * 44
+    linha = [8, 46037, "Fernando Seguim", "11 942556237", "", "", "Jacob", "", 9893.8, "", 9893.8, "PIX", "", 0.1, 0, 8904.42] + [""] * 6 + [9893.8, 8904.42]
+    w = workers.WorkerFinanceiro("ID_FIN", 2026, lambda _id: [("BASE_VENDAS", [cab_fin, linha])])
+
+    w.ciclo()
+
+    venda = banco.upserts[0]
+    assert venda[0] == "metricas_faturamento"
+    assert venda[2] == "id_planilha"
+    sem_carimbo = _sem_carimbo(venda[1])[0]
+    assert sem_carimbo["id_cliente"] == 84
+    assert sem_carimbo["id_planilha"] == 8
+    assert sem_carimbo["user_closer"] == 1
+    assert isinstance(venda[1][0]["atualizado_em"], str)
+    recebimentos = banco.upserts[1]
+    assert recebimentos[0] == "recebimentos_faturamento"
+    assert recebimentos[2] == "id_planilha_venda,mes"
+    assert _sem_carimbo(recebimentos[1]) == [
+        {"id_planilha_venda": 8, "mes": "2026-01-01", "pago": 9893.8, "liquido": 8904.42},
+    ]
+    assert banco.apagados == []
+    assert len(invalidacoes) == 1
+    assert w.planilha.nome == "financeiro"

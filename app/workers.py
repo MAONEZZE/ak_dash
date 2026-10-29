@@ -13,7 +13,8 @@ from app.config import Settings
 from app.fontes import banco
 from app.fontes.google_sheets import LeitorSheets, criar_credenciais
 from app.periodo import TZ_SP, hoje_sp
-from app.planilhas import COLUNAS_POR_TABELA, ler_linhas, linhas_metricas, resolver_usuario
+from app.planilha_financeiro import COLUNAS_VENDA, ler_base_vendas
+from app.planilhas import COLUNAS_POR_TABELA, ler_linhas, linhas_metricas, normalizar, resolver_usuario
 
 logger = logging.getLogger(__name__)
 
@@ -177,6 +178,96 @@ class Worker:
             self.executar_ciclo()
             if parar.wait(intervalo):
                 return
+
+
+class WorkerFinanceiro(Worker):
+    """Espelha a aba BASE_VENDAS da Isaac Newton2.0 em metricas_faturamento + recebimentos_faturamento."""
+
+    def __init__(
+        self,
+        planilha_id: str,
+        ano: int,
+        ler_abas: Callable[[str], list[tuple[str, list[list]]]],
+        agora: Callable[[], datetime] = lambda: datetime.now(TZ_SP),
+    ):
+        self.planilha = Planilha("financeiro", "metricas_faturamento", "")
+        self.planilha_id = planilha_id
+        self.ano = ano
+        self.ler_abas = ler_abas
+        self.agora = agora
+        self.vendas: dict[int, dict] | None = None
+        self.recebimentos: dict[tuple[int, str], dict] = {}
+        self.status = {"ultima_leitura_ok": None, "ultimo_erro": None}
+        self._puladas: set[str] = set()
+
+    def _carregar_estado(self) -> None:
+        self.vendas = {
+            l["id_planilha"]: l
+            for l in self._consultar(
+                "metricas_faturamento",
+                {"id_planilha": "not.is.null"},
+                "id_planilha,id_cliente," + ",".join(c for c in COLUNAS_VENDA if c != "id_planilha"),
+            )
+        }
+        self.recebimentos = {
+            (l["id_planilha_venda"], l["mes"]): l
+            for l in self._consultar("recebimentos_faturamento", {}, "id_planilha_venda,mes,pago,liquido")
+        }
+
+    def _resolver_clientes(self, lidas: list) -> dict[int, int | None]:
+        clientes = self._consultar("cliente_faturamento", {}, "id,nome,telefone")
+        por_telefone = {c["telefone"]: c["id"] for c in clientes if c["telefone"]}
+        por_nome = {normalizar(c["nome"]): c["id"] for c in clientes}
+        resolvidos: dict[int, int | None] = {}
+        for v in lidas:
+            if v.cliente_telefone is not None:
+                resolvidos[v.venda["id_planilha"]] = por_telefone.get(v.cliente_telefone)
+            else:
+                resolvidos[v.venda["id_planilha"]] = por_nome.get(normalizar(v.cliente_nome)) if v.cliente_nome else None
+        return resolvidos
+
+    def ciclo(self) -> None:
+        if self.vendas is None:
+            self._carregar_estado()
+
+        abas = dict(self.ler_abas(self.planilha_id))
+        lidas = ler_base_vendas(abas["BASE_VENDAS"], self.ano)
+        ids_cliente = self._resolver_clientes(lidas)
+
+        desejadas = {v.venda["id_planilha"]: {**v.venda, "id_cliente": ids_cliente[v.venda["id_planilha"]]} for v in lidas}
+        vendas_novas = {
+            i: d for i, d in sorted(desejadas.items())
+            if {k: self.vendas.get(i, {}).get(k) for k in d} != d
+        }
+        receb_desejados = {(r["id_planilha_venda"], r["mes"]): r for v in lidas for r in v.recebimentos}
+        receb_novos = {
+            k: r for k, r in sorted(receb_desejados.items())
+            if {c: self.recebimentos.get(k, {}).get(c) for c in r} != r
+        }
+
+        carimbo = self.agora().isoformat()
+        gravou = False
+
+        if vendas_novas:
+            banco.upsert(
+                self.planilha.tabela,
+                [{**l, "atualizado_em": carimbo} for l in vendas_novas.values()],
+                on_conflict="id_planilha",
+            )
+            self.vendas.update(vendas_novas)
+            gravou = True
+
+        if receb_novos:
+            banco.upsert(
+                "recebimentos_faturamento",
+                [{**l, "atualizado_em": carimbo} for l in receb_novos.values()],
+                on_conflict="id_planilha_venda,mes",
+            )
+            self.recebimentos.update(receb_novos)
+            gravou = True
+
+        if gravou:
+            cache.invalidar()
 
 
 ATIVOS: list[Worker] = []
