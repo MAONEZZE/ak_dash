@@ -1,8 +1,8 @@
 ## Contrato de gravação (dash2)
 
-Esta seção descreve como os fluxos n8n devem gravar no schema `dash2`.
+Esta seção descreve como o schema `dash2` é gravado.
 
-As tabelas de métricas e `dash2.metas` são gravadas pelos workers das planilhas (`app/workers.py`), dentro do BFF, a cada `WORKER_INTERVALO_SEGUNDOS`. Os fluxos n8n de métricas devem ser desligados; o n8n continua gravando só o faturamento (d).
+As tabelas de métricas e `dash2.metas` são gravadas pelos workers das planilhas (`app/workers.py`), dentro do BFF, a cada `WORKER_INTERVALO_SEGUNDOS`. O faturamento (d) também vem de um worker (o financeiro). Os fluxos n8n de métricas e de faturamento devem ser desligados.
 
 ### (a) Tabelas de métricas
 
@@ -31,7 +31,7 @@ Uma linha por tabela de métrica. As colunas de métrica são exatamente as list
 
 ### (d) Faturamento
 
-As mesmas colunas de antes, agora gravadas em `dash2.metricas_faturamento` e `dash2.cliente_faturamento`.
+As mesmas colunas de antes, agora gravadas pelo worker financeiro em `dash2.metricas_faturamento` e `dash2.cliente_faturamento`.
 
 ### (f) Configuração
 
@@ -46,10 +46,13 @@ Envs (ver `.env.example`):
 - `WORKER_INTERVALO_SEGUNDOS` (padrão `5`).
 - `GOOGLE_SERVICE_ACCOUNT_JSON`: JSON da service account. Ela (`client_email`) precisa ser compartilhada como leitora em cada planilha.
 - `PLANILHA_SELLERS_ID`, `PLANILHA_SDRS_ID`, `PLANILHA_CLOSERS_ID`, `PLANILHA_DRIPIFY_ID`: worker sem ID de planilha não sobe.
+- `PLANILHA_FINANCEIRO_ID`: ID da planilha Isaac Newton2.0; sem ele o worker financeiro não sobe.
+- `PLANILHA_FINANCEIRO_ANO`: ano usado para ler as datas da aba BASE_VENDAS.
 
 Comportamento:
 
 - Gravam só o que mudou, no mês corrente (America/Sao_Paulo).
+- O worker financeiro espelha a aba BASE_VENDAS inteira (não só o mês corrente) em `metricas_faturamento` + `recebimentos_faturamento`, apaga o que sai da planilha e substitui o n8n de faturamento.
 - Célula apagada → `null`. Meta apagada → linha removida de `dash2.metas`.
 - Aba de quem não está em `users` ou não tem o cargo é pulada (log).
 - Na virada do mês, a planilha precisa ser zerada no dia 1.

@@ -232,6 +232,7 @@ def test_iniciar_sobe_um_worker_por_planilha_configurada(monkeypatch):
         planilha_sdrs_id=None,
         planilha_closers_id="C",
         planilha_dripify_id=None,
+        planilha_financeiro_id=None,
         worker_intervalo_segundos=5.0,
     )
 
@@ -250,6 +251,47 @@ def test_iniciar_sobe_um_worker_por_planilha_configurada(monkeypatch):
     assert sorted(rodados) == [("closers", "C", 5.0), ("sellers", "S", 5.0)]
     assert isinstance(parar, threading.Event)
     assert parar.is_set() is False
+
+
+def test_iniciar_sobe_worker_financeiro_com_id_e_ano_da_config(monkeypatch):
+    rodados = []
+    monkeypatch.setattr(workers.Worker, "rodar", lambda self, parar, intervalo: rodados.append((self.planilha.nome, self.planilha_id, intervalo)))
+    monkeypatch.setattr(workers, "criar_credenciais", lambda texto: object())
+    base = dataclasses.replace(
+        config.settings,
+        supabase_url="https://x.supabase.co",
+        supabase_service_key="k",
+        google_service_account_json="{}",
+        planilha_sellers_id="S",
+        planilha_sdrs_id=None,
+        planilha_closers_id="C",
+        planilha_dripify_id=None,
+        planilha_financeiro_id="F",
+        planilha_financeiro_ano=2026,
+        workers_ativos=True,
+        worker_intervalo_segundos=5.0,
+    )
+
+    workers.iniciar(base)
+    for t in threading.enumerate():
+        if t.name.startswith("worker-"):
+            t.join(timeout=1)
+
+    assert ("financeiro", "F", 5.0) in rodados
+    financeiro = [w for w in workers.ATIVOS if w.planilha.nome == "financeiro"]
+    assert len(financeiro) == 1
+    assert isinstance(financeiro[0], workers.WorkerFinanceiro)
+    assert financeiro[0].ano == 2026
+
+    workers.ATIVOS.clear()
+    rodados.clear()
+    workers.iniciar(dataclasses.replace(base, planilha_financeiro_id=None))
+    for t in threading.enumerate():
+        if t.name.startswith("worker-"):
+            t.join(timeout=1)
+
+    assert all(w.planilha.nome != "financeiro" for w in workers.ATIVOS)
+    assert all(nome != "financeiro" for nome, _, _ in rodados)
 
 
 def test_iniciar_sem_credencial_loga_warning_e_guarda_motivo(monkeypatch, caplog):

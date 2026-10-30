@@ -354,5 +354,9 @@ def iniciar(config: Settings) -> threading.Event:
         w = Worker(p, ids[p.nome], LeitorSheets(credenciais).abas)
         ATIVOS.append(w)
         threading.Thread(target=w.rodar, args=(parar, config.worker_intervalo_segundos), name=f"worker-{p.nome}", daemon=True).start()
+    if config.planilha_financeiro_id:
+        financeiro = WorkerFinanceiro(config.planilha_financeiro_id, config.planilha_financeiro_ano, LeitorSheets(credenciais).abas)
+        ATIVOS.append(financeiro)
+        threading.Thread(target=financeiro.rodar, args=(parar, config.worker_intervalo_segundos), name="worker-financeiro", daemon=True).start()
     logger.info("Workers das planilhas ativos: %s", [w.planilha.nome for w in ATIVOS])
     return parar
