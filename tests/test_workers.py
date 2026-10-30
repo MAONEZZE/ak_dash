@@ -360,9 +360,28 @@ def test_financeiro_primeiro_ciclo_grava_vendas_com_cliente_e_recebimentos(monke
     assert _sem_carimbo(recebimentos[1]) == [
         {"id_planilha_venda": 8, "mes": "2026-01-01", "pago": 9893.8, "liquido": 8904.42},
     ]
-    assert banco.apagados == []
+    assert banco.apagados == [("metricas_faturamento", {"id_planilha": "is.null"})]
     assert len(invalidacoes) == 1
     assert w.planilha.nome == "financeiro"
+
+
+def test_financeiro_primeira_carga_apaga_vendas_legadas_sem_id_planilha(monkeypatch):
+    banco = _Banco({
+        "cliente_faturamento": [{"id": 84, "nome": "Fernando Seguim", "telefone": 11942556237}],
+        "metricas_faturamento": [],
+        "recebimentos_faturamento": [],
+    })
+    _instalar(monkeypatch, banco)
+    cab_fin = ["ID", "Data da Venda"] + [""] * 44
+    linha = [8, 46037, "Fernando Seguim", "11 942556237", "", "", "Jacob", "", 9893.8, "", 9893.8, "PIX", "", 0.1, 0, 8904.42] + [""] * 6 + [9893.8, 8904.42]
+    w = workers.WorkerFinanceiro("ID_FIN", 2026, lambda _id: [("BASE_VENDAS", [cab_fin, linha])])
+    w.ciclo()
+    assert ("metricas_faturamento", {"id_planilha": "is.null"}) in banco.apagados
+    banco.apagados.clear()
+
+    w.ciclo()
+
+    assert banco.apagados == []
 
 
 def test_financeiro_ciclo_sem_mudanca_nao_grava(monkeypatch):
@@ -377,6 +396,7 @@ def test_financeiro_ciclo_sem_mudanca_nao_grava(monkeypatch):
     w = workers.WorkerFinanceiro("ID_FIN", 2026, lambda _id: [("BASE_VENDAS", [cab_fin, linha])])
     w.ciclo()
     banco.upserts.clear()
+    banco.apagados.clear()
     invalidacoes.clear()
 
     w.ciclo()
@@ -459,7 +479,10 @@ def test_financeiro_venda_removida_da_planilha_e_apagada(monkeypatch):
 
     w.ciclo()
 
-    assert banco.apagados == [("metricas_faturamento", {"id_planilha": "in.(9,10)"})]
+    assert banco.apagados == [
+        ("metricas_faturamento", {"id_planilha": "is.null"}),
+        ("metricas_faturamento", {"id_planilha": "in.(9,10)"}),
+    ]
     assert not any(k[0] in (9, 10) for k in w.recebimentos)
     assert len(invalidacoes) == 1
 
@@ -482,5 +505,8 @@ def test_financeiro_mes_esvaziado_e_apagado_do_calendario(monkeypatch):
 
     w.ciclo()
 
-    assert banco.apagados == [("recebimentos_faturamento", {"id_planilha_venda": "eq.25", "mes": "eq.2026-05-01"})]
+    assert banco.apagados == [
+        ("metricas_faturamento", {"id_planilha": "is.null"}),
+        ("recebimentos_faturamento", {"id_planilha_venda": "eq.25", "mes": "eq.2026-05-01"}),
+    ]
     assert (25, "2026-05-01") not in w.recebimentos

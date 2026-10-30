@@ -213,6 +213,8 @@ class WorkerFinanceiro(Worker):
             (l["id_planilha_venda"], l["mes"]): l
             for l in self._consultar("recebimentos_faturamento", {}, "id_planilha_venda,mes,pago,liquido")
         }
+        # linhas do n8n antes do worker; backup em metricas_faturamento_bkp_20261028
+        banco.apagar("metricas_faturamento", {"id_planilha": "is.null"})
 
     def _resolver_clientes(self, lidas: list) -> dict[int, int | None]:
         def casar() -> dict[int, int | None]:
