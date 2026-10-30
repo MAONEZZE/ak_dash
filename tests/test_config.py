@@ -46,6 +46,24 @@ def test_settings_le_envs_dos_workers(monkeypatch):
     assert s.planilha_sdrs_id is None
 
 
+def test_settings_le_envs_do_worker_financeiro(monkeypatch):
+    monkeypatch.setenv("PLANILHA_FINANCEIRO_ID", "fin")
+    monkeypatch.setenv("PLANILHA_FINANCEIRO_ANO", "2027")
+
+    s = config.Settings()
+
+    assert s.planilha_financeiro_id == "fin"
+    assert s.planilha_financeiro_ano == 2027
+
+    monkeypatch.delenv("PLANILHA_FINANCEIRO_ID", raising=False)
+    monkeypatch.delenv("PLANILHA_FINANCEIRO_ANO", raising=False)
+
+    s = config.Settings()
+
+    assert s.planilha_financeiro_id is None
+    assert s.planilha_financeiro_ano == 2026
+
+
 def test_expediente_padrao_10_as_19_e_lido_das_envs(monkeypatch):
     monkeypatch.delenv("EXPEDIENTE_INICIO", raising=False)
     monkeypatch.delenv("EXPEDIENTE_FIM", raising=False)

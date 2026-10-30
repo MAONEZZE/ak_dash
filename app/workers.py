@@ -13,7 +13,8 @@ from app.config import Settings
 from app.fontes import banco
 from app.fontes.google_sheets import LeitorSheets, criar_credenciais
 from app.periodo import TZ_SP, hoje_sp
-from app.planilhas import COLUNAS_POR_TABELA, ler_linhas, linhas_metricas, resolver_usuario
+from app.planilha_financeiro import APELIDOS, COLUNAS_VENDA, ler_base_vendas
+from app.planilhas import COLUNAS_POR_TABELA, ler_linhas, linhas_metricas, normalizar, resolver_usuario
 
 logger = logging.getLogger(__name__)
 
@@ -179,6 +180,141 @@ class Worker:
                 return
 
 
+class WorkerFinanceiro(Worker):
+    """Espelha a aba BASE_VENDAS da Isaac Newton2.0 em metricas_faturamento + recebimentos_faturamento."""
+
+    def __init__(
+        self,
+        planilha_id: str,
+        ano: int,
+        ler_abas: Callable[[str], list[tuple[str, list[list]]]],
+        agora: Callable[[], datetime] = lambda: datetime.now(TZ_SP),
+    ):
+        self.planilha = Planilha("financeiro", "metricas_faturamento", "")
+        self.planilha_id = planilha_id
+        self.ano = ano
+        self.ler_abas = ler_abas
+        self.agora = agora
+        self.vendas: dict[int, dict] | None = None
+        self.recebimentos: dict[tuple[int, str], dict] = {}
+        self.status = {"ultima_leitura_ok": None, "ultimo_erro": None}
+        self._puladas: set[str] = set()
+
+    def _carregar_estado(self) -> None:
+        self.vendas = {
+            l["id_planilha"]: l
+            for l in self._consultar(
+                "metricas_faturamento",
+                {"id_planilha": "not.is.null"},
+                "id_planilha,id_cliente," + ",".join(c for c in COLUNAS_VENDA if c != "id_planilha"),
+            )
+        }
+        self.recebimentos = {
+            (l["id_planilha_venda"], l["mes"]): l
+            for l in self._consultar("recebimentos_faturamento", {}, "id_planilha_venda,mes,pago,liquido")
+        }
+        # linhas do n8n antes do worker; backup em metricas_faturamento_bkp_20261028
+        banco.apagar("metricas_faturamento", {"id_planilha": "is.null"})
+
+    def _resolver_clientes(self, lidas: list) -> dict[int, int | None]:
+        def casar() -> dict[int, int | None]:
+            clientes = self._consultar("cliente_faturamento", {}, "id,nome,telefone")
+            por_telefone = {c["telefone"]: c["id"] for c in clientes if c["telefone"]}
+            por_nome = {normalizar(c["nome"]): c["id"] for c in clientes}
+            resolvidos: dict[int, int | None] = {}
+            for v in lidas:
+                if v.cliente_telefone is not None:
+                    resolvidos[v.venda["id_planilha"]] = por_telefone.get(v.cliente_telefone)
+                else:
+                    resolvidos[v.venda["id_planilha"]] = por_nome.get(normalizar(v.cliente_nome)) if v.cliente_nome else None
+            return resolvidos
+
+        resolvidos = casar()
+        com_telefone: dict[int, dict] = {}
+        sem_telefone: dict[str, dict] = {}
+        for v in lidas:
+            if resolvidos[v.venda["id_planilha"]] is not None:
+                continue
+            if v.cliente_telefone is not None:
+                com_telefone.setdefault(v.cliente_telefone, {"nome": v.cliente_nome, "telefone": v.cliente_telefone})
+            elif v.cliente_nome:
+                sem_telefone.setdefault(normalizar(v.cliente_nome), {"nome": v.cliente_nome})
+        if com_telefone or sem_telefone:
+            banco.upsert("cliente_faturamento", list(com_telefone.values()), on_conflict="telefone")
+            banco.upsert("cliente_faturamento", list(sem_telefone.values()), on_conflict="id")
+            resolvidos = casar()
+        return resolvidos
+
+    def ciclo(self) -> None:
+        if self.vendas is None:
+            self._carregar_estado()
+
+        abas = dict(self.ler_abas(self.planilha_id))
+        if "BASE_VENDAS" not in abas:
+            raise RuntimeError("aba BASE_VENDAS não encontrada na planilha do financeiro")
+        lidas = ler_base_vendas(abas["BASE_VENDAS"], self.ano)
+        for v in lidas:
+            for nome in (v.sdr, v.closer):
+                if nome and normalizar(nome) not in APELIDOS and nome not in self._puladas:
+                    self._puladas.add(nome)
+                    logger.warning(
+                        "Planilha financeiro: '%s' não está nos apelidos de SDR/Closer (venda %s), gravado como null",
+                        nome,
+                        v.venda["id_planilha"],
+                    )
+        ids_cliente = self._resolver_clientes(lidas)
+
+        desejadas = {v.venda["id_planilha"]: {**v.venda, "id_cliente": ids_cliente[v.venda["id_planilha"]]} for v in lidas}
+        vendas_novas = {
+            i: d for i, d in sorted(desejadas.items())
+            if {k: self.vendas.get(i, {}).get(k) for k in d} != d
+        }
+        receb_desejados = {(r["id_planilha_venda"], r["mes"]): r for v in lidas for r in v.recebimentos}
+        receb_novos = {
+            k: r for k, r in sorted(receb_desejados.items())
+            if {c: self.recebimentos.get(k, {}).get(c) for c in r} != r
+        }
+
+        carimbo = self.agora().isoformat()
+        gravou = False
+
+        if vendas_novas:
+            banco.upsert(
+                self.planilha.tabela,
+                [{**l, "atualizado_em": carimbo} for l in vendas_novas.values()],
+                on_conflict="id_planilha",
+            )
+            self.vendas.update(vendas_novas)
+            gravou = True
+
+        if receb_novos:
+            banco.upsert(
+                "recebimentos_faturamento",
+                [{**l, "atualizado_em": carimbo} for l in receb_novos.values()],
+                on_conflict="id_planilha_venda,mes",
+            )
+            self.recebimentos.update(receb_novos)
+            gravou = True
+
+        meses_apagados = [k for k in sorted(self.recebimentos) if k not in receb_desejados and k[0] in desejadas]
+        for i, mes in meses_apagados:
+            banco.apagar("recebimentos_faturamento", {"id_planilha_venda": f"eq.{i}", "mes": f"eq.{mes}"})
+            self.recebimentos.pop((i, mes))
+            gravou = True
+
+        removidas = sorted(set(self.vendas) - set(desejadas))
+        if removidas:
+            banco.apagar("metricas_faturamento", {"id_planilha": f"in.({','.join(map(str, removidas))})"})
+            for i in removidas:
+                self.vendas.pop(i, None)
+            for k in [k for k in self.recebimentos if k[0] in removidas]:
+                del self.recebimentos[k]
+            gravou = True
+
+        if gravou:
+            cache.invalidar()
+
+
 ATIVOS: list[Worker] = []
 MOTIVO_INATIVOS: str | None = None
 
@@ -218,5 +354,9 @@ def iniciar(config: Settings) -> threading.Event:
         w = Worker(p, ids[p.nome], LeitorSheets(credenciais).abas)
         ATIVOS.append(w)
         threading.Thread(target=w.rodar, args=(parar, config.worker_intervalo_segundos), name=f"worker-{p.nome}", daemon=True).start()
+    if config.planilha_financeiro_id:
+        financeiro = WorkerFinanceiro(config.planilha_financeiro_id, config.planilha_financeiro_ano, LeitorSheets(credenciais).abas)
+        ATIVOS.append(financeiro)
+        threading.Thread(target=financeiro.rodar, args=(parar, config.worker_intervalo_segundos), name="worker-financeiro", daemon=True).start()
     logger.info("Workers das planilhas ativos: %s", [w.planilha.nome for w in ATIVOS])
     return parar

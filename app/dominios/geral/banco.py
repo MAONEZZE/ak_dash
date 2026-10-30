@@ -1,14 +1,24 @@
 """Leitura de `dash.metricas_faturamento` — uma linha por VENDA, não mais uma
 
-linha por pessoa/período. `buscar_faturamento` soma `valor_bruto_contrato` e
-`liquido_entrada` de toda venda com `data_venda` dentro do período pedido; o
-filtro usa `lt` no dia seguinte ao fim (nunca `lte`), porque `data_venda` é
-timestamp e `lte` na data perderia venda com hora ≠ meia-noite.
+linha por pessoa/período — e de `dash.recebimentos_faturamento`, o calendário
+de recebimentos da planilha.
+
+`buscar_faturamento` soma `valor_bruto_contrato` de toda venda com `data_venda`
+dentro do período pedido; o filtro usa `lt` no dia seguinte ao fim (nunca
+`lte`), porque `data_venda` é timestamp e `lte` na data perderia venda com hora
+≠ meia-noite.
+
+O liquidado da empresa NÃO vem da venda: é a soma de
+`recebimentos_faturamento.liquido` dos meses tocados pelo período (`mes` é dia
+1 do mês; vai do dia 1 do mês de `inicio` até `fim`). Assim o líquido cai no
+mês em que a parcela foi recebida, não no mês em que a venda foi fechada.
 
 O card da empresa soma TODA venda do período, inclusive de quem já saiu do
-time (`ids_pessoas` não filtra a consulta). Por pessoa, agrupa
-`liquido_entrada` por `user_closer`; venda sem `user_closer` entra no total
-da empresa e em ninguém. `inscritos`/`aprovados` continuam sempre `None`
+time (`ids_pessoas` não filtra a consulta). Por pessoa, o liquidado é o de
+cada recebimento, atribuído ao `user_closer` da VENDA a que ele pertence
+(mesmo que a venda tenha sido fechada em outro mês); recebimento de venda sem
+`user_closer` entra no total da empresa e em ninguém.
+`inscritos`/`aprovados` continuam sempre `None`
 aqui — não existem nesta tabela, vêm do SED (ver `buscar_confrarias_do_mes`).
 
 Também lê o SEGUNDO Supabase (`SED.events`/`SED.registrations`), que
@@ -69,27 +79,35 @@ def buscar_faturamento(inicio: date, fim: date, ids_pessoas: list[int]) -> Fatur
         "metricas_faturamento",
         {"and": f"(data_venda.gte.{inicio.isoformat()},data_venda.lt.{fim_exclusivo.isoformat()})"},
     )
+    recebimentos = query(
+        "recebimentos_faturamento",
+        {"and": f"(mes.gte.{inicio.replace(day=1).isoformat()},mes.lte.{fim.isoformat()})"},
+    )
 
     empresa: dict[str, float | None] = {**_linha_vazia(), "faturamento": 0.0, "liquidado": 0.0}
     por_pessoa: dict[int, dict[str, float | None]] = {}
 
     for r in linhas:
-        # `liquido_entrada` é só o líquido do PRIMEIRO pagamento da venda —
-        # quando ela tem um segundo pagamento (`valor_pgto_2`/`liquido_pgto_2`,
-        # ex.: entrada no PIX + resto no cartão, cada um com sua taxa), o
-        # líquido de verdade é a soma dos dois. Sem isso o card subestimava o
-        # liquidado toda vez que uma venda vinha parcelada em duas formas —
-        # mesmo bug encontrado e corrigido em dominios/financeiro/banco.py.
-        liquido_venda = (r.get("liquido_entrada") or 0) + (r.get("liquido_pgto_2") or 0)
-
         empresa["faturamento"] += r.get("valor_bruto_contrato") or 0
-        empresa["liquidado"] += liquido_venda
 
-        id_user = r.get("user_closer")
+    ids = sorted({int(r["id_planilha_venda"]) for r in recebimentos})
+    closer_por_venda: dict[int, int | None] = {}
+    if ids:
+        vendas = query(
+            "metricas_faturamento",
+            {"id_planilha": f"in.({','.join(map(str, ids))})"},
+            colunas="id_planilha,user_closer",
+        )
+        closer_por_venda = {int(v["id_planilha"]): v.get("user_closer") for v in vendas}
+
+    for r in recebimentos:
+        liquido = r.get("liquido") or 0
+        empresa["liquidado"] += liquido
+        id_user = closer_por_venda.get(int(r["id_planilha_venda"]))
         if id_user is None:
             continue
         pessoa = por_pessoa.setdefault(int(id_user), {**_linha_vazia(), "liquidado": 0.0})
-        pessoa["liquidado"] += liquido_venda
+        pessoa["liquidado"] += liquido
 
     return Faturamento(empresa=empresa, por_pessoa=por_pessoa)
 

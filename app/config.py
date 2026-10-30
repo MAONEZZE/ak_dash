@@ -78,6 +78,12 @@ class Settings:
     planilha_dripify_id: str | None = field(
         default_factory=lambda: os.getenv("PLANILHA_DRIPIFY_ID") or None
     )
+    planilha_financeiro_id: str | None = field(
+        default_factory=lambda: os.getenv("PLANILHA_FINANCEIRO_ID") or None
+    )
+    planilha_financeiro_ano: int = field(
+        default_factory=lambda: int(os.getenv("PLANILHA_FINANCEIRO_ANO", "2026"))
+    )
 
 
 settings = Settings()

@@ -80,6 +80,16 @@ def test_schema_respostafinanceiro_tem_os_campos_que_o_bff_produz():
     assert campos == {"periodo", "cards", "vendas"}
 
 
+def test_vendafinanceiro_descreve_recebimentos_por_mes():
+    schemas = _carregar_openapi()["components"]["schemas"]
+    venda = schemas["VendaFinanceiro"]
+    recebimento = schemas["RecebimentoMes"]
+    assert "recebimentos" in venda["required"]
+    assert "id_planilha" in venda["required"]
+    assert venda["properties"]["recebimentos"]["items"]["$ref"] == "#/components/schemas/RecebimentoMes"
+    assert set(recebimento["required"]) == {"mes", "pago", "liquido"}
+
+
 def test_pessoa_aceita_quatro_cargos_e_email_opcional():
     spec = _carregar_openapi()
     pessoa = spec["components"]["schemas"]["Pessoa"]

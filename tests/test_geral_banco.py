@@ -15,11 +15,13 @@ from app.dominios.geral import banco as banco_mod
 # --- buscar_faturamento (dash.metricas_faturamento: uma linha por venda)
 
 
-def _mockar_vendas(monkeypatch, linhas: list[dict]) -> list[dict]:
+def _mockar_vendas(monkeypatch, linhas: list[dict], recebimentos: list[dict] | None = None) -> list[dict]:
     chamadas: list[dict] = []
 
     def _fake_query(tabela, filtros=None, *a, **k):
         chamadas.append({"tabela": tabela, "filtros": filtros or {}})
+        if tabela == "recebimentos_faturamento":
+            return recebimentos or []
         return linhas
 
     monkeypatch.setattr(banco_mod, "query", _fake_query)
@@ -30,10 +32,11 @@ def test_soma_varias_vendas_no_card_da_empresa(monkeypatch):
     _mockar_vendas(
         monkeypatch,
         [
-            {"user_closer": 8, "valor_bruto_contrato": 400000, "liquido_entrada": 160019.64},
-            {"user_closer": 1, "valor_bruto_contrato": 165000, "liquido_entrada": 21737.70},
-            {"user_closer": 3, "valor_bruto_contrato": 60000, "liquido_entrada": 9000.00},
+            {"id_planilha": 1, "user_closer": 8, "valor_bruto_contrato": 400000, "liquido_entrada": 160019.64},
+            {"id_planilha": 2, "user_closer": 1, "valor_bruto_contrato": 165000, "liquido_entrada": 21737.70},
+            {"id_planilha": 3, "user_closer": 3, "valor_bruto_contrato": 60000, "liquido_entrada": 9000.00},
         ],
+        [{"id_planilha_venda": 1, "mes": "2026-08-01", "liquido": 190757.34}],
     )
     resultado = banco_mod.buscar_faturamento(date(2026, 8, 1), date(2026, 8, 31), [1, 3, 8])
     assert resultado.empresa["faturamento"] == 625000
@@ -46,9 +49,14 @@ def test_agrupa_liquidado_por_user_closer(monkeypatch):
     _mockar_vendas(
         monkeypatch,
         [
-            {"user_closer": 8, "valor_bruto_contrato": 300000, "liquido_entrada": 100000.00},
-            {"user_closer": 8, "valor_bruto_contrato": 100000, "liquido_entrada": 60019.64},
-            {"user_closer": 1, "valor_bruto_contrato": 165000, "liquido_entrada": 21737.70},
+            {"id_planilha": 1, "user_closer": 8, "valor_bruto_contrato": 300000, "liquido_entrada": 100000.00},
+            {"id_planilha": 2, "user_closer": 8, "valor_bruto_contrato": 100000, "liquido_entrada": 60019.64},
+            {"id_planilha": 3, "user_closer": 1, "valor_bruto_contrato": 165000, "liquido_entrada": 21737.70},
+        ],
+        [
+            {"id_planilha_venda": 1, "mes": "2026-08-01", "liquido": 100000.00},
+            {"id_planilha_venda": 2, "mes": "2026-08-01", "liquido": 60019.64},
+            {"id_planilha_venda": 3, "mes": "2026-08-01", "liquido": 21737.70},
         ],
     )
     resultado = banco_mod.buscar_faturamento(date(2026, 8, 1), date(2026, 8, 31), [1, 8])
@@ -62,8 +70,12 @@ def test_venda_sem_user_closer_entra_na_empresa_e_em_ninguem(monkeypatch):
     _mockar_vendas(
         monkeypatch,
         [
-            {"user_closer": None, "valor_bruto_contrato": 60000, "liquido_entrada": 15000.00},
-            {"user_closer": 1, "valor_bruto_contrato": 20000, "liquido_entrada": 5000.00},
+            {"id_planilha": 1, "user_closer": None, "valor_bruto_contrato": 60000, "liquido_entrada": 15000.00},
+            {"id_planilha": 2, "user_closer": 1, "valor_bruto_contrato": 20000, "liquido_entrada": 5000.00},
+        ],
+        [
+            {"id_planilha_venda": 1, "mes": "2026-08-01", "liquido": 15000.00},
+            {"id_planilha_venda": 2, "mes": "2026-08-01", "liquido": 5000.00},
         ],
     )
     resultado = banco_mod.buscar_faturamento(date(2026, 8, 1), date(2026, 8, 31), [1])
@@ -88,12 +100,14 @@ def test_liquidado_soma_o_segundo_pagamento_da_venda(monkeypatch):
         monkeypatch,
         [
             {
+                "id_planilha": 1,
                 "user_closer": 8,
                 "valor_bruto_contrato": 60000,
                 "liquido_entrada": 27000.00,
                 "liquido_pgto_2": 21737.70,
             },
         ],
+        [{"id_planilha_venda": 1, "mes": "2026-08-01", "liquido": 48737.70}],
     )
     resultado = banco_mod.buscar_faturamento(date(2026, 8, 1), date(2026, 8, 31), [8])
     assert resultado.empresa["liquidado"] == pytest.approx(48737.70)
@@ -103,7 +117,8 @@ def test_liquidado_soma_o_segundo_pagamento_da_venda(monkeypatch):
 def test_liquidado_sem_segundo_pagamento_nao_muda(monkeypatch):
     _mockar_vendas(
         monkeypatch,
-        [{"user_closer": 8, "valor_bruto_contrato": 60000, "liquido_entrada": 27000.00}],
+        [{"id_planilha": 1, "user_closer": 8, "valor_bruto_contrato": 60000, "liquido_entrada": 27000.00}],
+        [{"id_planilha_venda": 1, "mes": "2026-08-01", "liquido": 27000.00}],
     )
     resultado = banco_mod.buscar_faturamento(date(2026, 8, 1), date(2026, 8, 31), [8])
     assert resultado.empresa["liquidado"] == 27000.00
@@ -113,6 +128,62 @@ def test_filtro_usa_data_venda_com_lt_no_dia_seguinte(monkeypatch):
     chamadas = _mockar_vendas(monkeypatch, [])
     banco_mod.buscar_faturamento(date(2026, 8, 1), date(2026, 8, 31), [])
     assert chamadas[0]["filtros"]["and"] == "(data_venda.gte.2026-08-01,data_venda.lt.2026-09-01)"
+
+
+def test_liquidado_vem_do_calendario_de_recebimentos_dos_meses_do_periodo(monkeypatch):
+    venda_no_periodo = {"id_planilha": 1, "data_venda": "2026-08-05T00:00:00", "valor_bruto_contrato": 10000, "liquido_entrada": 9999, "user_closer": 1}
+    venda_fora = {"id_planilha": 2, "data_venda": "2026-03-01T00:00:00", "valor_bruto_contrato": 60000, "user_closer": 3}
+    recebimentos = [
+        {"id_planilha_venda": 1, "mes": "2026-08-01", "liquido": 4500},
+        {"id_planilha_venda": 2, "mes": "2026-08-01", "liquido": 18000},
+    ]
+    chamadas: list[dict] = []
+
+    def _fake_query(tabela, filtros=None, *a, **k):
+        filtros = filtros or {}
+        chamadas.append({"tabela": tabela, "filtros": filtros})
+        if tabela == "recebimentos_faturamento":
+            return recebimentos
+        if "and" in filtros:
+            return [venda_no_periodo]
+        ids = {int(i) for i in filtros["id_planilha"][len("in.("):-1].split(",")}
+        return [v for v in (venda_no_periodo, venda_fora) if v["id_planilha"] in ids]
+
+    monkeypatch.setattr(banco_mod, "query", _fake_query)
+    empresa = banco_mod.buscar_faturamento(date(2026, 8, 10), date(2026, 8, 20), [1, 3]).empresa
+
+    assert empresa["faturamento"] == 10000
+    assert empresa["liquidado"] == 22500
+    (recebimento,) = [c for c in chamadas if c["tabela"] == "recebimentos_faturamento"]
+    assert recebimento["filtros"]["and"] == "(mes.gte.2026-08-01,mes.lte.2026-08-20)"
+
+
+def test_liquidado_por_pessoa_vai_para_o_closer_da_venda_do_recebimento(monkeypatch):
+    venda_no_periodo = {"id_planilha": 1, "data_venda": "2026-08-05T00:00:00", "valor_bruto_contrato": 10000, "liquido_entrada": 9999, "user_closer": 1}
+    venda_fora = {"id_planilha": 2, "data_venda": "2026-03-01T00:00:00", "valor_bruto_contrato": 60000, "user_closer": 3}
+    venda_sem_closer = {"id_planilha": 3, "data_venda": "2026-03-01T00:00:00", "valor_bruto_contrato": 5000, "user_closer": None}
+    recebimentos = [
+        {"id_planilha_venda": 1, "mes": "2026-08-01", "liquido": 4500},
+        {"id_planilha_venda": 2, "mes": "2026-08-01", "liquido": 18000},
+        {"id_planilha_venda": 3, "mes": "2026-08-01", "liquido": 700},
+    ]
+
+    def _fake_query(tabela, filtros=None, *a, **k):
+        filtros = filtros or {}
+        if tabela == "recebimentos_faturamento":
+            return recebimentos
+        if "and" in filtros:
+            return [venda_no_periodo]
+        ids = {int(i) for i in filtros["id_planilha"][len("in.("):-1].split(",")}
+        return [v for v in (venda_no_periodo, venda_fora, venda_sem_closer) if v["id_planilha"] in ids]
+
+    monkeypatch.setattr(banco_mod, "query", _fake_query)
+    resultado = banco_mod.buscar_faturamento(date(2026, 8, 1), date(2026, 8, 31), [1, 3])
+
+    assert resultado.por_pessoa[1]["liquidado"] == 4500
+    assert resultado.por_pessoa[3]["liquidado"] == 18000
+    assert resultado.empresa["liquidado"] == 23200
+    assert None not in resultado.por_pessoa
 
 
 # --- buscar_confrarias_do_mes (segundo Supabase: SED.events/SED.registrations)
