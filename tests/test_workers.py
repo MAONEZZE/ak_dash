@@ -8,6 +8,7 @@ import pytest
 from app import config
 from app import workers
 from app.periodo import TZ_SP
+from app.planilha_financeiro import ler_base_vendas
 
 
 @pytest.fixture(autouse=True)
@@ -416,3 +417,26 @@ def test_financeiro_cria_cliente_novo_e_reaproveita_cliente_sem_telefone_pelo_no
     ]
     venda = next(l for t, l, _ in banco.upserts if t == "metricas_faturamento")
     assert {l["id_planilha"]: l["id_cliente"] for l in _sem_carimbo(venda)} == {1: 901, 2: 90, 3: 902}
+
+
+def test_financeiro_estado_inicial_vem_do_banco_e_so_regrava_venda_alterada(monkeypatch):
+    cab_fin = ["ID", "Data da Venda"] + [""] * 44
+
+    def linha(id_, valor_bruto):
+        return [id_, 46037, "Fernando Seguim", "11 942556237", "", "", "Jacob", "", valor_bruto, "", 9893.8, "PIX", "", 0.1, 0, 8904.42] + [""] * 6 + [9893.8, 8904.42]
+
+    gravadas = ler_base_vendas([cab_fin, linha(8, 9893.8), linha(9, 5000)], 2026)
+    banco = _Banco({
+        "cliente_faturamento": [{"id": 84, "nome": "Fernando Seguim", "telefone": 11942556237}],
+        "metricas_faturamento": [{**v.venda, "id_cliente": 84, "id": 100 + v.venda["id_planilha"]} for v in gravadas],
+        "recebimentos_faturamento": [r for v in gravadas for r in v.recebimentos],
+    })
+    _instalar(monkeypatch, banco)
+    w = workers.WorkerFinanceiro("ID_FIN", 2026, lambda _id: [("BASE_VENDAS", [cab_fin, linha(8, 9893.8), linha(9, 6000)])])
+
+    w.ciclo()
+
+    assert [t for t, _, _ in banco.upserts] == ["metricas_faturamento"]
+    _, linhas, _ = banco.upserts[0]
+    assert [l["id_planilha"] for l in _sem_carimbo(linhas)] == [9]
+    assert _sem_carimbo(linhas)[0]["valor_bruto_contrato"] == 6000
