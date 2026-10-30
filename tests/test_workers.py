@@ -510,3 +510,20 @@ def test_financeiro_mes_esvaziado_e_apagado_do_calendario(monkeypatch):
         ("recebimentos_faturamento", {"id_planilha_venda": "eq.25", "mes": "eq.2026-05-01"}),
     ]
     assert (25, "2026-05-01") not in w.recebimentos
+
+
+def test_financeiro_sem_aba_base_vendas_registra_erro_no_status(monkeypatch):
+    banco = _Banco({
+        "cliente_faturamento": [],
+        "metricas_faturamento": [],
+        "recebimentos_faturamento": [],
+    })
+    _instalar(monkeypatch, banco)
+    w = workers.WorkerFinanceiro("ID_FIN", 2026, lambda _id: [("DASHBOARD", [["x"]])])
+
+    w.executar_ciclo()
+
+    assert "BASE_VENDAS" in w.status["ultimo_erro"]["mensagem"]
+    assert w.status["ultimo_erro"]["mensagem"] == "RuntimeError: aba BASE_VENDAS não encontrada na planilha do financeiro"
+    assert w.status["ultima_leitura_ok"] is None
+    assert banco.upserts == []

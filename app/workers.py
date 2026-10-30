@@ -250,6 +250,8 @@ class WorkerFinanceiro(Worker):
             self._carregar_estado()
 
         abas = dict(self.ler_abas(self.planilha_id))
+        if "BASE_VENDAS" not in abas:
+            raise RuntimeError("aba BASE_VENDAS não encontrada na planilha do financeiro")
         lidas = ler_base_vendas(abas["BASE_VENDAS"], self.ano)
         ids_cliente = self._resolver_clientes(lidas)
 
