@@ -462,3 +462,25 @@ def test_financeiro_venda_removida_da_planilha_e_apagada(monkeypatch):
     assert banco.apagados == [("metricas_faturamento", {"id_planilha": "in.(9,10)"})]
     assert not any(k[0] in (9, 10) for k in w.recebimentos)
     assert len(invalidacoes) == 1
+
+
+def test_financeiro_mes_esvaziado_e_apagado_do_calendario(monkeypatch):
+    cab_fin = ["ID", "Data da Venda"] + [""] * 44
+    abril = [25, 46037, "Fernando Seguim", "11 942556237", "", "", "Jacob", "", 5000, "", 5000, "PIX", "", 0.1, 0, 4000] + [""] * 12 + [5000, 4000]
+
+    gravadas = ler_base_vendas([cab_fin, abril], 2026)
+    banco = _Banco({
+        "cliente_faturamento": [{"id": 84, "nome": "Fernando Seguim", "telefone": 11942556237}],
+        "metricas_faturamento": [{**v.venda, "id_cliente": 84, "id": 100 + v.venda["id_planilha"]} for v in gravadas],
+        "recebimentos_faturamento": [
+            *[r for v in gravadas for r in v.recebimentos],
+            {"id_planilha_venda": 25, "mes": "2026-05-01", "pago": 6000, "liquido": 5000},
+        ],
+    })
+    _instalar(monkeypatch, banco)
+    w = workers.WorkerFinanceiro("ID_FIN", 2026, lambda _id: [("BASE_VENDAS", [cab_fin, abril])])
+
+    w.ciclo()
+
+    assert banco.apagados == [("recebimentos_faturamento", {"id_planilha_venda": "eq.25", "mes": "eq.2026-05-01"})]
+    assert (25, "2026-05-01") not in w.recebimentos

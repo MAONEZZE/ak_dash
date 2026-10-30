@@ -283,6 +283,12 @@ class WorkerFinanceiro(Worker):
             self.recebimentos.update(receb_novos)
             gravou = True
 
+        meses_apagados = [k for k in sorted(self.recebimentos) if k not in receb_desejados and k[0] in desejadas]
+        for i, mes in meses_apagados:
+            banco.apagar("recebimentos_faturamento", {"id_planilha_venda": f"eq.{i}", "mes": f"eq.{mes}"})
+            self.recebimentos.pop((i, mes))
+            gravou = True
+
         removidas = sorted(set(self.vendas) - set(desejadas))
         if removidas:
             banco.apagar("metricas_faturamento", {"id_planilha": f"in.({','.join(map(str, removidas))})"})
