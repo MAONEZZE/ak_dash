@@ -283,6 +283,15 @@ class WorkerFinanceiro(Worker):
             self.recebimentos.update(receb_novos)
             gravou = True
 
+        removidas = sorted(set(self.vendas) - set(desejadas))
+        if removidas:
+            banco.apagar("metricas_faturamento", {"id_planilha": f"in.({','.join(map(str, removidas))})"})
+            for i in removidas:
+                self.vendas.pop(i, None)
+            for k in [k for k in self.recebimentos if k[0] in removidas]:
+                del self.recebimentos[k]
+            gravou = True
+
         if gravou:
             cache.invalidar()
 

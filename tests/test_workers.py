@@ -440,3 +440,25 @@ def test_financeiro_estado_inicial_vem_do_banco_e_so_regrava_venda_alterada(monk
     _, linhas, _ = banco.upserts[0]
     assert [l["id_planilha"] for l in _sem_carimbo(linhas)] == [9]
     assert _sem_carimbo(linhas)[0]["valor_bruto_contrato"] == 6000
+
+
+def test_financeiro_venda_removida_da_planilha_e_apagada(monkeypatch):
+    cab_fin = ["ID", "Data da Venda"] + [""] * 44
+
+    def linha(id_, valor_bruto):
+        return [id_, 46037, "Fernando Seguim", "11 942556237", "", "", "Jacob", "", valor_bruto, "", 9893.8, "PIX", "", 0.1, 0, 8904.42] + [""] * 6 + [9893.8, 8904.42]
+
+    gravadas = ler_base_vendas([cab_fin, linha(8, 9893.8), linha(9, 5000), linha(10, 4000)], 2026)
+    banco = _Banco({
+        "cliente_faturamento": [{"id": 84, "nome": "Fernando Seguim", "telefone": 11942556237}],
+        "metricas_faturamento": [{**v.venda, "id_cliente": 84, "id": 100 + v.venda["id_planilha"]} for v in gravadas],
+        "recebimentos_faturamento": [r for v in gravadas for r in v.recebimentos],
+    })
+    invalidacoes = _instalar(monkeypatch, banco)
+    w = workers.WorkerFinanceiro("ID_FIN", 2026, lambda _id: [("BASE_VENDAS", [cab_fin, linha(8, 9893.8)])])
+
+    w.ciclo()
+
+    assert banco.apagados == [("metricas_faturamento", {"id_planilha": "in.(9,10)"})]
+    assert not any(k[0] in (9, 10) for k in w.recebimentos)
+    assert len(invalidacoes) == 1
