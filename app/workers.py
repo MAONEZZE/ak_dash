@@ -199,6 +199,7 @@ class WorkerFinanceiro(Worker):
         self.recebimentos: dict[tuple[int, str], dict] = {}
         self.status = {"ultima_leitura_ok": None, "ultimo_erro": None}
         self._puladas: set[str] = set()
+        self._apagar_legado = False
 
     def _carregar_estado(self) -> None:
         self.vendas = {
@@ -214,7 +215,7 @@ class WorkerFinanceiro(Worker):
             for l in self._consultar("recebimentos_faturamento", {}, "id_planilha_venda,mes,pago,liquido")
         }
         # linhas do n8n antes do worker; backup em metricas_faturamento_bkp_20261028
-        banco.apagar("metricas_faturamento", {"id_planilha": "is.null"})
+        self._apagar_legado = True
 
     def _resolver_clientes(self, lidas: list) -> dict[int, int | None]:
         def casar() -> dict[int, int | None]:
@@ -294,6 +295,12 @@ class WorkerFinanceiro(Worker):
                 on_conflict="id_planilha_venda,mes",
             )
             self.recebimentos.update(receb_novos)
+            gravou = True
+
+        # só depois de ler e gravar a planilha: uma leitura que falha não pode esvaziar o faturamento
+        if self._apagar_legado and desejadas:
+            banco.apagar("metricas_faturamento", {"id_planilha": "is.null"})
+            self._apagar_legado = False
             gravou = True
 
         meses_apagados = [k for k in sorted(self.recebimentos) if k not in receb_desejados and k[0] in desejadas]

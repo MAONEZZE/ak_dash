@@ -426,6 +426,45 @@ def test_financeiro_primeira_carga_apaga_vendas_legadas_sem_id_planilha(monkeypa
     assert banco.apagados == []
 
 
+def test_financeiro_falha_na_leitura_nao_apaga_vendas_legadas(monkeypatch):
+    banco = _Banco({
+        "cliente_faturamento": [{"id": 84, "nome": "Fernando Seguim", "telefone": 11942556237}],
+        "metricas_faturamento": [],
+        "recebimentos_faturamento": [],
+    })
+    _instalar(monkeypatch, banco)
+    cab_fin = ["ID", "Data da Venda"] + [""] * 44
+    linha = [8, 46037, "Fernando Seguim", "11 942556237", "", "", "Jacob", "", 9893.8, "", 9893.8, "PIX", "", 0.1, 0, 8904.42] + [""] * 6 + [9893.8, 8904.42]
+    fonte = {"abas": [], "erro": None}
+
+    def ler(_id):
+        if fonte["erro"]:
+            raise fonte["erro"]
+        return fonte["abas"]
+
+    w = workers.WorkerFinanceiro("ID_FIN", 2026, ler)
+
+    fonte["erro"] = RuntimeError("403 Forbidden")
+    w.executar_ciclo()
+
+    assert banco.apagados == []
+    assert banco.upserts == []
+    assert "403" in w.status["ultimo_erro"]["mensagem"]
+
+    fonte["erro"] = None
+    fonte["abas"] = [("DASHBOARD", [["x"]])]
+    w.executar_ciclo()
+
+    assert banco.apagados == []
+    assert banco.upserts == []
+
+    fonte["abas"] = [("BASE_VENDAS", [cab_fin, linha])]
+    w.executar_ciclo()
+
+    assert banco.apagados.count(("metricas_faturamento", {"id_planilha": "is.null"})) == 1
+    assert banco.upserts[0][0] == "metricas_faturamento"
+
+
 def test_financeiro_ciclo_sem_mudanca_nao_grava(monkeypatch):
     banco = _Banco({
         "cliente_faturamento": [{"id": 84, "nome": "Fernando Seguim", "telefone": 11942556237}],
