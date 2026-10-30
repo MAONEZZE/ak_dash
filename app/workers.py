@@ -13,7 +13,7 @@ from app.config import Settings
 from app.fontes import banco
 from app.fontes.google_sheets import LeitorSheets, criar_credenciais
 from app.periodo import TZ_SP, hoje_sp
-from app.planilha_financeiro import COLUNAS_VENDA, ler_base_vendas
+from app.planilha_financeiro import APELIDOS, COLUNAS_VENDA, ler_base_vendas
 from app.planilhas import COLUNAS_POR_TABELA, ler_linhas, linhas_metricas, normalizar, resolver_usuario
 
 logger = logging.getLogger(__name__)
@@ -253,6 +253,15 @@ class WorkerFinanceiro(Worker):
         if "BASE_VENDAS" not in abas:
             raise RuntimeError("aba BASE_VENDAS não encontrada na planilha do financeiro")
         lidas = ler_base_vendas(abas["BASE_VENDAS"], self.ano)
+        for v in lidas:
+            for nome in (v.sdr, v.closer):
+                if nome and normalizar(nome) not in APELIDOS and nome not in self._puladas:
+                    self._puladas.add(nome)
+                    logger.warning(
+                        "Planilha financeiro: '%s' não está nos apelidos de SDR/Closer (venda %s), gravado como null",
+                        nome,
+                        v.venda["id_planilha"],
+                    )
         ids_cliente = self._resolver_clientes(lidas)
 
         desejadas = {v.venda["id_planilha"]: {**v.venda, "id_cliente": ids_cliente[v.venda["id_planilha"]]} for v in lidas}

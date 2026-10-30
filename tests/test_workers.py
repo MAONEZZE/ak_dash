@@ -527,3 +527,24 @@ def test_financeiro_sem_aba_base_vendas_registra_erro_no_status(monkeypatch):
     assert w.status["ultimo_erro"]["mensagem"] == "RuntimeError: aba BASE_VENDAS não encontrada na planilha do financeiro"
     assert w.status["ultima_leitura_ok"] is None
     assert banco.upserts == []
+
+
+def test_financeiro_apelido_desconhecido_loga_uma_vez(monkeypatch, caplog):
+    banco = _Banco({
+        "cliente_faturamento": [{"id": 84, "nome": "Fernando Seguim", "telefone": 11942556237}],
+        "metricas_faturamento": [],
+        "recebimentos_faturamento": [],
+    })
+    _instalar(monkeypatch, banco)
+    cab_fin = ["ID", "Data da Venda"] + [""] * 44
+    linha = [8, 46037, "Fernando Seguim", "11 942556237", "", "", "Fulano", "", 9893.8, "", 9893.8, "PIX", "", 0.1, 0, 8904.42] + [""] * 6 + [9893.8, 8904.42]
+    w = workers.WorkerFinanceiro("ID_FIN", 2026, lambda _id: [("BASE_VENDAS", [cab_fin, linha])])
+
+    with caplog.at_level(logging.WARNING):
+        w.ciclo()
+        w.ciclo()
+
+    mensagens = [r.getMessage() for r in caplog.records if "Fulano" in r.getMessage()]
+    assert len(mensagens) == 1
+    venda = _sem_carimbo(banco.upserts[0][1])[0]
+    assert venda["user_closer"] is None
