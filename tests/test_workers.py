@@ -234,6 +234,7 @@ def test_iniciar_sobe_um_worker_por_planilha_configurada(monkeypatch):
         planilha_closers_id="C",
         planilha_dripify_id=None,
         planilha_financeiro_id=None,
+        planilha_logs_id=None,
         worker_intervalo_segundos=5.0,
     )
 
@@ -269,6 +270,7 @@ def test_iniciar_sobe_worker_financeiro_com_id_e_ano_da_config(monkeypatch):
         planilha_dripify_id=None,
         planilha_financeiro_id="F",
         planilha_financeiro_ano=2026,
+        planilha_logs_id=None,
         workers_ativos=True,
         worker_intervalo_segundos=5.0,
     )
@@ -295,6 +297,46 @@ def test_iniciar_sobe_worker_financeiro_com_id_e_ano_da_config(monkeypatch):
     assert all(nome != "financeiro" for nome, _, _ in rodados)
 
 
+def test_iniciar_sobe_worker_de_logs_com_id_da_config(monkeypatch):
+    rodados = []
+    monkeypatch.setattr(workers.Worker, "rodar", lambda self, parar, intervalo: rodados.append((self.planilha.nome, self.planilha_id, intervalo)))
+    monkeypatch.setattr(workers, "criar_credenciais", lambda texto: object())
+    base = dataclasses.replace(
+        config.settings,
+        supabase_url="https://x.supabase.co",
+        supabase_service_key="k",
+        google_service_account_json="{}",
+        planilha_sellers_id=None,
+        planilha_sdrs_id=None,
+        planilha_closers_id=None,
+        planilha_dripify_id=None,
+        planilha_financeiro_id=None,
+        planilha_logs_id="L",
+        workers_ativos=True,
+        worker_intervalo_segundos=5.0,
+    )
+
+    workers.iniciar(base)
+    for t in threading.enumerate():
+        if t.name.startswith("worker-"):
+            t.join(timeout=1)
+
+    assert ("logs", "L", 5.0) in rodados
+    logs = [w for w in workers.ATIVOS if w.planilha.nome == "logs"]
+    assert len(logs) == 1
+    assert isinstance(logs[0], workers.WorkerLogs)
+
+    workers.ATIVOS.clear()
+    rodados.clear()
+    workers.iniciar(dataclasses.replace(base, planilha_logs_id=None))
+    for t in threading.enumerate():
+        if t.name.startswith("worker-"):
+            t.join(timeout=1)
+
+    assert all(w.planilha.nome != "logs" for w in workers.ATIVOS)
+    assert all(nome != "logs" for nome, _, _ in rodados)
+
+
 def test_iniciar_sem_credencial_loga_warning_e_guarda_motivo(monkeypatch, caplog):
     caplog.set_level(logging.WARNING)
     base = dataclasses.replace(
@@ -304,6 +346,7 @@ def test_iniciar_sem_credencial_loga_warning_e_guarda_motivo(monkeypatch, caplog
         supabase_service_key="k",
         google_service_account_json=None,
         planilha_sellers_id="S",
+        planilha_logs_id=None,
     )
 
     workers.iniciar(base)
@@ -330,6 +373,7 @@ def test_iniciar_com_json_invalido_nao_levanta_e_guarda_motivo(caplog):
         supabase_service_key="k",
         google_service_account_json="{nao e json",
         planilha_sellers_id="S",
+        planilha_logs_id=None,
     )
 
     workers.iniciar(base)

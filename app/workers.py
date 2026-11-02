@@ -432,5 +432,9 @@ def iniciar(config: Settings) -> threading.Event:
         financeiro = WorkerFinanceiro(config.planilha_financeiro_id, config.planilha_financeiro_ano, LeitorSheets(credenciais).abas)
         ATIVOS.append(financeiro)
         threading.Thread(target=financeiro.rodar, args=(parar, config.worker_intervalo_segundos), name="worker-financeiro", daemon=True).start()
+    if config.planilha_logs_id:
+        logs = WorkerLogs(config.planilha_logs_id, LeitorSheets(credenciais).abas)
+        ATIVOS.append(logs)
+        threading.Thread(target=logs.rodar, args=(parar, config.worker_intervalo_segundos), name="worker-logs", daemon=True).start()
     logger.info("Workers das planilhas ativos: %s", [w.planilha.nome for w in ATIVOS])
     return parar
