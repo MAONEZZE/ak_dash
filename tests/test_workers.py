@@ -659,3 +659,26 @@ def test_logs_primeiro_ciclo_grava_eventos_com_id_user(monkeypatch):
         assert l["atualizado_em"] == "2026-11-02T10:00:00-03:00"
         assert {"chave", "ocorrencias"} | set(planilha_logs.COLUNAS_LOG) <= set(l)
     assert banco.apagados == []
+
+
+def test_logs_estado_vem_do_banco_e_so_regrava_evento_alterado(monkeypatch):
+    eventos = planilha_logs.ler_logs([CABECALHO_LOGS, LOG_1, LOG_2]).eventos
+    banco = _Banco({
+        "users": [{"id": 4, "nome": "Jennifer Pamplona"}],
+        "logs_pipedrive": [{**e, "id_user": 4 if e["usuario_acao"] == "Jennifer Pamplona" else None} for e in eventos],
+    })
+    _instalar(monkeypatch, banco)
+    w, _ = _worker_logs([("Logs", [CABECALHO_LOGS, LOG_1, LOG_2, LOG_2])])
+
+    w.ciclo()
+
+    assert len(banco.upserts) == 1
+    tabela, linhas, on_conflict = banco.upserts[0]
+    assert tabela == "logs_pipedrive"
+    assert on_conflict == "chave"
+    assert [(l["usuario_acao"], l["ocorrencias"]) for l in linhas] == [("Thalyson", 2)]
+
+    w.ciclo()
+
+    assert len(banco.upserts) == 1
+    assert banco.apagados == []
