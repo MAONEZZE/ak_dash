@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 
+import pytest
+
 from app import planilha_logs
 
 
@@ -74,3 +76,11 @@ def test_linha_sem_data_ou_atividade_vai_para_invalidas_e_vazia_e_ignorada():
 
     assert len(leitura.eventos) == 1
     assert leitura.invalidas == [tuple(sem_data), tuple(sem_atividade)]
+
+
+def test_cabecalho_sem_coluna_obrigatoria_levanta_value_error():
+    with pytest.raises(ValueError, match="Data"):
+        planilha_logs.ler_logs([["Dia", "Hora", "Atividade feita"], ["06/08/2026", "15:20", "Indicações"]])
+
+    with pytest.raises(ValueError, match="Atividade feita"):
+        planilha_logs.ler_logs([["Data", "Hora"], ["06/08/2026", "15:20"]])

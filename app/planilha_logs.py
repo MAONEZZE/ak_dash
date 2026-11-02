@@ -92,6 +92,9 @@ def ler_logs(linhas: list[list]) -> LeituraLogs:
         for i, c in enumerate(linhas[0])
         if normalizar(c) in COLUNA_POR_CABECALHO
     }
+    for coluna, rotulo in (("data", "Data"), ("atividade", "Atividade feita")):
+        if coluna not in indices:
+            raise ValueError(f"aba Logs sem a coluna '{rotulo}'")
     acumulado: dict[str, dict] = {}
     invalidas: list[tuple] = []
     for linha in linhas[1:]:
