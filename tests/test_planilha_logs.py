@@ -39,3 +39,17 @@ def test_linha_vira_evento_com_campos_do_banco():
             ensure_ascii=False,
         ).encode()
     ).hexdigest()
+
+
+def test_data_e_hora_em_numero_serial_viram_iso():
+    linha = [46239, 0.7625, "Thalyson", "Indicações", "adição", "Valdir Pandolfi", 5511999998587]
+
+    leitura = planilha_logs.ler_logs([CABECALHO, linha])
+
+    assert len(leitura.eventos) == 1
+    evento = leitura.eventos[0]
+    assert evento["data"] == "2026-08-05"
+    assert evento["hora"] == "18:18:00"
+    assert evento["telefone"] == "5511999998587"
+    assert evento["telefone_digitos"] == "5511999998587"
+    assert evento["url_negocio"] is None
