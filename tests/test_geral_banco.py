@@ -292,60 +292,50 @@ def test_limites_do_mes_nunca_usam_offset_numerico(monkeypatch):
     assert "+" not in valor
 
 
-# --- buscar_dripify_por_conta (dash.metricas_dripify, uma conta por id_user)
+# --- buscar_logs (dash2.logs_pipedrive, espelho da planilha de logs)
 
 
-def _mockar_dripify(monkeypatch, linhas: list[dict], usuarios: list[dict]) -> list[dict]:
+def _mockar_logs(monkeypatch, linhas: list[dict]) -> list[dict]:
     chamadas: list[dict] = []
 
     def _fake_query(tabela, filtros=None, *a, **k):
         chamadas.append({"tabela": tabela, "filtros": filtros or {}})
-        return linhas if tabela == "metricas_dripify" else usuarios
+        return list(linhas)
 
     monkeypatch.setattr(banco_mod, "query", _fake_query)
     return chamadas
 
 
-def _drip(id_user: int | None, data: str, aceitas: int | None, captados: int | None) -> dict:
-    return {"id_user": id_user, "data": data, "conexoes_aceitas": aceitas, "numeros_captados": captados}
+def _log(data: str, hora: str | None, usuario: str | None = "Jennifer", atividade: str = "Indicações", cliente: str | None = "Isaque") -> dict:
+    return {"data": data, "hora": hora, "usuario_acao": usuario, "atividade": atividade, "cliente_nome": cliente}
 
 
-def test_dripify_soma_por_conta_so_dentro_do_periodo(monkeypatch):
-    _mockar_dripify(
+def test_logs_filtra_periodo_pela_coluna_data(monkeypatch):
+    chamadas = _mockar_logs(monkeypatch, [])
+    assert banco_mod.buscar_logs(date(2026, 10, 1), date(2026, 10, 5)) == []
+    assert chamadas[0]["tabela"] == "logs_pipedrive"
+    assert chamadas[0]["filtros"]["and"] == "(data.gte.2026-10-01,data.lte.2026-10-05)"
+
+
+def test_logs_vem_do_mais_recente_pro_mais_antigo_com_usuario_atividade_e_cliente(monkeypatch):
+    _mockar_logs(
         monkeypatch,
         [
-            _drip(1, "2026-10-01", 20, 10),
-            _drip(1, "2026-10-05", 20, 20),
-            _drip(3, "2026-10-02", 50, None),
+            _log("2026-10-01", "09:00:00", cliente="A"),
+            _log("2026-10-02", "08:00:00", usuario="Thalyson", atividade="Números Captados", cliente="B"),
+            _log("2026-10-01", "18:00:00", cliente="C"),
+            _log("2026-10-01", None, usuario=None, cliente=None),
         ],
-        [{"id": 1, "nome": "Jacob"}, {"id": 3, "nome": "Alex"}],
     )
-    contas = banco_mod.buscar_dripify_por_conta(date(2026, 10, 1), date(2026, 10, 5))
-    assert contas == [
-        banco_mod.ContaDripify(conta="Alex", conexoes_aceitas=50, numeros_captados=0),
-        banco_mod.ContaDripify(conta="Jacob", conexoes_aceitas=40, numeros_captados=30),
-    ]
-
-
-def test_dripify_linha_sem_usuario_nao_busca_nomes(monkeypatch):
-    chamadas = _mockar_dripify(monkeypatch, [_drip(None, "2026-10-01", 5, 5)], [])
-    assert banco_mod.buscar_dripify_por_conta(date(2026, 10, 1), date(2026, 10, 31)) == []
-    assert [c["tabela"] for c in chamadas] == ["metricas_dripify"]
-
-
-def test_dripify_filtra_periodo_pela_coluna_data(monkeypatch):
-    chamadas = _mockar_dripify(
-        monkeypatch,
-        [{"id_user": 1, "data": "2026-10-01", "conexoes_aceitas": 20, "numeros_captados": 10}],
-        [{"id": 1, "nome": "Jacob"}],
+    logs = banco_mod.buscar_logs(date(2026, 10, 1), date(2026, 10, 31))
+    assert [l.cliente for l in logs] == ["B", "C", "A", None]
+    assert logs[0] == banco_mod.LogAtividade(
+        data="2026-10-02", hora="08:00:00", usuario="Thalyson", atividade="Números Captados", cliente="B"
     )
-    contas = banco_mod.buscar_dripify_por_conta(date(2026, 10, 1), date(2026, 10, 5))
-    assert chamadas[0]["tabela"] == "metricas_dripify"
-    assert chamadas[0]["filtros"]["and"] == "(data.gte.2026-10-01,data.lte.2026-10-05)"
-    assert contas == [banco_mod.ContaDripify(conta="Jacob", conexoes_aceitas=20, numeros_captados=10)]
 
 
-def test_dripify_conta_sem_usuario_ganha_rotulo_neutro(monkeypatch):
-    _mockar_dripify(monkeypatch, [_drip(7, "2026-10-01", 1, 0)], [])
-    [conta] = banco_mod.buscar_dripify_por_conta(date(2026, 10, 1), date(2026, 10, 31))
-    assert conta.conta == "Conta 7"
+def test_logs_limita_aos_mais_recentes(monkeypatch):
+    _mockar_logs(monkeypatch, [_log(f"2026-10-{d:02d}", "10:00:00", cliente=str(d)) for d in range(1, 16)])
+    logs = banco_mod.buscar_logs(date(2026, 10, 1), date(2026, 10, 31))
+    assert len(logs) == banco_mod.LIMITE_LOGS
+    assert logs[0].cliente == "15"

@@ -8,7 +8,7 @@ from app.auth import exigir_usuario
 from app.cache import obter_ou_calcular
 from app.config import settings
 from app.dominios.comercial.banco import buscar_totais
-from app.dominios.geral.banco import buscar_confrarias_do_mes, buscar_dripify_por_conta, buscar_faturamento
+from app.dominios.geral.banco import buscar_confrarias_do_mes, buscar_faturamento, buscar_logs
 from app.dominios.geral.calculo import montar_resposta_geral, montar_termometro
 from app.fontes.banco import iniciar_registro_de_falhas, tabelas_com_falha
 from app.dominios.pessoas.banco import listar_ativas
@@ -53,10 +53,16 @@ def get_geral(
     todas_ativas = obter_ou_calcular(
         "pessoas:ativas", settings.cache_ttl_pessoas_segundos, listar_ativas
     )
+    pessoas_seller = [p for p in todas_ativas if p.cargo == "seller"]
     pessoas_sdr = [p for p in todas_ativas if p.cargo == "sdr"]
     pessoas_closer = [p for p in todas_ativas if p.cargo == "closer"]
 
     chave_periodo = f"{periodo_saida.inicio.isoformat()}:{periodo_saida.fim.isoformat()}"
+    totais_seller = obter_ou_calcular(
+        f"geral_seller:{chave_periodo}",
+        settings.cache_ttl_metricas_segundos,
+        lambda: buscar_totais("seller", [int(p.id) for p in pessoas_seller], periodo_saida.inicio, periodo_saida.fim),
+    )
     totais_sdr = obter_ou_calcular(
         f"geral_sdr:{chave_periodo}",
         settings.cache_ttl_metricas_segundos,
@@ -92,18 +98,11 @@ def get_geral(
             lambda: buscar_faturamento(inicio_mes, fim_mes, ids_closer),
         )
 
-    # Termômetro e Confrarias são sempre do mês CORRENTE, fora do filtro de
-    # data — mesmo sob Mês navegado pra outro mês.
+    # O termômetro segue o filtro de data (liquidado do período pedido, ver
+    # `montar_termometro`). As Confrarias são sempre do mês CORRENTE, fora do
+    # filtro — mesmo sob Mês navegado pra outro mês.
+    termometro = montar_termometro(faturamento, periodo_metas)
     mes_corrente = resolver_periodo("mes", _valor_atual("mes", hoje))
-    if (inicio_mes, fim_mes) == (mes_corrente.inicio, hoje):
-        faturamento_mes_corrente = faturamento_mes
-    else:
-        faturamento_mes_corrente = obter_ou_calcular(
-            f"faturamento:{mes_corrente.inicio.isoformat()}:{hoje.isoformat()}",
-            settings.cache_ttl_metricas_segundos,
-            lambda: buscar_faturamento(mes_corrente.inicio, hoje, ids_closer),
-        )
-    termometro = montar_termometro(faturamento_mes_corrente)
 
     eventos = obter_ou_calcular(
         f"confrarias:{mes_corrente.inicio.isoformat()}",
@@ -111,18 +110,20 @@ def get_geral(
         lambda: buscar_confrarias_do_mes(mes_corrente.inicio, mes_corrente.fim),
     )
 
-    contas_dripify = obter_ou_calcular(
-        f"dripify_contas:{chave_periodo}",
+    logs = obter_ou_calcular(
+        f"logs:{chave_periodo}",
         settings.cache_ttl_metricas_segundos,
-        lambda: buscar_dripify_por_conta(periodo_saida.inicio, periodo_saida.fim),
+        lambda: buscar_logs(periodo_saida.inicio, periodo_saida.fim),
     )
 
     resposta = montar_resposta_geral(
         periodo_metas=periodo_metas,
         periodo_saida=periodo_saida,
         hoje=hoje,
+        pessoas_seller=pessoas_seller,
         pessoas_sdr=pessoas_sdr,
         pessoas_closer=pessoas_closer,
+        totais_seller=totais_seller,
         totais_sdr=totais_sdr,
         totais_closer=totais_closer,
         metas=metas,
@@ -130,7 +131,7 @@ def get_geral(
         faturamento_mes=faturamento_mes,
         eventos=eventos,
         termometro=termometro,
-        contas_dripify=contas_dripify,
+        logs=logs,
     )
     resposta["avisos"] += [f"fonte_indisponivel:{t}" for t in tabelas_com_falha()]
     return resposta

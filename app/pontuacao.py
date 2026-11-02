@@ -18,6 +18,13 @@ from __future__ import annotations
 from typing import Mapping
 
 PESOS: dict[str, dict[str, int]] = {
+    # Seller: indicação vale como no SDR/Closer; FUP e número captado valem 1
+    # (decisão do usuário, 2026-11-02).
+    "seller": {
+        "indicacoes": 5,
+        "fups": 1,
+        "numeros_captados": 1,
+    },
     "sdr": {
         "inscricoes_realizadas": 15,
         "ligacoes_realizadas": 10,

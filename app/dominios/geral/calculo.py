@@ -1,15 +1,15 @@
 """Monta a resposta de `GET /geral`: 6 cards (2 escuros de faturamento + 4
 
 claros somados de `dash2.vw_metricas`), as Confrarias do mês (tabela de
-eventos do SED), as contas do Dripify do período, o termômetro de faturamento do mês e as pessoas com
-pontuação/ranking pros dois pódios (SDR e Closer) do frontend.
+eventos do SED), os logs de atividade do período, o termômetro de liquidado do mês e as pessoas com
+pontuação/ranking pros três pódios (Seller, SDR e Closer) do frontend.
 """
 from __future__ import annotations
 
 from datetime import date
 
 from app.dominios.comercial.banco import TotaisCargo
-from app.dominios.geral.banco import ContaDripify, EventoInscricoes, Faturamento
+from app.dominios.geral.banco import EventoInscricoes, Faturamento, LogAtividade
 from app.dominios.pessoas.banco import Pessoa
 from app.metas import Metas
 from app.metricas import NOME_EXIBICAO, nome_exibicao
@@ -17,6 +17,7 @@ from app.periodo import Periodo, dias_uteis_meta
 from app.pontuacao import atribuir_ranking, calcular_pontuacao
 
 # Colunas da tabela de pessoas, por cargo (decisão de produto).
+_METRICAS_SELLER_TABELA = ("fups", "numeros_captados", "indicacoes")
 _METRICAS_SDR_TABELA = (
     "ligacoes_realizadas", "reunioes_agendadas", "indicacoes", "inscricoes_realizadas",
 )
@@ -33,8 +34,9 @@ _METRICAS_SDR_TABELA = (
 # continuam com a meta somada por pessoa.
 _COMPOSICAO_CARDS_ESCUROS: tuple[str, ...] = ("faturamento", "liquidado")
 
-# Meta de faturamento do mês do termômetro — fixa por enquanto (decisão do
-# usuário, 2026-10-05), até existir meta de faturamento cadastrada no banco.
+# Meta do termômetro (liquidado do mês) — fixa por enquanto (decisão do
+# usuário, 2026-10-05; mantida quando o termômetro trocou faturamento por
+# liquidado, 2026-11-02), até existir meta cadastrada no banco.
 META_FATURAMENTO_MES = 380_000
 
 # Card claro da empresa -> (cargo, métrica) que o compõem. Uma definição só
@@ -64,9 +66,12 @@ def _pct_ritmo(realizado: float | None, meta: float | None, fracao_decorrida: fl
     return round(realizado / (meta * fracao_decorrida) * 100, 1)
 
 
+_ROTULO_CARGO = {"seller": "Seller", "sdr": "SDR", "closer": "Closer"}
+
+
 def _rotulo(nome: str, cargo: str, nomes_repetidos: set[str]) -> str:
     if nome in nomes_repetidos:
-        return f"{nome} ({'SDR' if cargo == 'sdr' else 'Closer'})"
+        return f"{nome} ({_ROTULO_CARGO[cargo]})"
     return nome
 
 
@@ -114,14 +119,17 @@ def _pontuacao(totais: TotaisCargo, id_user: int, cargo: str) -> int:
     return calcular_pontuacao(cargo, {metrica: v for (uid, metrica), v in totais.realizado.items() if uid == id_user})
 
 
-def montar_termometro(faturamento_mes_corrente: Faturamento) -> dict:
-    """Faturamento do mês CORRENTE (nunca o navegado nem o recorte pedido)
+def montar_termometro(faturamento: Faturamento, periodo: Periodo) -> dict:
+    """Liquidado do período PEDIDO contra `META_FATURAMENTO_MES` × meses que o
 
-    contra `META_FATURAMENTO_MES`.
+    período toca. O liquidado da empresa já é a soma dos meses inteiros que o
+    período toca (o calendário de recebimentos é mensal, ver `buscar_faturamento`),
+    então a meta acompanha: Dia/Semana/Mês = 1 mês, Ano = 12.
     """
+    meses = (periodo.fim.year - periodo.inicio.year) * 12 + periodo.fim.month - periodo.inicio.month + 1
     return {
-        "realizado": faturamento_mes_corrente.empresa.get("faturamento") or 0,
-        "meta": META_FATURAMENTO_MES,
+        "realizado": faturamento.empresa.get("liquidado") or 0,
+        "meta": META_FATURAMENTO_MES * meses,
     }
 
 
@@ -161,7 +169,9 @@ def montar_resposta_geral(
     faturamento_mes: Faturamento,
     eventos: list[EventoInscricoes],
     termometro: dict | None = None,
-    contas_dripify: list[ContaDripify] | None = None,
+    logs: list[LogAtividade] | None = None,
+    pessoas_seller: list[Pessoa] | None = None,
+    totais_seller: TotaisCargo | None = None,
 ) -> dict:
     """`periodo_metas` é o período pedido por inteiro (dia/mês/ano completo,
 
@@ -182,8 +192,10 @@ def montar_resposta_geral(
     objeto.
 
     `eventos` ignora o período pedido: são as Confrarias do mês corrente,
-    independentes do recorte de datas da página. `contas_dripify` segue o
-    recorte (`periodo_saida`), como os cards claros.
+    independentes do recorte de datas da página. `logs` segue o recorte
+    (`periodo_saida`), como os cards claros.
+
+    Os Sellers só entram nas pessoas (pódio próprio); não compõem nenhum card.
     """
     dias = dias_uteis_meta(periodo_metas.inicio, periodo_metas.fim, hoje)
     dias_decorridos = dias["decorridos"]
@@ -224,13 +236,28 @@ def montar_resposta_geral(
             }
         )
 
-    todos_nomes = [p.nome for p in pessoas_sdr] + [p.nome for p in pessoas_closer]
+    pessoas_seller = pessoas_seller or []
+    todos_nomes = [p.nome for p in pessoas_seller] + [p.nome for p in pessoas_sdr] + [p.nome for p in pessoas_closer]
     nomes_repetidos = {nome for nome in todos_nomes if todos_nomes.count(nome) > 1}
 
     def meta_de(id_user: int, cargo: str, chave: str) -> int | None:
         return metas.por_usuario(periodo_metas.inicio, periodo_metas.fim, id_user, cargo, chave)
 
     pessoas_saida = []
+    for pessoa in pessoas_seller:
+        id_user = int(pessoa.id)
+        metricas_calc = [
+            {
+                "metrica": chave,
+                "realizado": totais_seller.realizado.get((id_user, chave), 0),
+                "meta_periodo": meta_de(id_user, "seller", chave),
+            }
+            for chave in _METRICAS_SELLER_TABELA
+        ]
+        pessoas_saida.append(_montar_pessoa(
+            pessoa, "seller", metricas_calc, _pontuacao(totais_seller, id_user, "seller"), nomes_repetidos
+        ))
+
     for pessoa in pessoas_sdr:
         id_user = int(pessoa.id)
         metricas_calc = [
@@ -279,14 +306,14 @@ def montar_resposta_geral(
             pessoa, "closer", metricas_calc, _pontuacao(totais_closer, id_user, "closer"), nomes_repetidos
         ))
 
-    # Um ranking por cargo (contrato: SDR só contra SDR, Closer só contra Closer).
-    for cargo in ("sdr", "closer"):
+    # Um ranking por cargo (contrato: cada cargo só contra o próprio cargo).
+    for cargo in ("seller", "sdr", "closer"):
         atribuir_ranking([p for p in pessoas_saida if p["cargo"] == cargo], "pontuacao")
 
     avisos: list[str] = []
     if metas.vazio:
         avisos.append("metas_nao_cadastradas")
-    if totais_sdr.linhas_cargo_cruzado or totais_closer.linhas_cargo_cruzado:
+    if any(t.linhas_cargo_cruzado for t in (totais_seller, totais_sdr, totais_closer) if t):
         avisos.append("linhas_cargo_cruzado_ignoradas")
 
     return {
@@ -309,9 +336,9 @@ def montar_resposta_geral(
             }
             for e in eventos
         ],
-        "contas_dripify": [
-            {"conta": c.conta, "conexoes_aceitas": c.conexoes_aceitas, "numeros_captados": c.numeros_captados}
-            for c in contas_dripify or []
+        "logs": [
+            {"data": log.data, "hora": log.hora, "usuario": log.usuario, "atividade": log.atividade, "cliente": log.cliente}
+            for log in logs or []
         ],
         "pessoas": pessoas_saida,
         "termometro": termometro,

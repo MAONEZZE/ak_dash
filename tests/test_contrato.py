@@ -71,7 +71,7 @@ def test_schema_metricatime_e_metrica_tem_os_indicadores():
 def test_schema_respostageral_tem_os_campos_que_o_bff_produz():
     spec = _carregar_openapi()
     campos = set(spec["components"]["schemas"]["RespostaGeral"]["required"])
-    assert campos == {"periodo", "dias_uteis", "cards", "eventos", "contas_dripify", "pessoas", "avisos"}
+    assert campos == {"periodo", "dias_uteis", "cards", "eventos", "logs", "pessoas", "avisos"}
 
 
 def test_schema_respostafinanceiro_tem_os_campos_que_o_bff_produz():
