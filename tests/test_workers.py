@@ -721,3 +721,17 @@ def test_logs_sem_aba_ou_sem_eventos_registra_erro_e_nao_apaga(monkeypatch):
     assert "nenhum evento" in w.status["ultimo_erro"]["mensagem"]
     assert banco.apagados == []
     assert banco.upserts == []
+
+
+def test_logs_linha_invalida_e_usuario_sem_cadastro_logam_uma_vez(monkeypatch, caplog):
+    caplog.set_level(logging.WARNING)
+    banco = _Banco({"users": [], "logs_pipedrive": []})
+    _instalar(monkeypatch, banco)
+    w, _ = _worker_logs([("Logs", [CABECALHO_LOGS, LOG_2, ["ontem", "10:00", "Thalyson", "Indicações"]])])
+
+    w.ciclo()
+    w.ciclo()
+
+    mensagens = [r.getMessage() for r in caplog.records]
+    assert len([m for m in mensagens if "linha ignorada" in m]) == 1
+    assert len([m for m in mensagens if "'Thalyson' não está em users" in m]) == 1

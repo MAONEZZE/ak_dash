@@ -354,6 +354,10 @@ class WorkerLogs(Worker):
         if "Logs" not in abas:
             raise RuntimeError("aba Logs não encontrada na planilha de logs")
         leitura = ler_logs(abas["Logs"])
+        for linha in leitura.invalidas:
+            if linha not in self._puladas:
+                self._puladas.add(linha)
+                logger.warning("Planilha logs: linha ignorada (sem data válida ou sem atividade): %s", list(linha))
         if not leitura.eventos:
             # leitura vazia não pode esvaziar a tabela (mesmo cuidado do financeiro)
             raise RuntimeError("aba Logs sem nenhum evento válido; nada foi apagado")
@@ -362,6 +366,9 @@ class WorkerLogs(Worker):
         desejados: dict[str, dict] = {}
         for e in leitura.eventos:
             u = resolver_usuario(e["usuario_acao"], usuarios) if e["usuario_acao"] else None
+            if e["usuario_acao"] and u is None and e["usuario_acao"] not in self._puladas:
+                self._puladas.add(e["usuario_acao"])
+                logger.warning("Planilha logs: '%s' não está em users, gravado com id_user null", e["usuario_acao"])
             desejados[e["chave"]] = {**e, "id_user": u["id"] if u else None}
         novos = {
             k: d for k, d in sorted(desejados.items())
