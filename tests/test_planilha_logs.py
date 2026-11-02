@@ -53,3 +53,12 @@ def test_data_e_hora_em_numero_serial_viram_iso():
     assert evento["telefone"] == "5511999998587"
     assert evento["telefone_digitos"] == "5511999998587"
     assert evento["url_negocio"] is None
+
+
+def test_linhas_identicas_viram_um_evento_com_ocorrencias():
+    a = ["06/08/2026", "15:20", "Thalyson", "Indicações", "adição", "Valdir Pandolfi"]
+    b = ["06/08/2026", "15:20", "Thalyson", "Indicações", "adição", "Aurelio Bud Spencer"]
+
+    leitura = planilha_logs.ler_logs([CABECALHO, a, b, a])
+
+    assert [(e["cliente_nome"], e["ocorrencias"]) for e in leitura.eventos] == [("Valdir Pandolfi", 2), ("Aurelio Bud Spencer", 1)]
