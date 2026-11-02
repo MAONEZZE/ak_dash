@@ -705,6 +705,24 @@ def test_logs_primeiro_ciclo_grava_eventos_com_id_user(monkeypatch):
     assert banco.apagados == []
 
 
+def test_logs_nome_completo_casa_pelo_primeiro_nome_quando_nao_ha_match_exato(monkeypatch):
+    banco = _Banco({"users": [{"id": 4, "nome": "Jennifer"}, {"id": 9, "nome": "Jennifer Pamplona"}, {"id": 8, "nome": "Thalyson"}], "logs_pipedrive": []})
+    _instalar(monkeypatch, banco)
+    log_nathan = ["07/08/2026", "09:00", "Nathan Mayumi", "Indicações"]
+    log_jennifer_lima = ["07/08/2026", "09:30", "Jennifer Lima", "Indicações"]
+    w, _ = _worker_logs([("Logs", [CABECALHO_LOGS, LOG_1, LOG_2, log_nathan, log_jennifer_lima])])
+
+    w.ciclo()
+
+    _, linhas, _ = banco.upserts[0]
+    assert sorted((l["usuario_acao"], l["id_user"]) for l in linhas) == [
+        ("Jennifer Lima", 4),
+        ("Jennifer Pamplona", 9),
+        ("Nathan Mayumi", None),
+        ("Thalyson", 8),
+    ]
+
+
 def test_logs_estado_vem_do_banco_e_so_regrava_evento_alterado(monkeypatch):
     eventos = planilha_logs.ler_logs([CABECALHO_LOGS, LOG_1, LOG_2]).eventos
     banco = _Banco({

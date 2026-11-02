@@ -365,7 +365,11 @@ class WorkerLogs(Worker):
 
         desejados: dict[str, dict] = {}
         for e in leitura.eventos:
-            u = resolver_usuario(e["usuario_acao"], usuarios) if e["usuario_acao"] else None
+            # a planilha usa nome completo ("Jennifer Pamplona") e users só o primeiro nome ("Jennifer")
+            u = (
+                resolver_usuario(e["usuario_acao"], usuarios) or resolver_usuario(e["usuario_acao"].split()[0], usuarios)
+                if e["usuario_acao"] else None
+            )
             if e["usuario_acao"] and u is None and e["usuario_acao"] not in self._puladas:
                 self._puladas.add(e["usuario_acao"])
                 logger.warning("Planilha logs: '%s' não está em users, gravado com id_user null", e["usuario_acao"])
