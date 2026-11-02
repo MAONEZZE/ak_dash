@@ -6,6 +6,7 @@ from datetime import date, datetime
 import pytest
 
 from app import config
+from app import planilha_logs
 from app import workers
 from app.periodo import TZ_SP
 from app.planilha_financeiro import ler_base_vendas
@@ -629,3 +630,32 @@ def test_financeiro_apelido_desconhecido_loga_uma_vez(monkeypatch, caplog):
     assert len(mensagens) == 1
     venda = _sem_carimbo(banco.upserts[0][1])[0]
     assert venda["user_closer"] is None
+
+
+CABECALHO_LOGS = ["Data", "Hora", "Usuario da ação", "Atividade feita", "Ação evento", "Nome do Cliente", "Telefone do Cliente"]
+LOG_1 = ["05/08/2026", "18:18", "Jennifer Pamplona", "Números Captados", "adição", "Isaque Costa", "31 987130727"]
+LOG_2 = ["06/08/2026", "10:19", "Thalyson", "Reuniões Agendadas", "adição", "Katia"]
+
+
+def _worker_logs(abas):
+    fonte = {"abas": abas}
+    w = workers.WorkerLogs("ID_LOGS", lambda _id: fonte["abas"], agora=lambda: datetime(2026, 11, 2, 10, 0, tzinfo=TZ_SP))
+    return w, fonte
+
+
+def test_logs_primeiro_ciclo_grava_eventos_com_id_user(monkeypatch):
+    banco = _Banco({"users": [{"id": 4, "nome": "Jennifer Pamplona"}], "logs_pipedrive": []})
+    _instalar(monkeypatch, banco)
+    w, _ = _worker_logs([("Logs", [CABECALHO_LOGS, LOG_1, LOG_2])])
+
+    w.ciclo()
+
+    assert len(banco.upserts) == 1
+    tabela, linhas, on_conflict = banco.upserts[0]
+    assert tabela == "logs_pipedrive"
+    assert on_conflict == "chave"
+    assert sorted((l["usuario_acao"], l["id_user"]) for l in linhas) == [("Jennifer Pamplona", 4), ("Thalyson", None)]
+    for l in linhas:
+        assert l["atualizado_em"] == "2026-11-02T10:00:00-03:00"
+        assert {"chave", "ocorrencias"} | set(planilha_logs.COLUNAS_LOG) <= set(l)
+    assert banco.apagados == []

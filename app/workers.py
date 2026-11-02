@@ -1,4 +1,4 @@
-"""Workers que espelham as planilhas (Sellers, SDRs, Closers, Dripify) em dash2 a cada N segundos. Substituem os fluxos n8n de métricas. Gravam só o que mudou (estado em memória, carregado do banco na subida e na virada do mês), no mês corrente em America/Sao_Paulo. Nunca criam usuário nem cargo: aba de quem não está em users/user_cargos é pulada."""
+"""Workers que espelham as planilhas (Sellers, SDRs, Closers, Dripify, Logs) em dash2 a cada N segundos. Substituem os fluxos n8n de métricas. Gravam só o que mudou (estado em memória, carregado do banco na subida e na virada do mês), no mês corrente em America/Sao_Paulo. Nunca criam usuário nem cargo: aba de quem não está em users/user_cargos é pulada."""
 from __future__ import annotations
 
 import logging
@@ -14,6 +14,7 @@ from app.fontes import banco
 from app.fontes.google_sheets import LeitorSheets, criar_credenciais
 from app.periodo import TZ_SP, hoje_sp
 from app.planilha_financeiro import APELIDOS, COLUNAS_VENDA, ler_base_vendas
+from app.planilha_logs import COLUNAS_LOG, ler_logs
 from app.planilhas import COLUNAS_POR_TABELA, ler_linhas, linhas_metricas, normalizar, resolver_usuario
 
 logger = logging.getLogger(__name__)
@@ -320,6 +321,54 @@ class WorkerFinanceiro(Worker):
 
         if gravou:
             cache.invalidar()
+
+
+class WorkerLogs(Worker):
+    """Espelha a aba Logs da planilha Logs Pipedrive em logs_pipedrive (chave = sha1 do conteúdo da linha)."""
+
+    def __init__(
+        self,
+        planilha_id: str,
+        ler_abas: Callable[[str], list[tuple[str, list[list]]]],
+        agora: Callable[[], datetime] = lambda: datetime.now(TZ_SP),
+    ):
+        self.planilha = Planilha("logs", "logs_pipedrive", "")
+        self.planilha_id = planilha_id
+        self.ler_abas = ler_abas
+        self.agora = agora
+        self.logs: dict[str, dict] | None = None
+        self.status = {"ultima_leitura_ok": None, "ultimo_erro": None}
+        self._puladas: set = set()
+
+    def _carregar_estado(self) -> None:
+        self.logs = {
+            l["chave"]: l
+            for l in self._consultar("logs_pipedrive", {}, "chave,ocorrencias,id_user," + ",".join(COLUNAS_LOG))
+        }
+
+    def ciclo(self) -> None:
+        if self.logs is None:
+            self._carregar_estado()
+
+        abas = dict(self.ler_abas(self.planilha_id))
+        leitura = ler_logs(abas["Logs"])
+        usuarios = self._consultar("users", {}, "id,nome")
+
+        desejados: dict[str, dict] = {}
+        for e in leitura.eventos:
+            u = resolver_usuario(e["usuario_acao"], usuarios) if e["usuario_acao"] else None
+            desejados[e["chave"]] = {**e, "id_user": u["id"] if u else None}
+        novos = {
+            k: d for k, d in sorted(desejados.items())
+            if {c: self.logs.get(k, {}).get(c) for c in d} != d
+        }
+        if novos:
+            banco.upsert(
+                "logs_pipedrive",
+                [{**l, "atualizado_em": self.agora().isoformat()} for l in novos.values()],
+                on_conflict="chave",
+            )
+            self.logs.update(novos)
 
 
 ATIVOS: list[Worker] = []
