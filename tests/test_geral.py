@@ -576,20 +576,27 @@ def test_card_ligacoes_realizadas_soma_sdr_e_closer():
     assert card["realizado"] == 10
 
 
-def test_termometro_e_o_faturamento_do_mes_contra_meta_fixa():
+def test_termometro_e_o_liquidado_do_mes_contra_meta_fixa():
     from app.dominios.geral.calculo import montar_termometro
 
     mes = Faturamento(
         empresa={"faturamento": 152_000.0, "liquidado": 40_000.0, "inscritos": None, "aprovados": None},
         por_pessoa={},
     )
-    assert montar_termometro(mes) == {"realizado": 152_000.0, "meta": 380_000}
+    assert montar_termometro(mes, _periodo_metas()) == {"realizado": 40_000.0, "meta": 380_000}
+
+
+def test_termometro_no_ano_tem_meta_de_12_meses():
+    from app.dominios.geral.calculo import montar_termometro
+
+    ano = Periodo("ano", date(2026, 1, 1), date(2026, 12, 31))
+    assert montar_termometro(_faturamento_vazio(), ano)["meta"] == 12 * 380_000
 
 
 def test_termometro_sem_venda_no_mes_fica_em_zero():
     from app.dominios.geral.calculo import montar_termometro
 
-    assert montar_termometro(_faturamento_vazio())["realizado"] == 0
+    assert montar_termometro(_faturamento_vazio(), _periodo_metas())["realizado"] == 0
 
 
 def test_oportunidade_nao_soma_numeros_captados_do_sdr():
@@ -603,3 +610,23 @@ def test_oportunidade_nao_soma_numeros_captados_do_sdr():
     assert card["realizado"] == 2
     metricas = [m["metrica"] for m in resposta["pessoas"][0]["metricas"]]
     assert metricas == ["ligacoes_realizadas", "reunioes_agendadas", "indicacoes", "inscricoes_realizadas"]
+
+
+def test_sellers_tem_ranking_proprio_com_indicacao_valendo_5():
+    sellers = [
+        Pessoa(id="20", nome="Ana", cargo="seller", email="a@x.com"),
+        Pessoa(id="21", nome="Bia", cargo="seller", email="b@x.com"),
+    ]
+    sdr = [Pessoa(id="4", nome="Jennifer", cargo="sdr", email="j@x.com")]
+    resposta = _montar(
+        pessoas_sdr=sdr, pessoas_closer=[],
+        totais_sdr=_totais({(4, "indicacoes"): 100}), totais_closer=_totais({}),
+        pessoas_seller=sellers,
+        totais_seller=_totais({(20, "indicacoes"): 2, (20, "fups"): 3, (21, "numeros_captados"): 20}),
+        metas=Metas({}), faturamento=_faturamento_vazio(), eventos=[],
+    )
+    por_nome = {p["nome"]: p for p in resposta["pessoas"]}
+    assert (por_nome["Bia"]["cargo"], por_nome["Bia"]["pontuacao"], por_nome["Bia"]["posicao"]) == ("seller", 20, 1)
+    assert (por_nome["Ana"]["pontuacao"], por_nome["Ana"]["posicao"]) == (13, 2)
+    assert por_nome["Jennifer"]["posicao"] == 1
+    assert [m["metrica"] for m in por_nome["Ana"]["metricas"]] == ["fups", "numeros_captados", "indicacoes"]

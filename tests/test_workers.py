@@ -6,6 +6,7 @@ from datetime import date, datetime
 import pytest
 
 from app import config
+from app import planilha_logs
 from app import workers
 from app.periodo import TZ_SP
 from app.planilha_financeiro import ler_base_vendas
@@ -233,6 +234,7 @@ def test_iniciar_sobe_um_worker_por_planilha_configurada(monkeypatch):
         planilha_closers_id="C",
         planilha_dripify_id=None,
         planilha_financeiro_id=None,
+        planilha_logs_id=None,
         worker_intervalo_segundos=5.0,
     )
 
@@ -268,6 +270,7 @@ def test_iniciar_sobe_worker_financeiro_com_id_e_ano_da_config(monkeypatch):
         planilha_dripify_id=None,
         planilha_financeiro_id="F",
         planilha_financeiro_ano=2026,
+        planilha_logs_id=None,
         workers_ativos=True,
         worker_intervalo_segundos=5.0,
     )
@@ -294,6 +297,46 @@ def test_iniciar_sobe_worker_financeiro_com_id_e_ano_da_config(monkeypatch):
     assert all(nome != "financeiro" for nome, _, _ in rodados)
 
 
+def test_iniciar_sobe_worker_de_logs_com_id_da_config(monkeypatch):
+    rodados = []
+    monkeypatch.setattr(workers.Worker, "rodar", lambda self, parar, intervalo: rodados.append((self.planilha.nome, self.planilha_id, intervalo)))
+    monkeypatch.setattr(workers, "criar_credenciais", lambda texto: object())
+    base = dataclasses.replace(
+        config.settings,
+        supabase_url="https://x.supabase.co",
+        supabase_service_key="k",
+        google_service_account_json="{}",
+        planilha_sellers_id=None,
+        planilha_sdrs_id=None,
+        planilha_closers_id=None,
+        planilha_dripify_id=None,
+        planilha_financeiro_id=None,
+        planilha_logs_id="L",
+        workers_ativos=True,
+        worker_intervalo_segundos=5.0,
+    )
+
+    workers.iniciar(base)
+    for t in threading.enumerate():
+        if t.name.startswith("worker-"):
+            t.join(timeout=1)
+
+    assert ("logs", "L", 5.0) in rodados
+    logs = [w for w in workers.ATIVOS if w.planilha.nome == "logs"]
+    assert len(logs) == 1
+    assert isinstance(logs[0], workers.WorkerLogs)
+
+    workers.ATIVOS.clear()
+    rodados.clear()
+    workers.iniciar(dataclasses.replace(base, planilha_logs_id=None))
+    for t in threading.enumerate():
+        if t.name.startswith("worker-"):
+            t.join(timeout=1)
+
+    assert all(w.planilha.nome != "logs" for w in workers.ATIVOS)
+    assert all(nome != "logs" for nome, _, _ in rodados)
+
+
 def test_iniciar_sem_credencial_loga_warning_e_guarda_motivo(monkeypatch, caplog):
     caplog.set_level(logging.WARNING)
     base = dataclasses.replace(
@@ -303,6 +346,7 @@ def test_iniciar_sem_credencial_loga_warning_e_guarda_motivo(monkeypatch, caplog
         supabase_service_key="k",
         google_service_account_json=None,
         planilha_sellers_id="S",
+        planilha_logs_id=None,
     )
 
     workers.iniciar(base)
@@ -329,6 +373,7 @@ def test_iniciar_com_json_invalido_nao_levanta_e_guarda_motivo(caplog):
         supabase_service_key="k",
         google_service_account_json="{nao e json",
         planilha_sellers_id="S",
+        planilha_logs_id=None,
     )
 
     workers.iniciar(base)
@@ -424,6 +469,45 @@ def test_financeiro_primeira_carga_apaga_vendas_legadas_sem_id_planilha(monkeypa
     w.ciclo()
 
     assert banco.apagados == []
+
+
+def test_financeiro_falha_na_leitura_nao_apaga_vendas_legadas(monkeypatch):
+    banco = _Banco({
+        "cliente_faturamento": [{"id": 84, "nome": "Fernando Seguim", "telefone": 11942556237}],
+        "metricas_faturamento": [],
+        "recebimentos_faturamento": [],
+    })
+    _instalar(monkeypatch, banco)
+    cab_fin = ["ID", "Data da Venda"] + [""] * 44
+    linha = [8, 46037, "Fernando Seguim", "11 942556237", "", "", "Jacob", "", 9893.8, "", 9893.8, "PIX", "", 0.1, 0, 8904.42] + [""] * 6 + [9893.8, 8904.42]
+    fonte = {"abas": [], "erro": None}
+
+    def ler(_id):
+        if fonte["erro"]:
+            raise fonte["erro"]
+        return fonte["abas"]
+
+    w = workers.WorkerFinanceiro("ID_FIN", 2026, ler)
+
+    fonte["erro"] = RuntimeError("403 Forbidden")
+    w.executar_ciclo()
+
+    assert banco.apagados == []
+    assert banco.upserts == []
+    assert "403" in w.status["ultimo_erro"]["mensagem"]
+
+    fonte["erro"] = None
+    fonte["abas"] = [("DASHBOARD", [["x"]])]
+    w.executar_ciclo()
+
+    assert banco.apagados == []
+    assert banco.upserts == []
+
+    fonte["abas"] = [("BASE_VENDAS", [cab_fin, linha])]
+    w.executar_ciclo()
+
+    assert banco.apagados.count(("metricas_faturamento", {"id_planilha": "is.null"})) == 1
+    assert banco.upserts[0][0] == "metricas_faturamento"
 
 
 def test_financeiro_ciclo_sem_mudanca_nao_grava(monkeypatch):
@@ -590,3 +674,126 @@ def test_financeiro_apelido_desconhecido_loga_uma_vez(monkeypatch, caplog):
     assert len(mensagens) == 1
     venda = _sem_carimbo(banco.upserts[0][1])[0]
     assert venda["user_closer"] is None
+
+
+CABECALHO_LOGS = ["Data", "Hora", "Usuario da ação", "Atividade feita", "Ação evento", "Nome do Cliente", "Telefone do Cliente"]
+LOG_1 = ["05/08/2026", "18:18", "Jennifer Pamplona", "Números Captados", "adição", "Isaque Costa", "31 987130727"]
+LOG_2 = ["06/08/2026", "10:19", "Thalyson", "Reuniões Agendadas", "adição", "Katia"]
+
+
+def _worker_logs(abas):
+    fonte = {"abas": abas}
+    w = workers.WorkerLogs("ID_LOGS", lambda _id: fonte["abas"], agora=lambda: datetime(2026, 11, 2, 10, 0, tzinfo=TZ_SP))
+    return w, fonte
+
+
+def test_logs_primeiro_ciclo_grava_eventos_com_id_user(monkeypatch):
+    banco = _Banco({"users": [{"id": 4, "nome": "Jennifer Pamplona"}], "logs_pipedrive": []})
+    _instalar(monkeypatch, banco)
+    w, _ = _worker_logs([("Logs", [CABECALHO_LOGS, LOG_1, LOG_2])])
+
+    w.ciclo()
+
+    assert len(banco.upserts) == 1
+    tabela, linhas, on_conflict = banco.upserts[0]
+    assert tabela == "logs_pipedrive"
+    assert on_conflict == "chave"
+    assert sorted((l["usuario_acao"], l["id_user"]) for l in linhas) == [("Jennifer Pamplona", 4), ("Thalyson", None)]
+    for l in linhas:
+        assert l["atualizado_em"] == "2026-11-02T10:00:00-03:00"
+        assert {"chave", "ocorrencias"} | set(planilha_logs.COLUNAS_LOG) <= set(l)
+    assert banco.apagados == []
+
+
+def test_logs_nome_completo_casa_pelo_primeiro_nome_quando_nao_ha_match_exato(monkeypatch):
+    banco = _Banco({"users": [{"id": 4, "nome": "Jennifer"}, {"id": 9, "nome": "Jennifer Pamplona"}, {"id": 8, "nome": "Thalyson"}], "logs_pipedrive": []})
+    _instalar(monkeypatch, banco)
+    log_nathan = ["07/08/2026", "09:00", "Nathan Mayumi", "Indicações"]
+    log_jennifer_lima = ["07/08/2026", "09:30", "Jennifer Lima", "Indicações"]
+    w, _ = _worker_logs([("Logs", [CABECALHO_LOGS, LOG_1, LOG_2, log_nathan, log_jennifer_lima])])
+
+    w.ciclo()
+
+    _, linhas, _ = banco.upserts[0]
+    assert sorted((l["usuario_acao"], l["id_user"]) for l in linhas) == [
+        ("Jennifer Lima", 4),
+        ("Jennifer Pamplona", 9),
+        ("Nathan Mayumi", None),
+        ("Thalyson", 8),
+    ]
+
+
+def test_logs_estado_vem_do_banco_e_so_regrava_evento_alterado(monkeypatch):
+    eventos = planilha_logs.ler_logs([CABECALHO_LOGS, LOG_1, LOG_2]).eventos
+    banco = _Banco({
+        "users": [{"id": 4, "nome": "Jennifer Pamplona"}],
+        "logs_pipedrive": [{**e, "id_user": 4 if e["usuario_acao"] == "Jennifer Pamplona" else None} for e in eventos],
+    })
+    _instalar(monkeypatch, banco)
+    w, _ = _worker_logs([("Logs", [CABECALHO_LOGS, LOG_1, LOG_2, LOG_2])])
+
+    w.ciclo()
+
+    assert len(banco.upserts) == 1
+    tabela, linhas, on_conflict = banco.upserts[0]
+    assert tabela == "logs_pipedrive"
+    assert on_conflict == "chave"
+    assert [(l["usuario_acao"], l["ocorrencias"]) for l in linhas] == [("Thalyson", 2)]
+
+    w.ciclo()
+
+    assert len(banco.upserts) == 1
+    assert banco.apagados == []
+
+
+def test_logs_evento_removido_da_planilha_e_apagado(monkeypatch):
+    eventos = planilha_logs.ler_logs([CABECALHO_LOGS, LOG_1, LOG_2]).eventos
+    chave_2 = next(e["chave"] for e in eventos if e["usuario_acao"] == "Thalyson")
+    banco = _Banco({
+        "users": [],
+        "logs_pipedrive": [{**e, "id_user": None} for e in eventos],
+    })
+    _instalar(monkeypatch, banco)
+    w, _ = _worker_logs([("Logs", [CABECALHO_LOGS, LOG_1])])
+
+    w.ciclo()
+    w.ciclo()
+
+    assert banco.apagados == [("logs_pipedrive", {"chave": f"in.({chave_2})"})]
+    assert banco.upserts == []
+
+
+def test_logs_sem_aba_ou_sem_eventos_registra_erro_e_nao_apaga(monkeypatch):
+    eventos = planilha_logs.ler_logs([CABECALHO_LOGS, LOG_1]).eventos
+    banco = _Banco({
+        "users": [],
+        "logs_pipedrive": [{**e, "id_user": None} for e in eventos],
+    })
+    _instalar(monkeypatch, banco)
+    w, fonte = _worker_logs([("Outra", [["x"]])])
+
+    w.executar_ciclo()
+
+    assert "Logs" in w.status["ultimo_erro"]["mensagem"]
+    assert w.status["ultima_leitura_ok"] is None
+
+    fonte["abas"] = [("Logs", [CABECALHO_LOGS, ["", None]])]
+    w.executar_ciclo()
+
+    assert "nenhum evento" in w.status["ultimo_erro"]["mensagem"]
+    assert banco.apagados == []
+    assert banco.upserts == []
+
+
+def test_logs_linha_invalida_e_usuario_sem_cadastro_logam_uma_vez(monkeypatch, caplog):
+    caplog.set_level(logging.WARNING)
+    banco = _Banco({"users": [], "logs_pipedrive": []})
+    _instalar(monkeypatch, banco)
+    w, _ = _worker_logs([("Logs", [CABECALHO_LOGS, LOG_2, ["ontem", "10:00", "Thalyson", "Indicações"]])])
+
+    w.ciclo()
+    w.ciclo()
+
+    mensagens = [r.getMessage() for r in caplog.records]
+    assert len([m for m in mensagens if "linha ignorada" in m]) == 1
+    assert len([m for m in mensagens if "'Thalyson' não está em users" in m]) == 1

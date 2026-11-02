@@ -64,6 +64,20 @@ def test_settings_le_envs_do_worker_financeiro(monkeypatch):
     assert s.planilha_financeiro_ano == 2026
 
 
+def test_settings_le_env_do_worker_de_logs(monkeypatch):
+    monkeypatch.setenv("PLANILHA_LOGS_ID", "logs")
+
+    s = config.Settings()
+
+    assert s.planilha_logs_id == "logs"
+
+    monkeypatch.setenv("PLANILHA_LOGS_ID", "")
+
+    s = config.Settings()
+
+    assert s.planilha_logs_id is None
+
+
 def test_expediente_padrao_10_as_19_e_lido_das_envs(monkeypatch):
     monkeypatch.delenv("EXPEDIENTE_INICIO", raising=False)
     monkeypatch.delenv("EXPEDIENTE_FIM", raising=False)

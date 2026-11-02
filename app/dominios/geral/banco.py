@@ -23,7 +23,7 @@ aqui — não existem nesta tabela, vêm do SED (ver `buscar_confrarias_do_mes`)
 
 Também lê o SEGUNDO Supabase (`SED.events`/`SED.registrations`), que
 alimenta a tabela de Confrarias da Geral — ver `buscar_confrarias_do_mes` —
-e `dash.metricas_dripify` por conta — ver `buscar_dripify_por_conta`.
+e `dash2.logs_pipedrive`, o espelho da planilha de logs — ver `buscar_logs`.
 
 As métricas de atividade (números captados, ligações, reuniões, indicações)
 NÃO passam por aqui: a Geral lê as mesmas `buscar_totais`/`dash.vw_metricas`
@@ -42,7 +42,7 @@ from app.fontes.banco import query
 CHAVES_FATURAMENTO = ("faturamento", "liquidado", "inscritos", "aprovados")
 
 # Uma tabela de Confrarias na Geral, de 10 linhas — a segunda virou a tabela
-# de contas do Dripify (decisão do usuário, 2026-10-05).
+# de contas do Dripify (decisão do usuário, 2026-10-05) e depois no card Logs.
 LIMITE_EVENTOS = 10
 
 # A Geral só mostra as Confrarias (decisão do usuário, 2026-10-05). `ilike`
@@ -206,44 +206,37 @@ def buscar_confrarias_do_mes(inicio: date, fim: date) -> list[EventoInscricoes]:
     ]
 
 
+# Linhas do card Logs da Geral — o mesmo tamanho da tabela de Confrarias ao lado.
+LIMITE_LOGS = 10
+
+
 @dataclass(frozen=True)
-class ContaDripify:
-    conta: str
-    conexoes_aceitas: int
-    numeros_captados: int
+class LogAtividade:
+    data: str
+    hora: str | None
+    usuario: str | None
+    atividade: str
+    cliente: str | None
 
 
-def buscar_dripify_por_conta(inicio: date, fim: date) -> list[ContaDripify]:
-    """Conexões aceitas e números captados de cada conta do LinkedIn
-    (`dash.metricas_dripify`, uma conta por `id_user`) somados de `inicio` a
-    `fim`, da maior pra menor em conexões aceitas.
-
-    Lê a tabela direto, não a `vw_metricas`: a view só emite Dripify de quem é
-    SDR, e as contas rodam também no nome de closers e de quem já saiu do
-    time (Jacob, Mariana...). A data é a coluna `data`, então o período vai
-    pro PostgREST.
+def buscar_logs(inicio: date, fim: date) -> list[LogAtividade]:
+    """Os `LIMITE_LOGS` logs mais recentes de `inicio` a `fim` em
+    `dash2.logs_pipedrive` (espelho da aba Logs da planilha `PLANILHA_LOGS_ID`,
+    mantido pelo WorkerLogs), do mais novo pro mais antigo.
     """
     linhas = query(
-        "metricas_dripify",
+        "logs_pipedrive",
         {"and": f"(data.gte.{inicio.isoformat()},data.lte.{fim.isoformat()})"},
-        colunas="id_user,data,conexoes_aceitas,numeros_captados",
+        colunas="data,hora,usuario_acao,atividade,cliente_nome",
     )
-
-    somas: dict[int, list[int]] = {}
-    for r in linhas:
-        if r.get("id_user") is None:
-            continue
-        soma = somas.setdefault(int(r["id_user"]), [0, 0])
-        soma[0] += r.get("conexoes_aceitas") or 0
-        soma[1] += r.get("numeros_captados") or 0
-    if not somas:
-        return []
-
-    usuarios = query("users", {"id": f"in.({','.join(str(i) for i in somas)})"}, colunas="id,nome")
-    nomes = {int(u["id"]): u.get("nome") for u in usuarios}
-
-    contas = [
-        ContaDripify(conta=nomes.get(id_user) or f"Conta {id_user}", conexoes_aceitas=aceitas, numeros_captados=captados)
-        for id_user, (aceitas, captados) in somas.items()
+    linhas.sort(key=lambda r: (str(r.get("data") or ""), str(r.get("hora") or "")), reverse=True)
+    return [
+        LogAtividade(
+            data=str(r["data"]),
+            hora=r.get("hora"),
+            usuario=r.get("usuario_acao"),
+            atividade=r["atividade"],
+            cliente=r.get("cliente_nome"),
+        )
+        for r in linhas[:LIMITE_LOGS]
     ]
-    return sorted(contas, key=lambda c: (-c.conexoes_aceitas, c.conta))

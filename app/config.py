@@ -84,6 +84,9 @@ class Settings:
     planilha_financeiro_ano: int = field(
         default_factory=lambda: int(os.getenv("PLANILHA_FINANCEIRO_ANO", "2026"))
     )
+    planilha_logs_id: str | None = field(
+        default_factory=lambda: os.getenv("PLANILHA_LOGS_ID") or None
+    )
 
 
 settings = Settings()

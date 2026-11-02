@@ -1,4 +1,4 @@
-"""Workers que espelham as planilhas (Sellers, SDRs, Closers, Dripify) em dash2 a cada N segundos. Substituem os fluxos n8n de métricas. Gravam só o que mudou (estado em memória, carregado do banco na subida e na virada do mês), no mês corrente em America/Sao_Paulo. Nunca criam usuário nem cargo: aba de quem não está em users/user_cargos é pulada."""
+"""Workers que espelham as planilhas (Sellers, SDRs, Closers, Dripify, Logs) em dash2 a cada N segundos. Substituem os fluxos n8n de métricas. Gravam só o que mudou (estado em memória, carregado do banco na subida e na virada do mês), no mês corrente em America/Sao_Paulo. Nunca criam usuário nem cargo: aba de quem não está em users/user_cargos é pulada."""
 from __future__ import annotations
 
 import logging
@@ -14,6 +14,7 @@ from app.fontes import banco
 from app.fontes.google_sheets import LeitorSheets, criar_credenciais
 from app.periodo import TZ_SP, hoje_sp
 from app.planilha_financeiro import APELIDOS, COLUNAS_VENDA, ler_base_vendas
+from app.planilha_logs import COLUNAS_LOG, ler_logs
 from app.planilhas import COLUNAS_POR_TABELA, ler_linhas, linhas_metricas, normalizar, resolver_usuario
 
 logger = logging.getLogger(__name__)
@@ -199,6 +200,7 @@ class WorkerFinanceiro(Worker):
         self.recebimentos: dict[tuple[int, str], dict] = {}
         self.status = {"ultima_leitura_ok": None, "ultimo_erro": None}
         self._puladas: set[str] = set()
+        self._apagar_legado = False
 
     def _carregar_estado(self) -> None:
         self.vendas = {
@@ -214,7 +216,7 @@ class WorkerFinanceiro(Worker):
             for l in self._consultar("recebimentos_faturamento", {}, "id_planilha_venda,mes,pago,liquido")
         }
         # linhas do n8n antes do worker; backup em metricas_faturamento_bkp_20261028
-        banco.apagar("metricas_faturamento", {"id_planilha": "is.null"})
+        self._apagar_legado = True
 
     def _resolver_clientes(self, lidas: list) -> dict[int, int | None]:
         def casar() -> dict[int, int | None]:
@@ -296,6 +298,12 @@ class WorkerFinanceiro(Worker):
             self.recebimentos.update(receb_novos)
             gravou = True
 
+        # só depois de ler e gravar a planilha: uma leitura que falha não pode esvaziar o faturamento
+        if self._apagar_legado and desejadas:
+            banco.apagar("metricas_faturamento", {"id_planilha": "is.null"})
+            self._apagar_legado = False
+            gravou = True
+
         meses_apagados = [k for k in sorted(self.recebimentos) if k not in receb_desejados and k[0] in desejadas]
         for i, mes in meses_apagados:
             banco.apagar("recebimentos_faturamento", {"id_planilha_venda": f"eq.{i}", "mes": f"eq.{mes}"})
@@ -313,6 +321,76 @@ class WorkerFinanceiro(Worker):
 
         if gravou:
             cache.invalidar()
+
+
+class WorkerLogs(Worker):
+    """Espelha a aba Logs da planilha Logs Pipedrive em logs_pipedrive (chave = sha1 do conteúdo da linha)."""
+
+    def __init__(
+        self,
+        planilha_id: str,
+        ler_abas: Callable[[str], list[tuple[str, list[list]]]],
+        agora: Callable[[], datetime] = lambda: datetime.now(TZ_SP),
+    ):
+        self.planilha = Planilha("logs", "logs_pipedrive", "")
+        self.planilha_id = planilha_id
+        self.ler_abas = ler_abas
+        self.agora = agora
+        self.logs: dict[str, dict] | None = None
+        self.status = {"ultima_leitura_ok": None, "ultimo_erro": None}
+        self._puladas: set = set()
+
+    def _carregar_estado(self) -> None:
+        self.logs = {
+            l["chave"]: l
+            for l in self._consultar("logs_pipedrive", {}, "chave,ocorrencias,id_user," + ",".join(COLUNAS_LOG))
+        }
+
+    def ciclo(self) -> None:
+        if self.logs is None:
+            self._carregar_estado()
+
+        abas = dict(self.ler_abas(self.planilha_id))
+        if "Logs" not in abas:
+            raise RuntimeError("aba Logs não encontrada na planilha de logs")
+        leitura = ler_logs(abas["Logs"])
+        for linha in leitura.invalidas:
+            if linha not in self._puladas:
+                self._puladas.add(linha)
+                logger.warning("Planilha logs: linha ignorada (sem data válida ou sem atividade): %s", list(linha))
+        if not leitura.eventos:
+            # leitura vazia não pode esvaziar a tabela (mesmo cuidado do financeiro)
+            raise RuntimeError("aba Logs sem nenhum evento válido; nada foi apagado")
+        usuarios = self._consultar("users", {}, "id,nome")
+
+        desejados: dict[str, dict] = {}
+        for e in leitura.eventos:
+            # a planilha usa nome completo ("Jennifer Pamplona") e users só o primeiro nome ("Jennifer")
+            u = (
+                resolver_usuario(e["usuario_acao"], usuarios) or resolver_usuario(e["usuario_acao"].split()[0], usuarios)
+                if e["usuario_acao"] else None
+            )
+            if e["usuario_acao"] and u is None and e["usuario_acao"] not in self._puladas:
+                self._puladas.add(e["usuario_acao"])
+                logger.warning("Planilha logs: '%s' não está em users, gravado com id_user null", e["usuario_acao"])
+            desejados[e["chave"]] = {**e, "id_user": u["id"] if u else None}
+        novos = {
+            k: d for k, d in sorted(desejados.items())
+            if {c: self.logs.get(k, {}).get(c) for c in d} != d
+        }
+        if novos:
+            banco.upsert(
+                "logs_pipedrive",
+                [{**l, "atualizado_em": self.agora().isoformat()} for l in novos.values()],
+                on_conflict="chave",
+            )
+            self.logs.update(novos)
+
+        removidas = sorted(set(self.logs) - set(desejados))
+        if removidas:
+            banco.apagar("logs_pipedrive", {"chave": f"in.({','.join(removidas)})"})
+            for k in removidas:
+                self.logs.pop(k, None)
 
 
 ATIVOS: list[Worker] = []
@@ -358,5 +436,9 @@ def iniciar(config: Settings) -> threading.Event:
         financeiro = WorkerFinanceiro(config.planilha_financeiro_id, config.planilha_financeiro_ano, LeitorSheets(credenciais).abas)
         ATIVOS.append(financeiro)
         threading.Thread(target=financeiro.rodar, args=(parar, config.worker_intervalo_segundos), name="worker-financeiro", daemon=True).start()
+    if config.planilha_logs_id:
+        logs = WorkerLogs(config.planilha_logs_id, LeitorSheets(credenciais).abas)
+        ATIVOS.append(logs)
+        threading.Thread(target=logs.rodar, args=(parar, config.worker_intervalo_segundos), name="worker-logs", daemon=True).start()
     logger.info("Workers das planilhas ativos: %s", [w.planilha.nome for w in ATIVOS])
     return parar
