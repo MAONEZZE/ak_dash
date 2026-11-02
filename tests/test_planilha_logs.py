@@ -62,3 +62,15 @@ def test_linhas_identicas_viram_um_evento_com_ocorrencias():
     leitura = planilha_logs.ler_logs([CABECALHO, a, b, a])
 
     assert [(e["cliente_nome"], e["ocorrencias"]) for e in leitura.eventos] == [("Valdir Pandolfi", 2), ("Aurelio Bud Spencer", 1)]
+
+
+def test_linha_sem_data_ou_atividade_vai_para_invalidas_e_vazia_e_ignorada():
+    ok = ["06/08/2026", "15:20", "Thalyson", "Indicações"]
+    sem_data = ["ontem", "15:20", "Thalyson", "Indicações"]
+    sem_atividade = ["06/08/2026", "15:20", "Thalyson", "  "]
+    vazia = ["", None, " "]
+
+    leitura = planilha_logs.ler_logs([CABECALHO, ok, sem_data, sem_atividade, vazia, []])
+
+    assert len(leitura.eventos) == 1
+    assert leitura.invalidas == [tuple(sem_data), tuple(sem_atividade)]

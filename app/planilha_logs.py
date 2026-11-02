@@ -93,10 +93,16 @@ def ler_logs(linhas: list[list]) -> LeituraLogs:
         if normalizar(c) in COLUNA_POR_CABECALHO
     }
     acumulado: dict[str, dict] = {}
+    invalidas: list[tuple] = []
     for linha in linhas[1:]:
+        if all(_texto(c) is None for c in linha):
+            continue
         evento = {c: _texto(_celula(linha, indices.get(c))) for c in COLUNAS_LOG}
         evento["data"] = _data(_celula(linha, indices.get("data")))
         evento["hora"] = _hora(_celula(linha, indices.get("hora")))
+        if evento["data"] is None or evento["atividade"] is None:
+            invalidas.append(tuple(linha))
+            continue
         evento["telefone_digitos"] = re.sub(r"\D", "", evento["telefone"] or "") or None
         chave = hashlib.sha1(
             json.dumps([evento[c] for c in COLUNAS_LOG if c != "telefone_digitos"], ensure_ascii=False).encode()
@@ -105,4 +111,4 @@ def ler_logs(linhas: list[list]) -> LeituraLogs:
             acumulado[chave]["ocorrencias"] += 1
         else:
             acumulado[chave] = {"chave": chave, "ocorrencias": 1, **{c: evento[c] for c in COLUNAS_LOG}}
-    return LeituraLogs(list(acumulado.values()), [])
+    return LeituraLogs(list(acumulado.values()), invalidas)
