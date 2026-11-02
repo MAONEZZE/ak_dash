@@ -48,11 +48,13 @@ Envs (ver `.env.example`):
 - `PLANILHA_SELLERS_ID`, `PLANILHA_SDRS_ID`, `PLANILHA_CLOSERS_ID`, `PLANILHA_DRIPIFY_ID`: worker sem ID de planilha não sobe.
 - `PLANILHA_FINANCEIRO_ID`: ID da planilha Isaac Newton2.0; sem ele o worker financeiro não sobe.
 - `PLANILHA_FINANCEIRO_ANO`: ano usado para ler as datas da aba BASE_VENDAS.
+- `PLANILHA_LOGS_ID`: ID da planilha Logs Pipedrive; sem ele o worker de logs não sobe.
 
 Comportamento:
 
 - Gravam só o que mudou, no mês corrente (America/Sao_Paulo).
 - O worker financeiro espelha a aba BASE_VENDAS inteira (não só o mês corrente) em `metricas_faturamento` + `recebimentos_faturamento`, apaga o que sai da planilha e substitui o n8n de faturamento.
+- O worker de logs espelha a aba `Logs` inteira em `dash2.logs_pipedrive` (chave = sha1 do conteúdo; linhas idênticas somam `ocorrencias`), apaga o que sai da planilha e falha sem apagar nada se a aba vier ausente ou vazia. Linha sem data/atividade e usuário fora de `users` só geram warning.
 - Célula apagada → `null`. Meta apagada → linha removida de `dash2.metas`.
 - Aba de quem não está em `users` ou não tem o cargo é pulada (log).
 - Na virada do mês, a planilha precisa ser zerada no dia 1.
