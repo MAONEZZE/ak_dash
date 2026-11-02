@@ -351,7 +351,12 @@ class WorkerLogs(Worker):
             self._carregar_estado()
 
         abas = dict(self.ler_abas(self.planilha_id))
+        if "Logs" not in abas:
+            raise RuntimeError("aba Logs não encontrada na planilha de logs")
         leitura = ler_logs(abas["Logs"])
+        if not leitura.eventos:
+            # leitura vazia não pode esvaziar a tabela (mesmo cuidado do financeiro)
+            raise RuntimeError("aba Logs sem nenhum evento válido; nada foi apagado")
         usuarios = self._consultar("users", {}, "id,nome")
 
         desejados: dict[str, dict] = {}

@@ -699,3 +699,25 @@ def test_logs_evento_removido_da_planilha_e_apagado(monkeypatch):
 
     assert banco.apagados == [("logs_pipedrive", {"chave": f"in.({chave_2})"})]
     assert banco.upserts == []
+
+
+def test_logs_sem_aba_ou_sem_eventos_registra_erro_e_nao_apaga(monkeypatch):
+    eventos = planilha_logs.ler_logs([CABECALHO_LOGS, LOG_1]).eventos
+    banco = _Banco({
+        "users": [],
+        "logs_pipedrive": [{**e, "id_user": None} for e in eventos],
+    })
+    _instalar(monkeypatch, banco)
+    w, fonte = _worker_logs([("Outra", [["x"]])])
+
+    w.executar_ciclo()
+
+    assert "Logs" in w.status["ultimo_erro"]["mensagem"]
+    assert w.status["ultima_leitura_ok"] is None
+
+    fonte["abas"] = [("Logs", [CABECALHO_LOGS, ["", None]])]
+    w.executar_ciclo()
+
+    assert "nenhum evento" in w.status["ultimo_erro"]["mensagem"]
+    assert banco.apagados == []
+    assert banco.upserts == []
