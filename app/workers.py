@@ -370,6 +370,12 @@ class WorkerLogs(Worker):
             )
             self.logs.update(novos)
 
+        removidas = sorted(set(self.logs) - set(desejados))
+        if removidas:
+            banco.apagar("logs_pipedrive", {"chave": f"in.({','.join(removidas)})"})
+            for k in removidas:
+                self.logs.pop(k, None)
+
 
 ATIVOS: list[Worker] = []
 MOTIVO_INATIVOS: str | None = None
