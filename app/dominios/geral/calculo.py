@@ -333,6 +333,7 @@ def montar_resposta_geral(
                 "inscritos": e.inscritos,
                 "aprovados": e.aprovados,
                 "pendentes": e.pendentes,
+                "rejeitados": e.rejeitados,
             }
             for e in eventos
         ],

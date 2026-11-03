@@ -41,9 +41,9 @@ from app.fontes.banco import query
 
 CHAVES_FATURAMENTO = ("faturamento", "liquidado", "inscritos", "aprovados")
 
-# Uma tabela de Confrarias na Geral, de 10 linhas — a segunda virou a tabela
-# de contas do Dripify (decisão do usuário, 2026-10-05) e depois no card Logs.
-LIMITE_EVENTOS = 10
+# Teto de Confrarias do mês na Geral. A tabela mostra 9 linhas e rola o resto
+# (2026-11-02); o teto só evita mandar uma lista sem fim.
+LIMITE_EVENTOS = 50
 
 # A Geral só mostra as Confrarias (decisão do usuário, 2026-10-05). `ilike`
 # com `*` dos dois lados = "contém", sem diferenciar maiúsculas.
@@ -117,8 +117,8 @@ class EventoInscricoes:
     """Um evento de `SED.events` + as contagens de `SED.registrations` dele.
 
     `inscritos` conta TODAS as inscrições do evento, qualquer status;
-    `aprovados`, só os `approved`; `pendentes`, só os `pending` — os dois
-    são subconjuntos de `inscritos`.
+    `aprovados`, só os `approved`; `pendentes`, só os `pending`;
+    `rejeitados`, só os `rejected` — os três são subconjuntos de `inscritos`.
     `capacidade` é `None` quando o evento não tem limite cadastrado.
     """
 
@@ -129,6 +129,7 @@ class EventoInscricoes:
     inscritos: int
     aprovados: int
     pendentes: int = 0
+    rejeitados: int = 0
 
 
 def _instante_utc(momento: datetime) -> str:
@@ -191,6 +192,7 @@ def buscar_confrarias_do_mes(inicio: date, fim: date) -> list[EventoInscricoes]:
     inscritos = Counter(r.get("event_id") for r in inscricoes)
     aprovados = Counter(r.get("event_id") for r in inscricoes if r.get("status") == "approved")
     pendentes = Counter(r.get("event_id") for r in inscricoes if r.get("status") == "pending")
+    rejeitados = Counter(r.get("event_id") for r in inscricoes if r.get("status") == "rejected")
 
     return [
         EventoInscricoes(
@@ -201,13 +203,14 @@ def buscar_confrarias_do_mes(inicio: date, fim: date) -> list[EventoInscricoes]:
             inscritos=inscritos[e["id"]],
             aprovados=aprovados[e["id"]],
             pendentes=pendentes[e["id"]],
+            rejeitados=rejeitados[e["id"]],
         )
         for e in eventos
     ]
 
 
-# Linhas do card Logs da Geral — o mesmo tamanho da tabela de Confrarias ao lado.
-LIMITE_LOGS = 10
+# Teto de logs do card Logs da Geral — a tabela mostra 9 linhas e rola o resto.
+LIMITE_LOGS = 50
 
 
 @dataclass(frozen=True)
