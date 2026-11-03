@@ -221,6 +221,7 @@ def test_inscritos_conta_toda_inscricao_inclusive_recusada(monkeypatch):
     assert evento.inscritos == 4
     assert evento.aprovados == 1
     assert evento.pendentes == 2  # só `pending`: recusado não é pendente
+    assert evento.rejeitados == 1
     assert evento.capacidade == 50
 
 
@@ -231,7 +232,7 @@ def test_evento_sem_inscricao_sai_com_zero_nao_com_erro(monkeypatch):
         [{"event_id": "outro", "status": "approved"}],
     )
     (evento,) = banco_mod.buscar_confrarias_do_mes(date(2026, 9, 1), date(2026, 9, 30))
-    assert (evento.inscritos, evento.aprovados, evento.pendentes, evento.capacidade) == (0, 0, 0, None)
+    assert (evento.inscritos, evento.aprovados, evento.pendentes, evento.rejeitados, evento.capacidade) == (0, 0, 0, 0, None)
 
 
 def test_filtra_confraria_do_mes_inteiro_e_nao_filtra_status(monkeypatch):
@@ -250,17 +251,18 @@ def test_filtra_confraria_do_mes_inteiro_e_nao_filtra_status(monkeypatch):
     assert chamadas[1]["filtros"]["event_id"] == 'in.("e1")'
 
 
-def test_no_maximo_dez_eventos_e_na_ordem_do_banco(monkeypatch):
+def test_no_maximo_limite_eventos_e_na_ordem_do_banco(monkeypatch):
+    limite = banco_mod.LIMITE_EVENTOS
     _mockar_duas_queries(
         monkeypatch,
         [
             {"id": f"e{i}", "title": f"Confraria Akeel {i}", "event_date": "2026-09-20T19:00:00", "capacity": None}
-            for i in range(1, 26)
+            for i in range(1, limite + 6)
         ],
         [],
     )
     eventos = banco_mod.buscar_confrarias_do_mes(date(2026, 9, 1), date(2026, 9, 30))
-    assert [e.id for e in eventos] == [f"e{i}" for i in range(1, 11)]
+    assert [e.id for e in eventos] == [f"e{i}" for i in range(1, limite + 1)]
 
 
 def test_sem_confraria_no_mes_nao_consulta_inscricoes(monkeypatch):
@@ -335,7 +337,8 @@ def test_logs_vem_do_mais_recente_pro_mais_antigo_com_usuario_atividade_e_client
 
 
 def test_logs_limita_aos_mais_recentes(monkeypatch):
-    _mockar_logs(monkeypatch, [_log(f"2026-10-{d:02d}", "10:00:00", cliente=str(d)) for d in range(1, 16)])
+    total = banco_mod.LIMITE_LOGS + 5
+    _mockar_logs(monkeypatch, [_log("2026-10-01", f"{m // 60:02d}:{m % 60:02d}:00", cliente=str(m)) for m in range(total)])
     logs = banco_mod.buscar_logs(date(2026, 10, 1), date(2026, 10, 31))
     assert len(logs) == banco_mod.LIMITE_LOGS
-    assert logs[0].cliente == "15"
+    assert logs[0].cliente == str(total - 1)
