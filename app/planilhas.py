@@ -57,7 +57,7 @@ def _celula(linha: list, indice: int):
 
 
 def ler_linhas(titulo: str, linhas: list[list]) -> Aba | None:
-    if normalizar(titulo).startswith("dashboard"):
+    if normalizar(titulo).startswith(("dashboard", "funil")):
         return None
     if not linhas:
         return None

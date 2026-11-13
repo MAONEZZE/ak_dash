@@ -26,6 +26,13 @@ def test_ler_linhas_de_aba_vazia_devolve_none():
     assert planilhas.ler_linhas("Juca", []) is None
 
 
+def test_ler_linhas_ignora_aba_de_funil():
+    linhas = [[], [None, "Painel de acompanhamento do funil de prospecção LinkedIn"]]
+
+    assert planilhas.ler_linhas("Funil de Vendas LinkedIn", linhas) is None
+    assert planilhas.ler_linhas("funil de vendas instagram", linhas) is None
+
+
 def test_ler_linhas_mapeia_cabecalhos_das_planilhas_de_funil():
     linkedin = planilhas.ler_linhas(
         "Linkedin Jacob",
