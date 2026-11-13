@@ -107,9 +107,9 @@ def test_vendafinanceiro_descreve_recebimentos_por_mes():
     assert set(recebimento["required"]) == {"mes", "pago", "liquido"}
 
 
-def test_pessoa_aceita_quatro_cargos_e_email_opcional():
+def test_pessoa_aceita_tres_cargos_e_email_opcional():
     spec = _carregar_openapi()
     pessoa = spec["components"]["schemas"]["Pessoa"]
-    assert set(pessoa["properties"]["cargo"]["enum"]) == {"seller", "sdr", "closer", "dripify"}
+    assert set(pessoa["properties"]["cargo"]["enum"]) == {"seller", "sdr", "closer"}
     assert "email" not in pessoa["required"]
     assert pessoa["properties"]["email"]["nullable"] is True
