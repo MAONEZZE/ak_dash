@@ -24,7 +24,7 @@ class Settings:
     supabase_jwt_secret: str | None = field(
         default_factory=lambda: os.getenv("SUPABASE_JWT_SECRET")
     )
-    supabase_schema: str = field(default_factory=lambda: os.getenv("SUPABASE_SCHEMA", "dash2"))
+    supabase_schema: str = field(default_factory=lambda: os.getenv("NOME_SCHEMA", "dash_new"))
     # Segundo Supabase (futuro: Inscritos/Aprovados). Em branco = não chama,
     # cards mostram "—", sem erro — nunca derruba o endpoint /geral.
     supabase_inscricoes_url: str | None = field(

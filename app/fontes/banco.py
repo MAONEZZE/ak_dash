@@ -1,6 +1,6 @@
 """Cliente mínimo do Supabase via REST (PostgREST) — só leitura, sem ORM.
 
-Tabelas reais vivem no schema `dash2` (configurável por `SUPABASE_SCHEMA`; `dash` é o
+Tabelas reais vivem no schema `dash_new` (configurável por `NOME_SCHEMA`; `dash` é o
 antigo), não `public` — daí o header `Accept-Profile`, que o PostgREST exige pra
 selecionar schema fora do padrão.
 

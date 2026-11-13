@@ -94,3 +94,16 @@ def test_expediente_padrao_10_as_19_e_lido_das_envs(monkeypatch):
 
     assert s.expediente_inicio == time(9, 30)
     assert s.expediente_fim == time(18, 0)
+
+
+def test_schema_vem_de_nome_schema(monkeypatch):
+    monkeypatch.setenv("NOME_SCHEMA", "dash_x")
+    monkeypatch.setenv("SUPABASE_SCHEMA", "dash2")
+
+    s = config.Settings()
+
+    assert s.supabase_schema == "dash_x"
+
+    monkeypatch.delenv("NOME_SCHEMA", raising=False)
+
+    assert config.Settings().supabase_schema == "dash_new"
