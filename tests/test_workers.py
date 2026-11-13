@@ -832,3 +832,30 @@ def test_worker_funil_grava_aba_do_seller_e_nao_avisa_pelas_contas(monkeypatch, 
         {"id_user": 4, "cargo": "seller", "metrica": "numeros_captados", "valor_diario": 13},
     ]
     assert not any("pulada" in r.getMessage() for r in caplog.records)
+
+
+CAB_IG = ["Dia", "Abordagens feita", "Follow Up", "Respondidos", "Números Captados", "Indicações Captadas"]
+META_IG = ["Meta diária", 50, 50, 20, 7, 0]
+
+
+def test_worker_funil_cria_contas_novas_com_o_seller_da_planilha(monkeypatch):
+    banco = _Banco({
+        "users": [{"id": 13, "nome": "Lucas"}],
+        "user_cargos": [{"id_user": 13}],
+        "contas_funil": [{"id": 20, "canal": "instagram", "nome": "Jacob", "id_seller": 13}],
+    })
+    _instalar(monkeypatch, banco)
+    abas = [
+        ("Jacob", [CAB_IG, META_IG, [], [9, None, 75, None, 12]]),
+        ("Mary", [CAB_IG, META_IG, [], [11, None, None, None, 6]]),
+        ("Lucas", [CAB_IG, ["Meta diária", 150, 150, 60, 21, 0], [], [9, None, 75, None, 12]]),
+        ("Dashboard", [[]]),
+    ]
+    w = workers.WorkerFunil("instagram", "ID_IG", lambda _id: abas, hoje=lambda: date(2026, 11, 13))
+
+    w.ciclo()
+
+    contas = [u for u in banco.upserts if u[0] == "contas_funil"]
+    assert len(contas) == 1
+    assert contas[0][2] == "canal,nome"
+    assert _sem_carimbo(contas[0][1]) == [{"canal": "instagram", "nome": "Mary", "id_seller": 13}]

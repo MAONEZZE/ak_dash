@@ -197,6 +197,7 @@ class WorkerFunil(Worker):
     ):
         super().__init__(Planilha(f"funil_{canal}", "metricas_sellers", "seller"), planilha_id, ler_abas, hoje, agora)
         self.canal = canal
+        self.contas: dict[str, int] = {}
 
     def ciclo(self) -> None:
         hoje = self.hoje()
@@ -208,7 +209,28 @@ class WorkerFunil(Worker):
         com_cargo = {l["id_user"] for l in self._consultar("user_cargos", {"cargo": f"eq.{self.planilha.cargo}"}, "id_user")}
 
         abas_seller = [a for a in abas if (u := resolver_usuario(a.pessoa, usuarios)) is not None and u["id"] in com_cargo]
-        if self._sincronizar(abas_seller, usuarios, com_cargo, hoje):
+        gravou = self._sincronizar(abas_seller, usuarios, com_cargo, hoje)
+
+        abas_conta = [a for a in abas if a not in abas_seller]
+        id_seller = resolver_usuario(abas_seller[0].pessoa, usuarios)["id"] if abas_seller else None
+
+        def contas_do_canal() -> dict[str, dict]:
+            return {l["nome"]: l for l in self._consultar("contas_funil", {"canal": f"eq.{self.canal}"}, "id,canal,nome,id_seller")}
+
+        existentes = contas_do_canal()
+        novas = [
+            {"canal": self.canal, "nome": a.pessoa, "id_seller": id_seller}
+            for a in abas_conta
+            if a.pessoa not in existentes or existentes[a.pessoa]["id_seller"] != id_seller
+        ]
+        if novas:
+            carimbo = self.agora().isoformat()
+            banco.upsert("contas_funil", [{**l, "atualizado_em": carimbo} for l in novas], on_conflict="canal,nome")
+            existentes = contas_do_canal()
+            gravou = True
+        self.contas = {nome: l["id"] for nome, l in existentes.items()}
+
+        if gravou:
             cache.invalidar()
 
 
