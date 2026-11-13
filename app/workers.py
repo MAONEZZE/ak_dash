@@ -1,4 +1,4 @@
-"""Workers que espelham as planilhas (Sellers, SDRs, Closers, Dripify, Logs) em dash2 a cada N segundos. Substituem os fluxos n8n de métricas. Gravam só o que mudou (estado em memória, carregado do banco na subida e na virada do mês), no mês corrente em America/Sao_Paulo. Nunca criam usuário nem cargo: aba de quem não está em users/user_cargos é pulada."""
+"""Workers que espelham as planilhas (SDRs, Closers, funis LinkedIn/Instagram, Financeiro, Logs) no schema dash_new a cada N segundos. Substituem os fluxos n8n de métricas. Gravam só o que mudou (estado em memória, carregado do banco na subida e na virada do mês), no mês corrente em America/Sao_Paulo. Nunca criam usuário nem cargo: aba de quem não está em users/user_cargos é pulada."""
 from __future__ import annotations
 
 import logging
@@ -28,10 +28,8 @@ class Planilha:
 
 
 PLANILHAS = [
-    Planilha("sellers", "metricas_sellers", "seller"),
     Planilha("sdrs", "metricas_sdrs", "sdr"),
     Planilha("closers", "metricas_closers", "closer"),
-    Planilha("dripify", "metricas_dripify", "dripify"),
 ]
 
 
@@ -532,10 +530,8 @@ def iniciar(config: Settings) -> threading.Event:
         logger.warning("Workers das planilhas não subiram: %s", MOTIVO_INATIVOS)
         return parar
     ids = {
-        "sellers": config.planilha_sellers_id,
         "sdrs": config.planilha_sdrs_id,
         "closers": config.planilha_closers_id,
-        "dripify": config.planilha_dripify_id,
     }
     for p in PLANILHAS:
         if not ids[p.nome]:
@@ -543,6 +539,12 @@ def iniciar(config: Settings) -> threading.Event:
         w = Worker(p, ids[p.nome], LeitorSheets(credenciais).abas)
         ATIVOS.append(w)
         threading.Thread(target=w.rodar, args=(parar, config.worker_intervalo_segundos), name=f"worker-{p.nome}", daemon=True).start()
+    for canal, planilha_id in (("linkedin", config.planilha_funil_linkedin_id), ("instagram", config.planilha_funil_instagram_id)):
+        if not planilha_id:
+            continue
+        funil = WorkerFunil(canal, planilha_id, LeitorSheets(credenciais).abas)
+        ATIVOS.append(funil)
+        threading.Thread(target=funil.rodar, args=(parar, config.worker_intervalo_segundos), name=f"worker-funil_{canal}", daemon=True).start()
     if config.planilha_financeiro_id:
         financeiro = WorkerFinanceiro(config.planilha_financeiro_id, config.planilha_financeiro_ano, LeitorSheets(credenciais).abas)
         ATIVOS.append(financeiro)

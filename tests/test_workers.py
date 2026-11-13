@@ -229,10 +229,10 @@ def test_iniciar_sobe_um_worker_por_planilha_configurada(monkeypatch):
         supabase_url="https://x.supabase.co",
         supabase_service_key="k",
         google_service_account_json="{}",
-        planilha_sellers_id="S",
-        planilha_sdrs_id=None,
+        planilha_sdrs_id="S",
         planilha_closers_id="C",
-        planilha_dripify_id=None,
+        planilha_funil_linkedin_id=None,
+        planilha_funil_instagram_id=None,
         planilha_financeiro_id=None,
         planilha_logs_id=None,
         worker_intervalo_segundos=5.0,
@@ -249,10 +249,41 @@ def test_iniciar_sobe_um_worker_por_planilha_configurada(monkeypatch):
         if t.name.startswith("worker-"):
             t.join(timeout=1)
 
-    assert sorted(w.planilha.nome for w in workers.ATIVOS) == ["closers", "sellers"]
-    assert sorted(rodados) == [("closers", "C", 5.0), ("sellers", "S", 5.0)]
+    assert sorted(w.planilha.nome for w in workers.ATIVOS) == ["closers", "sdrs"]
+    assert sorted(rodados) == [("closers", "C", 5.0), ("sdrs", "S", 5.0)]
     assert isinstance(parar, threading.Event)
     assert parar.is_set() is False
+
+
+def test_iniciar_sobe_workers_de_funil_com_os_ids_da_config(monkeypatch):
+    rodados = []
+    monkeypatch.setattr(workers.Worker, "rodar", lambda self, parar, intervalo: rodados.append((self.planilha.nome, self.planilha_id, intervalo)))
+    monkeypatch.setattr(workers, "criar_credenciais", lambda texto: object())
+    base = dataclasses.replace(
+        config.settings,
+        supabase_url="https://x.supabase.co",
+        supabase_service_key="k",
+        google_service_account_json="{}",
+        planilha_sdrs_id=None,
+        planilha_closers_id="C",
+        planilha_funil_linkedin_id="LI",
+        planilha_funil_instagram_id="IG",
+        planilha_financeiro_id=None,
+        planilha_logs_id=None,
+        worker_intervalo_segundos=5.0,
+        workers_ativos=True,
+    )
+
+    workers.iniciar(base)
+    for t in threading.enumerate():
+        if t.name.startswith("worker-"):
+            t.join(timeout=1)
+
+    assert sorted(w.planilha.nome for w in workers.ATIVOS) == ["closers", "funil_instagram", "funil_linkedin"]
+    funis = {w.canal: w for w in workers.ATIVOS if isinstance(w, workers.WorkerFunil)}
+    assert set(funis) == {"linkedin", "instagram"}
+    assert funis["linkedin"].planilha_id == "LI"
+    assert funis["instagram"].planilha_id == "IG"
 
 
 def test_iniciar_sobe_worker_financeiro_com_id_e_ano_da_config(monkeypatch):
@@ -264,10 +295,8 @@ def test_iniciar_sobe_worker_financeiro_com_id_e_ano_da_config(monkeypatch):
         supabase_url="https://x.supabase.co",
         supabase_service_key="k",
         google_service_account_json="{}",
-        planilha_sellers_id="S",
         planilha_sdrs_id=None,
         planilha_closers_id="C",
-        planilha_dripify_id=None,
         planilha_financeiro_id="F",
         planilha_financeiro_ano=2026,
         planilha_logs_id=None,
@@ -306,10 +335,8 @@ def test_iniciar_sobe_worker_de_logs_com_id_da_config(monkeypatch):
         supabase_url="https://x.supabase.co",
         supabase_service_key="k",
         google_service_account_json="{}",
-        planilha_sellers_id=None,
         planilha_sdrs_id=None,
         planilha_closers_id=None,
-        planilha_dripify_id=None,
         planilha_financeiro_id=None,
         planilha_logs_id="L",
         workers_ativos=True,
@@ -345,7 +372,7 @@ def test_iniciar_sem_credencial_loga_warning_e_guarda_motivo(monkeypatch, caplog
         supabase_url="https://x.supabase.co",
         supabase_service_key="k",
         google_service_account_json=None,
-        planilha_sellers_id="S",
+        planilha_sdrs_id="S",
         planilha_logs_id=None,
     )
 
@@ -372,7 +399,7 @@ def test_iniciar_com_json_invalido_nao_levanta_e_guarda_motivo(caplog):
         supabase_url="https://x.supabase.co",
         supabase_service_key="k",
         google_service_account_json="{nao e json",
-        planilha_sellers_id="S",
+        planilha_sdrs_id="S",
         planilha_logs_id=None,
     )
 

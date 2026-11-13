@@ -66,17 +66,17 @@ class Settings:
     google_service_account_json: str | None = field(
         default_factory=lambda: os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON") or None
     )
-    planilha_sellers_id: str | None = field(
-        default_factory=lambda: os.getenv("PLANILHA_SELLERS_ID") or None
-    )
     planilha_sdrs_id: str | None = field(
         default_factory=lambda: os.getenv("PLANILHA_SDRS_ID") or None
     )
     planilha_closers_id: str | None = field(
         default_factory=lambda: os.getenv("PLANILHA_CLOSERS_ID") or None
     )
-    planilha_dripify_id: str | None = field(
-        default_factory=lambda: os.getenv("PLANILHA_DRIPIFY_ID") or None
+    planilha_funil_linkedin_id: str | None = field(
+        default_factory=lambda: os.getenv("PLANILHA_FUNIL_LINKEDIN_ID") or None
+    )
+    planilha_funil_instagram_id: str | None = field(
+        default_factory=lambda: os.getenv("PLANILHA_FUNIL_INSTAGRAM_ID") or None
     )
     planilha_financeiro_id: str | None = field(
         default_factory=lambda: os.getenv("PLANILHA_FINANCEIRO_ID") or None

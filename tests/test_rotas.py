@@ -64,7 +64,7 @@ def test_saude_mostra_status_dos_workers(monkeypatch):
     assert resposta.status_code == 200
     assert resposta.json() == {
         "status": "ok",
-        "workers": {"sellers": {"ultima_leitura_ok": "2026-10-27T10:00:00-03:00", "ultimo_erro": None}},
+        "workers": {"sdrs": {"ultima_leitura_ok": "2026-10-27T10:00:00-03:00", "ultimo_erro": None}},
         "workers_motivo": None,
     }
 
