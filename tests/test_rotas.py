@@ -272,3 +272,9 @@ def test_funil_devolve_dashboard_do_seller_do_canal(monkeypatch):
     instagram = cliente.get("/funil/instagram", params={"granularidade": "mes", "periodo": "2026-11"}).json()
     for k in ("diario", "semanal", "mensal"):
         assert [m["metrica"] for m in instagram["dashboard"][k]] == ["fups", "numeros_captados", "indicacoes"]
+
+
+def test_funil_canal_invalido_404(monkeypatch):
+    resposta = _client(monkeypatch).get("/funil/tiktok", params={"granularidade": "mes", "periodo": "2026-11"})
+    assert resposta.status_code == 404
+    assert resposta.json() == {"erro": {"codigo": "canal_invalido", "mensagem": "canal deve ser linkedin ou instagram"}}

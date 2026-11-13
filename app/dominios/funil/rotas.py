@@ -36,6 +36,11 @@ def get_funil(
     periodo: str = Query(...),
     _usuario: dict = Depends(exigir_usuario),
 ) -> dict:
+    if canal not in METRICAS_DASHBOARD_FUNIL:
+        raise HTTPException(
+            status_code=404,
+            detail={"erro": {"codigo": "canal_invalido", "mensagem": "canal deve ser linkedin ou instagram"}},
+        )
     iniciar_registro_de_falhas()
     p = _resolver_periodo_ou_400(granularidade, periodo)
     contas = obter_ou_calcular(
