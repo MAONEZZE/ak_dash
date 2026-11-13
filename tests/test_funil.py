@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import date
 
 from app.dominios.funil import banco as funil_banco
+from app.dominios.funil.calculo import recortes_dashboard
 from app.planilhas import COLUNAS_POR_TABELA
 
 
@@ -43,3 +44,16 @@ def test_buscar_contas_soma_metricas_por_conta_no_periodo(monkeypatch):
     filtros_metricas = next(c["filtros"] for c in chamadas if c["tabela"] == "metricas_contas")
     assert filtros_metricas["id_conta"] == "in.(1,2)"
     assert filtros_metricas["and"] == "(data.gte.2026-11-01,data.lte.2026-11-30)"
+
+
+def test_recortes_dashboard_sao_dia_semana_e_mes_correntes():
+    hoje = date(2026, 11, 13)
+
+    r = recortes_dashboard(hoje)
+
+    assert {k: (p.granularidade, p.inicio, p.fim) for k, p in r.items()} == {
+        "diario": ("dia", date(2026, 11, 13), date(2026, 11, 13)),
+        "semanal": ("semana", date(2026, 11, 9), date(2026, 11, 15)),
+        "mensal": ("mes", date(2026, 11, 1), date(2026, 11, 30)),
+    }
+    assert list(r) == ["diario", "semanal", "mensal"]
