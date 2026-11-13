@@ -797,3 +797,38 @@ def test_logs_linha_invalida_e_usuario_sem_cadastro_logam_uma_vez(monkeypatch, c
     mensagens = [r.getMessage() for r in caplog.records]
     assert len([m for m in mensagens if "linha ignorada" in m]) == 1
     assert len([m for m in mensagens if "'Thalyson' não está em users" in m]) == 1
+
+
+CAB_LINKEDIN = ["Dia", "Conexões Enviadas", "Conexões Aceitas", "Mensagem de Abordagem", "Abordagens", "Follow de abordagem", "Respondidos", "InMails Enviados", "Follow-ups", "Números Captados"]
+META_LINKEDIN = ["Meta diária", 40, 20, 20, 20, 30, 10, 5, 150, 0]
+
+
+def test_worker_funil_grava_aba_do_seller_e_nao_avisa_pelas_contas(monkeypatch, caplog):
+    banco = _Banco({
+        "users": [{"id": 4, "nome": "Duda"}, {"id": 1, "nome": "Jacob"}],
+        "user_cargos": [{"id_user": 4}],
+        "contas_funil": [{"id": 10, "canal": "linkedin", "nome": "Jacob", "id_seller": 4}],
+    })
+    _instalar(monkeypatch, banco)
+    abas = [
+        ("Linkedin Jacob", [CAB_LINKEDIN, META_LINKEDIN, [], [5, 42, 33, 33, 71, 38, 24, 19, None, 8]]),
+        ("Duda", [CAB_LINKEDIN, ["Meta diária", 180, 90, 95, 100, 150, 50, 25, 750, 13], [], [5, 155, 103, 103, 175, 71, 63, 19, 7, 19]]),
+        ("Funil de Vendas LinkedIn", [[]]),
+    ]
+    w = workers.WorkerFunil("linkedin", "ID_LI", lambda _id: abas, hoje=lambda: date(2026, 11, 13))
+    caplog.set_level(logging.WARNING)
+
+    w.ciclo()
+
+    metricas = [u for u in banco.upserts if u[0] == "metricas_sellers"]
+    assert len(metricas) == 1
+    assert _sem_carimbo(metricas[0][1]) == [
+        {"id_user": 4, "data": "2026-11-05", "key_data_ref_user": "05/11/2026-duda", "fups": 7, "numeros_captados": 19, "indicacoes": None},
+    ]
+    metas = [u for u in banco.upserts if u[0] == "metas"]
+    assert len(metas) == 1
+    assert _sem_carimbo(metas[0][1]) == [
+        {"id_user": 4, "cargo": "seller", "metrica": "fups", "valor_diario": 750},
+        {"id_user": 4, "cargo": "seller", "metrica": "numeros_captados", "valor_diario": 13},
+    ]
+    assert not any("pulada" in r.getMessage() for r in caplog.records)
