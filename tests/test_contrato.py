@@ -74,6 +74,23 @@ def test_schema_respostageral_tem_os_campos_que_o_bff_produz():
     assert campos == {"periodo", "dias_uteis", "cards", "eventos", "logs", "pessoas", "avisos"}
 
 
+def test_schema_respostafunil_tem_os_campos_que_o_bff_produz():
+    schemas = _carregar_openapi()["components"]["schemas"]
+    assert set(schemas["RespostaFunil"]["required"]) == {"periodo", "avisos", "contas", "dashboard"}
+    assert set(schemas["ContaFunil"]["properties"]["metricas"]["required"]) == {
+        "conexoes_enviadas",
+        "conexoes_aceitas",
+        "mensagens_abordagem",
+        "abordagens",
+        "follows_abordagem",
+        "respondidos",
+        "in_mails",
+        "fups",
+        "numeros_captados",
+        "indicacoes",
+    }
+
+
 def test_schema_respostafinanceiro_tem_os_campos_que_o_bff_produz():
     spec = _carregar_openapi()
     campos = set(spec["components"]["schemas"]["RespostaFinanceiro"]["required"])
