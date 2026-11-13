@@ -250,3 +250,25 @@ def test_funil_linkedin_200_com_contas_do_periodo(monkeypatch):
     ]
     assert corpo["avisos"] == []
     assert set(corpo) == {"periodo", "avisos", "contas", "dashboard"}
+
+
+def test_funil_devolve_dashboard_do_seller_do_canal(monkeypatch):
+    monkeypatch.setattr(
+        f"{__name__}._USERS",
+        [*_USERS, {"id": 4, "nome": "Duda", "email": None, "imagem_url": None, "active": True}],
+    )
+    monkeypatch.setattr(f"{__name__}._USER_CARGOS", [*_USER_CARGOS, {"id_user": 4, "cargo": "seller"}])
+    monkeypatch.setattr(f"{__name__}._CONTAS", [{"id": 1, "nome": "Jacob", "id_seller": 4}])
+    cliente = _client(monkeypatch)
+    chaves = {"metrica", "nome_exibicao", "meta_periodo", "realizado", "pct_atingimento", "falta_folga", "horas_restantes", "media_necessaria", "previsao"}
+
+    linkedin = cliente.get("/funil/linkedin", params={"granularidade": "mes", "periodo": "2026-11"}).json()
+    assert linkedin["dashboard"]["seller"] == {"id_user": "4", "nome": "Duda"}
+    for k in ("diario", "semanal", "mensal"):
+        assert [m["metrica"] for m in linkedin["dashboard"][k]] == ["fups", "numeros_captados"]
+        for item in linkedin["dashboard"][k]:
+            assert set(item) == chaves
+
+    instagram = cliente.get("/funil/instagram", params={"granularidade": "mes", "periodo": "2026-11"}).json()
+    for k in ("diario", "semanal", "mensal"):
+        assert [m["metrica"] for m in instagram["dashboard"][k]] == ["fups", "numeros_captados", "indicacoes"]
