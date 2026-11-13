@@ -1,4 +1,4 @@
-"""Leitura das abas das planilhas de métricas (Sellers, SDRs, Closers, funis LinkedIn/Instagram), sem I/O. Usado pelos workers e por scripts/popular_dash2.py."""
+"""Leitura das abas das planilhas de métricas (Sellers, SDRs, Closers, funis LinkedIn/Instagram), sem I/O. Usado pelos workers."""
 from __future__ import annotations
 
 import re
