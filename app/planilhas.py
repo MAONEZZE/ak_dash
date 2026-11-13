@@ -1,4 +1,4 @@
-"""Leitura das abas das planilhas de métricas (Sellers, SDRs, Closers, Dripify), sem I/O. Usado pelos workers e por scripts/popular_dash2.py."""
+"""Leitura das abas das planilhas de métricas (Sellers, SDRs, Closers, funis LinkedIn/Instagram), sem I/O. Usado pelos workers e por scripts/popular_dash2.py."""
 from __future__ import annotations
 
 import re
@@ -31,6 +31,11 @@ COLUNA_POR_CABECALHO: dict[str, str] = {
     "conexoes aceitas": "conexoes_aceitas",
     "abordagens": "abordagens",
     "inmails enviados": "in_mails",
+    "mensagem de abordagem": "mensagens_abordagem",
+    "follow de abordagem": "follows_abordagem",
+    "respondidos": "respondidos",
+    "abordagens feita": "abordagens",
+    "follow up": "fups",
 }
 
 
@@ -114,4 +119,16 @@ COLUNAS_POR_TABELA: dict[str, list[str]] = {
         "inscricoes_realizadas",
     ],
     "metricas_dripify": ["conexoes_enviadas", "conexoes_aceitas", "abordagens", "in_mails", "fups", "numeros_captados"],
+    "metricas_contas": [
+        "conexoes_enviadas",
+        "conexoes_aceitas",
+        "mensagens_abordagem",
+        "abordagens",
+        "follows_abordagem",
+        "respondidos",
+        "in_mails",
+        "fups",
+        "numeros_captados",
+        "indicacoes",
+    ],
 }
