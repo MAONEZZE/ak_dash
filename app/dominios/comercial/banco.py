@@ -1,8 +1,8 @@
-"""Leitura de `dash2.vw_metricas` — granularidade diária, formato longo
+"""Leitura de `dash_new.vw_metricas` — granularidade diária, formato longo
 
 (`data, id_user, nome, cargo, conta, metrica, valor`). Fonte única das duas
 páginas: a view lê as tabelas de origem em tempo real
-(`metricas_sdrs`/`metricas_closers`/`metricas_dripify`), com a data extraída
+(`metricas_sdrs`/`metricas_closers`/`metricas_sellers`), com a data extraída
 de `key_data_ref_user` e o cargo vindo da tabela de origem — ver
 sql/2026-09-15-view-metricas.sql. A coluna `conta` vem sempre null.
 

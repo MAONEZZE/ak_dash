@@ -1,7 +1,7 @@
 """Vocabulário de métricas — um nome só, em todo o sistema.
 
 A chave de métrica é o nome da COLUNA nas tabelas de origem
-(`dash.metricas_sdrs`, `metricas_closers`, `metricas_dripify`), que é também
+(`dash.metricas_sdrs`, `metricas_closers`, `metricas_sellers`), que é também
 o que `dash.metricas_metas.metrica` guarda e o que `dash.vw_metricas` emite.
 Não existe tradução em lugar nenhum: banco, BFF e payload da API falam o
 mesmo idioma, então não há um segundo lugar pra divergir.
@@ -9,7 +9,7 @@ mesmo idioma, então não há um segundo lugar pra divergir.
 `reuniao_agendado`/`numero`/`follow_up` etc. eram o vocabulário da view
 antiga, que não existe mais — ver sql/2026-09-15-view-metricas.sql.
 
-As listas por cargo seguem as planilhas do dash2 (uma tabela por cargo, na
+As listas por cargo seguem as planilhas do dash_new (uma tabela por cargo, na
 ordem das colunas da planilha). Não são mais a união de um cargo só.
 """
 from __future__ import annotations
@@ -44,21 +44,14 @@ METRICAS_CLOSER: tuple[str, ...] = (
     "inscricoes_realizadas",
 )
 
-# Dripify: conexões, abordagens e captação via LinkedIn.
-METRICAS_DRIPIFY: tuple[str, ...] = (
-    "conexoes_enviadas",
-    "conexoes_aceitas",
-    "abordagens",
-    "in_mails",
-    "fups",
-    "numeros_captados",
-)
-
 NOME_EXIBICAO: dict[str, str] = {
     "conexoes_enviadas": "Conexões Enviadas",
     "conexoes_aceitas": "Conexões Aceitas",
     "abordagens": "Abordagens",
     "in_mails": "InMails Enviados",
+    "mensagens_abordagem": "Mensagem de Abordagem",
+    "follows_abordagem": "Follow de abordagem",
+    "respondidos": "Respondidos",
     "fups": "Follow-ups",
     "numeros_captados": "Números Captados",
     "ligacoes_efetuadas": "Ligações Efetuadas",
@@ -106,5 +99,4 @@ def metricas_do_cargo(cargo: str) -> tuple[str, ...]:
         "seller": METRICAS_SELLER,
         "sdr": METRICAS_SDR,
         "closer": METRICAS_CLOSER,
-        "dripify": METRICAS_DRIPIFY,
     }.get(cargo, ())

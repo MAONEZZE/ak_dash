@@ -118,7 +118,6 @@ COLUNAS_POR_TABELA: dict[str, list[str]] = {
         "indicacoes",
         "inscricoes_realizadas",
     ],
-    "metricas_dripify": ["conexoes_enviadas", "conexoes_aceitas", "abordagens", "in_mails", "fups", "numeros_captados"],
     "metricas_contas": [
         "conexoes_enviadas",
         "conexoes_aceitas",

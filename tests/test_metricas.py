@@ -1,7 +1,7 @@
 """Testes de `app/metricas.py` — vocabulário de métricas por cargo."""
 from __future__ import annotations
 
-from app.metricas import metricas_do_cargo, nome_exibicao
+from app.metricas import NOME_EXIBICAO, metricas_do_cargo, nome_exibicao
 
 
 def test_metricas_do_cargo_seguem_as_planilhas():
@@ -13,9 +13,13 @@ def test_metricas_do_cargo_seguem_as_planilhas():
         "ligacoes_agendadas", "ligacoes_realizadas", "reunioes_agendadas", "reunioes_realizadas",
         "indicacoes", "inscricoes_realizadas",
     )
-    assert metricas_do_cargo("dripify") == (
-        "conexoes_enviadas", "conexoes_aceitas", "abordagens", "in_mails", "fups", "numeros_captados",
-    )
     assert metricas_do_cargo("empresa") == ()
     assert nome_exibicao("ligacoes_efetuadas") == "Ligações Efetuadas"
     assert nome_exibicao("indicacoes", "seller") == "Indicações Captadas"
+
+
+def test_metricas_do_cargo_dripify_nao_existe_mais():
+    assert metricas_do_cargo("dripify") == ()
+    assert NOME_EXIBICAO["mensagens_abordagem"] == "Mensagem de Abordagem"
+    assert NOME_EXIBICAO["follows_abordagem"] == "Follow de abordagem"
+    assert NOME_EXIBICAO["respondidos"] == "Respondidos"
