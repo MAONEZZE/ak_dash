@@ -859,3 +859,33 @@ def test_worker_funil_cria_contas_novas_com_o_seller_da_planilha(monkeypatch):
     assert len(contas) == 1
     assert contas[0][2] == "canal,nome"
     assert _sem_carimbo(contas[0][1]) == [{"canal": "instagram", "nome": "Mary", "id_seller": 13}]
+
+
+def test_worker_funil_grava_metricas_das_contas_e_anula_dia_apagado(monkeypatch):
+    banco = _Banco({
+        "users": [{"id": 13, "nome": "Lucas"}],
+        "user_cargos": [{"id_user": 13}],
+        "contas_funil": [{"id": 20, "canal": "instagram", "nome": "Jacob", "id_seller": 13}],
+        "metricas_contas": [{"id_conta": 20, "data": "2026-11-03", "abordagens": 5, "conexoes_enviadas": None, "conexoes_aceitas": None, "mensagens_abordagem": None, "follows_abordagem": None, "respondidos": None, "in_mails": None, "fups": None, "numeros_captados": None, "indicacoes": None}],
+    })
+    _instalar(monkeypatch, banco)
+    abas = [
+        ("Jacob", [CAB_IG, META_IG, [], [9, None, 75, None, 12]]),
+        ("Lucas", [CAB_IG, ["Meta diária", 150, 150, 60, 21, 0], [], [9, None, 75, None, 12]]),
+    ]
+    w = workers.WorkerFunil("instagram", "ID_IG", lambda _id: abas, hoje=lambda: date(2026, 11, 13))
+
+    w.ciclo()
+
+    contas = [u for u in banco.upserts if u[0] == "metricas_contas"]
+    assert len(contas) == 1
+    assert contas[0][2] == "id_conta,data"
+    assert _sem_carimbo(contas[0][1]) == [
+        {"id_conta": 20, "data": "2026-11-03", "abordagens": None, "conexoes_enviadas": None, "conexoes_aceitas": None, "mensagens_abordagem": None, "follows_abordagem": None, "respondidos": None, "in_mails": None, "fups": None, "numeros_captados": None, "indicacoes": None},
+        {"id_conta": 20, "data": "2026-11-09", "abordagens": None, "fups": 75, "respondidos": None, "numeros_captados": 12, "indicacoes": None, "conexoes_enviadas": None, "conexoes_aceitas": None, "mensagens_abordagem": None, "follows_abordagem": None, "in_mails": None},
+    ]
+
+    banco.upserts.clear()
+    w.ciclo()
+
+    assert [u for u in banco.upserts if u[0] == "metricas_contas"] == []

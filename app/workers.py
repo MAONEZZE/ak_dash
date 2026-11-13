@@ -185,7 +185,7 @@ class Worker:
 
 
 class WorkerFunil(Worker):
-    """Espelha as abas de seller da planilha de um funil (LinkedIn/Instagram) em metricas_sellers e metas. Abas de conta ficam para depois."""
+    """Espelha as abas de seller da planilha de um funil (LinkedIn/Instagram) em metricas_sellers e metas, e as abas de conta em metricas_contas."""
 
     def __init__(
         self,
@@ -198,6 +198,62 @@ class WorkerFunil(Worker):
         super().__init__(Planilha(f"funil_{canal}", "metricas_sellers", "seller"), planilha_id, ler_abas, hoje, agora)
         self.canal = canal
         self.contas: dict[str, int] = {}
+        self.metricas_contas: dict[tuple[int, str], dict] = {}
+
+    def _carregar_estado(self, ano: int, mes: int) -> None:
+        super()._carregar_estado(ano, mes)
+        inicio = date(ano, mes, 1)
+        fim = date(ano, mes, monthrange(ano, mes)[1])
+        colunas = COLUNAS_POR_TABELA["metricas_contas"]
+        self.metricas_contas = {
+            (l["id_conta"], l["data"]): l
+            for l in self._consultar(
+                "metricas_contas",
+                {"and": f"(data.gte.{inicio},data.lte.{fim})"},
+                "id_conta,data," + ",".join(colunas),
+            )
+        }
+
+    def _sincronizar_contas(self, abas_conta: list[Aba], hoje: date) -> bool:
+        colunas = COLUNAS_POR_TABELA["metricas_contas"]
+        metricas_novas: dict[tuple[int, str], dict] = {}
+
+        for aba in abas_conta:
+            id_conta = self.contas.get(aba.pessoa)
+            if id_conta is None:
+                continue
+
+            desejadas = {}
+            for d, valores in sorted(aba.dias.items()):
+                try:
+                    dia = date(hoje.year, hoje.month, d)
+                except ValueError:
+                    continue
+                desejadas[(id_conta, dia.isoformat())] = {
+                    "id_conta": id_conta,
+                    "data": dia.isoformat(),
+                    **{c: valores.get(c) for c in colunas},
+                }
+            for chave, linha in self.metricas_contas.items():
+                if linha["id_conta"] == id_conta and chave not in desejadas:
+                    desejadas[chave] = {**linha, **{c: None for c in colunas}}
+            for chave, linha in desejadas.items():
+                if self.metricas_contas.get(chave) != linha:
+                    metricas_novas[chave] = linha
+
+        if not metricas_novas:
+            return False
+
+        banco.upsert(
+            "metricas_contas",
+            [
+                {**l, "atualizado_em": self.agora().isoformat()}
+                for l in sorted(metricas_novas.values(), key=lambda l: (l["id_conta"], l["data"]))
+            ],
+            on_conflict="id_conta,data",
+        )
+        self.metricas_contas.update(metricas_novas)
+        return True
 
     def ciclo(self) -> None:
         hoje = self.hoje()
@@ -229,6 +285,8 @@ class WorkerFunil(Worker):
             existentes = contas_do_canal()
             gravou = True
         self.contas = {nome: l["id"] for nome, l in existentes.items()}
+        if self._sincronizar_contas(abas_conta, hoje):
+            gravou = True
 
         if gravou:
             cache.invalidar()
