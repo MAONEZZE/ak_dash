@@ -246,13 +246,30 @@ def test_funil_linkedin_200_com_contas_do_periodo(monkeypatch):
                 "numeros_captados": 0,
                 "indicacoes": 0,
             },
+            "serie": [
+                {
+                    "data": "2026-11-02",
+                    "metricas": {
+                        "conexoes_enviadas": 43,
+                        "conexoes_aceitas": 0,
+                        "mensagens_abordagem": 0,
+                        "abordagens": 0,
+                        "follows_abordagem": 0,
+                        "respondidos": 0,
+                        "in_mails": 0,
+                        "fups": 0,
+                        "numeros_captados": 0,
+                        "indicacoes": 0,
+                    },
+                }
+            ],
         }
     ]
     assert corpo["avisos"] == []
-    assert set(corpo) == {"periodo", "avisos", "contas", "dashboard"}
+    assert set(corpo) == {"periodo", "avisos", "contas", "meta_numeros_captados"}
 
 
-def test_funil_devolve_dashboard_do_seller_do_canal(monkeypatch):
+def test_funil_devolve_meta_de_numeros_captados_do_seller_no_periodo(monkeypatch):
     monkeypatch.setattr(
         f"{__name__}._USERS",
         [*_USERS, {"id": 4, "nome": "Duda", "email": None, "imagem_url": None, "active": True}],
@@ -260,18 +277,23 @@ def test_funil_devolve_dashboard_do_seller_do_canal(monkeypatch):
     monkeypatch.setattr(f"{__name__}._USER_CARGOS", [*_USER_CARGOS, {"id_user": 4, "cargo": "seller"}])
     monkeypatch.setattr(f"{__name__}._CONTAS", [{"id": 1, "nome": "Jacob", "id_seller": 4}])
     cliente = _client(monkeypatch)
-    chaves = {"metrica", "nome_exibicao", "meta_periodo", "realizado", "pct_atingimento", "falta_folga", "horas_restantes", "media_necessaria", "previsao"}
+    monkeypatch.setattr(
+        metas_mod,
+        "query",
+        lambda tabela, *a, **kw: [{"id_user": 4, "cargo": "seller", "metrica": "numeros_captados", "valor_diario": 4}],
+    )
 
-    linkedin = cliente.get("/funil/linkedin", params={"granularidade": "mes", "periodo": "2026-11"}).json()
-    assert linkedin["dashboard"]["seller"] == {"id_user": "4", "nome": "Duda"}
-    for k in ("diario", "semanal", "mensal"):
-        assert [m["metrica"] for m in linkedin["dashboard"][k]] == ["fups", "numeros_captados"]
-        for item in linkedin["dashboard"][k]:
-            assert set(item) == chaves
+    mes = cliente.get("/funil/linkedin", params={"granularidade": "mes", "periodo": "2026-11"}).json()
+    assert mes["meta_numeros_captados"] == 88  # 4 por dia × 22 dias úteis do mês
+    assert "dashboard" not in mes
 
-    instagram = cliente.get("/funil/instagram", params={"granularidade": "mes", "periodo": "2026-11"}).json()
-    for k in ("diario", "semanal", "mensal"):
-        assert [m["metrica"] for m in instagram["dashboard"][k]] == ["fups", "numeros_captados", "indicacoes"]
+    semana = cliente.get("/funil/linkedin", params={"granularidade": "semana", "periodo": "2026-W46"}).json()
+    assert semana["meta_numeros_captados"] == 20  # 4 × 5
+
+
+def test_funil_sem_seller_ligado_nao_tem_meta(monkeypatch):
+    corpo = _client(monkeypatch).get("/funil/linkedin", params={"granularidade": "mes", "periodo": "2026-11"}).json()
+    assert corpo["meta_numeros_captados"] is None
 
 
 def test_funil_canal_invalido_404(monkeypatch):
