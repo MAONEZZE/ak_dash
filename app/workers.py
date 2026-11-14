@@ -1,4 +1,4 @@
-"""Workers que espelham as planilhas (Sellers, SDRs, Closers, Dripify, Logs) em dash2 a cada N segundos. Substituem os fluxos n8n de métricas. Gravam só o que mudou (estado em memória, carregado do banco na subida e na virada do mês), no mês corrente em America/Sao_Paulo. Nunca criam usuário nem cargo: aba de quem não está em users/user_cargos é pulada."""
+"""Workers que espelham as planilhas (SDRs, Closers, funis LinkedIn/Instagram, Financeiro, Logs) no schema dash_new a cada N segundos. Substituem os fluxos n8n de métricas. Gravam só o que mudou (estado em memória, carregado do banco na subida e na virada do mês), no mês corrente em America/Sao_Paulo. Nunca criam usuário nem cargo: aba de quem não está em users/user_cargos é pulada."""
 from __future__ import annotations
 
 import logging
@@ -15,7 +15,7 @@ from app.fontes.google_sheets import LeitorSheets, criar_credenciais
 from app.periodo import TZ_SP, hoje_sp
 from app.planilha_financeiro import APELIDOS, COLUNAS_VENDA, ler_base_vendas
 from app.planilha_logs import COLUNAS_LOG, ler_logs
-from app.planilhas import COLUNAS_POR_TABELA, ler_linhas, linhas_metricas, normalizar, resolver_usuario
+from app.planilhas import COLUNAS_POR_TABELA, Aba, ler_linhas, linhas_metricas, normalizar, resolver_usuario
 
 logger = logging.getLogger(__name__)
 
@@ -28,10 +28,8 @@ class Planilha:
 
 
 PLANILHAS = [
-    Planilha("sellers", "metricas_sellers", "seller"),
     Planilha("sdrs", "metricas_sdrs", "sdr"),
     Planilha("closers", "metricas_closers", "closer"),
-    Planilha("dripify", "metricas_dripify", "dripify"),
 ]
 
 
@@ -89,6 +87,10 @@ class Worker:
         usuarios = self._consultar("users", {}, "id,nome")
         com_cargo = {l["id_user"] for l in self._consultar("user_cargos", {"cargo": f"eq.{self.planilha.cargo}"}, "id_user")}
 
+        if self._sincronizar(abas, usuarios, com_cargo, hoje):
+            cache.invalidar()
+
+    def _sincronizar(self, abas: list[Aba], usuarios: list[dict], com_cargo: set[int], hoje: date) -> bool:
         colunas = COLUNAS_POR_TABELA[self.planilha.tabela]
         metricas_novas: dict[str, dict] = {}
         metas_novas: dict[tuple[int, str], int] = {}
@@ -162,8 +164,7 @@ class Worker:
             self.metas.pop((i, m), None)
             gravou = True
 
-        if gravou:
-            cache.invalidar()
+        return gravou
 
     def executar_ciclo(self) -> None:
         try:
@@ -179,6 +180,114 @@ class Worker:
             self.executar_ciclo()
             if parar.wait(intervalo):
                 return
+
+
+class WorkerFunil(Worker):
+    """Espelha as abas de seller da planilha de um funil (LinkedIn/Instagram) em metricas_sellers e metas, e as abas de conta em metricas_contas."""
+
+    def __init__(
+        self,
+        canal: str,
+        planilha_id: str,
+        ler_abas: Callable[[str], list[tuple[str, list[list]]]],
+        hoje: Callable[[], date] = hoje_sp,
+        agora: Callable[[], datetime] = lambda: datetime.now(TZ_SP),
+    ):
+        super().__init__(Planilha(f"funil_{canal}", "metricas_sellers", "seller"), planilha_id, ler_abas, hoje, agora)
+        self.canal = canal
+        self.contas: dict[str, int] = {}
+        self.metricas_contas: dict[tuple[int, str], dict] = {}
+
+    def _carregar_estado(self, ano: int, mes: int) -> None:
+        super()._carregar_estado(ano, mes)
+        inicio = date(ano, mes, 1)
+        fim = date(ano, mes, monthrange(ano, mes)[1])
+        colunas = COLUNAS_POR_TABELA["metricas_contas"]
+        self.metricas_contas = {
+            (l["id_conta"], l["data"]): l
+            for l in self._consultar(
+                "metricas_contas",
+                {"and": f"(data.gte.{inicio},data.lte.{fim})"},
+                "id_conta,data," + ",".join(colunas),
+            )
+        }
+
+    def _sincronizar_contas(self, abas_conta: list[Aba], hoje: date) -> bool:
+        colunas = COLUNAS_POR_TABELA["metricas_contas"]
+        metricas_novas: dict[tuple[int, str], dict] = {}
+
+        for aba in abas_conta:
+            id_conta = self.contas.get(aba.pessoa)
+            if id_conta is None:
+                continue
+
+            desejadas = {}
+            for d, valores in sorted(aba.dias.items()):
+                try:
+                    dia = date(hoje.year, hoje.month, d)
+                except ValueError:
+                    continue
+                desejadas[(id_conta, dia.isoformat())] = {
+                    "id_conta": id_conta,
+                    "data": dia.isoformat(),
+                    **{c: valores.get(c) for c in colunas},
+                }
+            for chave, linha in self.metricas_contas.items():
+                if linha["id_conta"] == id_conta and chave not in desejadas:
+                    desejadas[chave] = {**linha, **{c: None for c in colunas}}
+            for chave, linha in desejadas.items():
+                if self.metricas_contas.get(chave) != linha:
+                    metricas_novas[chave] = linha
+
+        if not metricas_novas:
+            return False
+
+        banco.upsert(
+            "metricas_contas",
+            [
+                {**l, "atualizado_em": self.agora().isoformat()}
+                for l in sorted(metricas_novas.values(), key=lambda l: (l["id_conta"], l["data"]))
+            ],
+            on_conflict="id_conta,data",
+        )
+        self.metricas_contas.update(metricas_novas)
+        return True
+
+    def ciclo(self) -> None:
+        hoje = self.hoje()
+        if (hoje.year, hoje.month) != self.mes:
+            self._carregar_estado(hoje.year, hoje.month)
+
+        abas = [a for titulo, linhas in self.ler_abas(self.planilha_id) if (a := ler_linhas(titulo, linhas)) is not None]
+        usuarios = self._consultar("users", {}, "id,nome")
+        com_cargo = {l["id_user"] for l in self._consultar("user_cargos", {"cargo": f"eq.{self.planilha.cargo}"}, "id_user")}
+
+        abas_seller = [a for a in abas if (u := resolver_usuario(a.pessoa, usuarios)) is not None and u["id"] in com_cargo]
+        gravou = self._sincronizar(abas_seller, usuarios, com_cargo, hoje)
+
+        abas_conta = [a for a in abas if a not in abas_seller]
+        id_seller = resolver_usuario(abas_seller[0].pessoa, usuarios)["id"] if abas_seller else None
+
+        def contas_do_canal() -> dict[str, dict]:
+            return {l["nome"]: l for l in self._consultar("contas_funil", {"canal": f"eq.{self.canal}"}, "id,canal,nome,id_seller")}
+
+        existentes = contas_do_canal()
+        novas = [
+            {"canal": self.canal, "nome": a.pessoa, "id_seller": id_seller}
+            for a in abas_conta
+            if a.pessoa not in existentes or existentes[a.pessoa]["id_seller"] != id_seller
+        ]
+        if novas:
+            carimbo = self.agora().isoformat()
+            banco.upsert("contas_funil", [{**l, "atualizado_em": carimbo} for l in novas], on_conflict="canal,nome")
+            existentes = contas_do_canal()
+            gravou = True
+        self.contas = {nome: l["id"] for nome, l in existentes.items()}
+        if self._sincronizar_contas(abas_conta, hoje):
+            gravou = True
+
+        if gravou:
+            cache.invalidar()
 
 
 class WorkerFinanceiro(Worker):
@@ -421,10 +530,8 @@ def iniciar(config: Settings) -> threading.Event:
         logger.warning("Workers das planilhas não subiram: %s", MOTIVO_INATIVOS)
         return parar
     ids = {
-        "sellers": config.planilha_sellers_id,
         "sdrs": config.planilha_sdrs_id,
         "closers": config.planilha_closers_id,
-        "dripify": config.planilha_dripify_id,
     }
     for p in PLANILHAS:
         if not ids[p.nome]:
@@ -432,6 +539,12 @@ def iniciar(config: Settings) -> threading.Event:
         w = Worker(p, ids[p.nome], LeitorSheets(credenciais).abas)
         ATIVOS.append(w)
         threading.Thread(target=w.rodar, args=(parar, config.worker_intervalo_segundos), name=f"worker-{p.nome}", daemon=True).start()
+    for canal, planilha_id in (("linkedin", config.planilha_funil_linkedin_id), ("instagram", config.planilha_funil_instagram_id)):
+        if not planilha_id:
+            continue
+        funil = WorkerFunil(canal, planilha_id, LeitorSheets(credenciais).abas)
+        ATIVOS.append(funil)
+        threading.Thread(target=funil.rodar, args=(parar, config.worker_intervalo_segundos), name=f"worker-funil_{canal}", daemon=True).start()
     if config.planilha_financeiro_id:
         financeiro = WorkerFinanceiro(config.planilha_financeiro_id, config.planilha_financeiro_ano, LeitorSheets(credenciais).abas)
         ATIVOS.append(financeiro)

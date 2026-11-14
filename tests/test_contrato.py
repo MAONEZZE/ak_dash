@@ -74,6 +74,27 @@ def test_schema_respostageral_tem_os_campos_que_o_bff_produz():
     assert campos == {"periodo", "dias_uteis", "cards", "eventos", "logs", "pessoas", "avisos"}
 
 
+def test_schema_respostafunil_tem_os_campos_que_o_bff_produz():
+    schemas = _carregar_openapi()["components"]["schemas"]
+    assert set(schemas["RespostaFunil"]["required"]) == {"periodo", "avisos", "contas", "meta_numeros_captados"}
+    assert "DashboardFunil" not in schemas
+    assert set(schemas["ContaFunil"]["required"]) == {"id_conta", "nome", "metricas", "serie"}
+    assert set(schemas["DiaContaFunil"]["required"]) == {"data", "metricas"}
+    assert schemas["ContaFunil"]["properties"]["serie"]["items"]["$ref"] == "#/components/schemas/DiaContaFunil"
+    assert set(schemas["ContaFunil"]["properties"]["metricas"]["required"]) == {
+        "conexoes_enviadas",
+        "conexoes_aceitas",
+        "mensagens_abordagem",
+        "abordagens",
+        "follows_abordagem",
+        "respondidos",
+        "in_mails",
+        "fups",
+        "numeros_captados",
+        "indicacoes",
+    }
+
+
 def test_schema_respostafinanceiro_tem_os_campos_que_o_bff_produz():
     spec = _carregar_openapi()
     campos = set(spec["components"]["schemas"]["RespostaFinanceiro"]["required"])
@@ -90,9 +111,9 @@ def test_vendafinanceiro_descreve_recebimentos_por_mes():
     assert set(recebimento["required"]) == {"mes", "pago", "liquido"}
 
 
-def test_pessoa_aceita_quatro_cargos_e_email_opcional():
+def test_pessoa_aceita_tres_cargos_e_email_opcional():
     spec = _carregar_openapi()
     pessoa = spec["components"]["schemas"]["Pessoa"]
-    assert set(pessoa["properties"]["cargo"]["enum"]) == {"seller", "sdr", "closer", "dripify"}
+    assert set(pessoa["properties"]["cargo"]["enum"]) == {"seller", "sdr", "closer"}
     assert "email" not in pessoa["required"]
     assert pessoa["properties"]["email"]["nullable"] is True

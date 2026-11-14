@@ -17,6 +17,7 @@ from app import workers
 from app.auth import exigir_usuario
 from app.dominios.comercial import banco as comercial_banco_mod
 from app.dominios.financeiro import banco as financeiro_banco_mod
+from app.dominios.funil import banco as funil_banco_mod
 from app.dominios.geral import banco as geral_banco_mod
 from app.dominios.geral import rotas as geral_rotas_mod
 from app.dominios.pessoas import banco as pessoas_banco_mod
@@ -29,17 +30,38 @@ _USERS = [
 ]
 _USER_CARGOS = [{"id_user": 9, "cargo": "sdr"}, {"id_user": 1, "cargo": "closer"}]
 
+_CONTAS = [{"id": 1, "nome": "Jacob", "id_seller": None}]
+
 
 def _fake_query(tabela, filtros=None, schema="dash", colunas="*", **kwargs):
     if tabela == "users":
         return _USERS
     if tabela == "user_cargos":
         return _USER_CARGOS
+    if tabela == "contas_funil":
+        return _CONTAS
+    if tabela == "metricas_contas":
+        return [
+            {
+                "id_conta": 1,
+                "data": "2026-11-02",
+                "conexoes_enviadas": 43,
+                "conexoes_aceitas": None,
+                "mensagens_abordagem": None,
+                "abordagens": None,
+                "follows_abordagem": None,
+                "respondidos": None,
+                "in_mails": None,
+                "fups": None,
+                "numeros_captados": None,
+                "indicacoes": None,
+            }
+        ]
     return []
 
 
 def _sobrescrever_query(monkeypatch) -> None:
-    for mod in (pessoas_banco_mod, comercial_banco_mod, geral_banco_mod, financeiro_banco_mod, metas_mod):
+    for mod in (pessoas_banco_mod, comercial_banco_mod, geral_banco_mod, financeiro_banco_mod, funil_banco_mod, metas_mod):
         monkeypatch.setattr(mod, "query", _fake_query)
 
 
@@ -64,7 +86,7 @@ def test_saude_mostra_status_dos_workers(monkeypatch):
     assert resposta.status_code == 200
     assert resposta.json() == {
         "status": "ok",
-        "workers": {"sellers": {"ultima_leitura_ok": "2026-10-27T10:00:00-03:00", "ultimo_erro": None}},
+        "workers": {"sdrs": {"ultima_leitura_ok": "2026-10-27T10:00:00-03:00", "ultimo_erro": None}},
         "workers_motivo": None,
     }
 
@@ -201,3 +223,80 @@ def test_geral_em_dia_busca_faturamento_do_dia_e_do_mes_corrente(monkeypatch):
     assert len(intervalos) == 2
     assert "data_venda.gte.2026-09-14" in intervalos[0]  # tabela/pódios: só o dia
     assert "data_venda.gte.2026-09-01" in intervalos[1]  # cards escuros: o mês
+
+
+def test_funil_linkedin_200_com_contas_do_periodo(monkeypatch):
+    resposta = _client(monkeypatch).get("/funil/linkedin", params={"granularidade": "mes", "periodo": "2026-11"})
+    assert resposta.status_code == 200
+    corpo = resposta.json()
+    assert corpo["periodo"] == {"granularidade": "mes", "inicio": "2026-11-01", "fim": "2026-11-30"}
+    assert corpo["contas"] == [
+        {
+            "id_conta": "1",
+            "nome": "Jacob",
+            "metricas": {
+                "conexoes_enviadas": 43,
+                "conexoes_aceitas": 0,
+                "mensagens_abordagem": 0,
+                "abordagens": 0,
+                "follows_abordagem": 0,
+                "respondidos": 0,
+                "in_mails": 0,
+                "fups": 0,
+                "numeros_captados": 0,
+                "indicacoes": 0,
+            },
+            "serie": [
+                {
+                    "data": "2026-11-02",
+                    "metricas": {
+                        "conexoes_enviadas": 43,
+                        "conexoes_aceitas": 0,
+                        "mensagens_abordagem": 0,
+                        "abordagens": 0,
+                        "follows_abordagem": 0,
+                        "respondidos": 0,
+                        "in_mails": 0,
+                        "fups": 0,
+                        "numeros_captados": 0,
+                        "indicacoes": 0,
+                    },
+                }
+            ],
+        }
+    ]
+    assert corpo["avisos"] == []
+    assert set(corpo) == {"periodo", "avisos", "contas", "meta_numeros_captados"}
+
+
+def test_funil_devolve_meta_de_numeros_captados_do_seller_no_periodo(monkeypatch):
+    monkeypatch.setattr(
+        f"{__name__}._USERS",
+        [*_USERS, {"id": 4, "nome": "Duda", "email": None, "imagem_url": None, "active": True}],
+    )
+    monkeypatch.setattr(f"{__name__}._USER_CARGOS", [*_USER_CARGOS, {"id_user": 4, "cargo": "seller"}])
+    monkeypatch.setattr(f"{__name__}._CONTAS", [{"id": 1, "nome": "Jacob", "id_seller": 4}])
+    cliente = _client(monkeypatch)
+    monkeypatch.setattr(
+        metas_mod,
+        "query",
+        lambda tabela, *a, **kw: [{"id_user": 4, "cargo": "seller", "metrica": "numeros_captados", "valor_diario": 4}],
+    )
+
+    mes = cliente.get("/funil/linkedin", params={"granularidade": "mes", "periodo": "2026-11"}).json()
+    assert mes["meta_numeros_captados"] == 88  # 4 por dia × 22 dias úteis do mês
+    assert "dashboard" not in mes
+
+    semana = cliente.get("/funil/linkedin", params={"granularidade": "semana", "periodo": "2026-W46"}).json()
+    assert semana["meta_numeros_captados"] == 20  # 4 × 5
+
+
+def test_funil_sem_seller_ligado_nao_tem_meta(monkeypatch):
+    corpo = _client(monkeypatch).get("/funil/linkedin", params={"granularidade": "mes", "periodo": "2026-11"}).json()
+    assert corpo["meta_numeros_captados"] is None
+
+
+def test_funil_canal_invalido_404(monkeypatch):
+    resposta = _client(monkeypatch).get("/funil/tiktok", params={"granularidade": "mes", "periodo": "2026-11"})
+    assert resposta.status_code == 404
+    assert resposta.json() == {"erro": {"codigo": "canal_invalido", "mensagem": "canal deve ser linkedin ou instagram"}}

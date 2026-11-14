@@ -9,10 +9,10 @@ def test_workers_desligados_por_padrao(monkeypatch):
         "WORKERS_ATIVOS",
         "WORKER_INTERVALO_SEGUNDOS",
         "GOOGLE_SERVICE_ACCOUNT_JSON",
-        "PLANILHA_SELLERS_ID",
         "PLANILHA_SDRS_ID",
         "PLANILHA_CLOSERS_ID",
-        "PLANILHA_DRIPIFY_ID",
+        "PLANILHA_FUNIL_LINKEDIN_ID",
+        "PLANILHA_FUNIL_INSTAGRAM_ID",
     ):
         monkeypatch.delenv(nome, raising=False)
 
@@ -21,18 +21,18 @@ def test_workers_desligados_por_padrao(monkeypatch):
     assert s.workers_ativos is False
     assert s.worker_intervalo_segundos == 5.0
     assert s.google_service_account_json is None
-    assert s.planilha_sellers_id is None
     assert s.planilha_sdrs_id is None
     assert s.planilha_closers_id is None
-    assert s.planilha_dripify_id is None
+    assert s.planilha_funil_linkedin_id is None
+    assert s.planilha_funil_instagram_id is None
 
 
 def test_settings_le_envs_dos_workers(monkeypatch):
     monkeypatch.setenv("WORKERS_ATIVOS", " TRUE ")
     monkeypatch.setenv("WORKER_INTERVALO_SEGUNDOS", "2.5")
     monkeypatch.setenv("GOOGLE_SERVICE_ACCOUNT_JSON", '{"type": "service_account"}')
-    monkeypatch.setenv("PLANILHA_SELLERS_ID", "abc")
-    monkeypatch.setenv("PLANILHA_DRIPIFY_ID", "")
+    monkeypatch.setenv("PLANILHA_FUNIL_LINKEDIN_ID", "abc")
+    monkeypatch.setenv("PLANILHA_FUNIL_INSTAGRAM_ID", "")
     monkeypatch.delenv("PLANILHA_SDRS_ID", raising=False)
     monkeypatch.delenv("PLANILHA_CLOSERS_ID", raising=False)
 
@@ -41,8 +41,8 @@ def test_settings_le_envs_dos_workers(monkeypatch):
     assert s.workers_ativos is True
     assert s.worker_intervalo_segundos == 2.5
     assert s.google_service_account_json == '{"type": "service_account"}'
-    assert s.planilha_sellers_id == "abc"
-    assert s.planilha_dripify_id is None
+    assert s.planilha_funil_linkedin_id == "abc"
+    assert s.planilha_funil_instagram_id is None
     assert s.planilha_sdrs_id is None
 
 
@@ -94,3 +94,16 @@ def test_expediente_padrao_10_as_19_e_lido_das_envs(monkeypatch):
 
     assert s.expediente_inicio == time(9, 30)
     assert s.expediente_fim == time(18, 0)
+
+
+def test_schema_vem_de_nome_schema(monkeypatch):
+    monkeypatch.setenv("NOME_SCHEMA", "dash_x")
+    monkeypatch.setenv("SUPABASE_SCHEMA", "dash2")
+
+    s = config.Settings()
+
+    assert s.supabase_schema == "dash_x"
+
+    monkeypatch.delenv("NOME_SCHEMA", raising=False)
+
+    assert config.Settings().supabase_schema == "dash_new"

@@ -10,6 +10,7 @@ from app import workers
 from app.config import settings
 from app.dominios.comercial.rotas import router as comercial_router
 from app.dominios.financeiro.rotas import router as financeiro_router
+from app.dominios.funil.rotas import router as funil_router
 from app.dominios.geral.rotas import router as geral_router
 from app.dominios.pessoas.rotas import router as pessoas_router
 
@@ -43,6 +44,7 @@ app.include_router(pessoas_router)
 app.include_router(comercial_router)
 app.include_router(geral_router)
 app.include_router(financeiro_router)
+app.include_router(funil_router)
 
 
 @app.get("/saude", tags=["infra"])

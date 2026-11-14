@@ -229,10 +229,10 @@ def test_iniciar_sobe_um_worker_por_planilha_configurada(monkeypatch):
         supabase_url="https://x.supabase.co",
         supabase_service_key="k",
         google_service_account_json="{}",
-        planilha_sellers_id="S",
-        planilha_sdrs_id=None,
+        planilha_sdrs_id="S",
         planilha_closers_id="C",
-        planilha_dripify_id=None,
+        planilha_funil_linkedin_id=None,
+        planilha_funil_instagram_id=None,
         planilha_financeiro_id=None,
         planilha_logs_id=None,
         worker_intervalo_segundos=5.0,
@@ -249,10 +249,41 @@ def test_iniciar_sobe_um_worker_por_planilha_configurada(monkeypatch):
         if t.name.startswith("worker-"):
             t.join(timeout=1)
 
-    assert sorted(w.planilha.nome for w in workers.ATIVOS) == ["closers", "sellers"]
-    assert sorted(rodados) == [("closers", "C", 5.0), ("sellers", "S", 5.0)]
+    assert sorted(w.planilha.nome for w in workers.ATIVOS) == ["closers", "sdrs"]
+    assert sorted(rodados) == [("closers", "C", 5.0), ("sdrs", "S", 5.0)]
     assert isinstance(parar, threading.Event)
     assert parar.is_set() is False
+
+
+def test_iniciar_sobe_workers_de_funil_com_os_ids_da_config(monkeypatch):
+    rodados = []
+    monkeypatch.setattr(workers.Worker, "rodar", lambda self, parar, intervalo: rodados.append((self.planilha.nome, self.planilha_id, intervalo)))
+    monkeypatch.setattr(workers, "criar_credenciais", lambda texto: object())
+    base = dataclasses.replace(
+        config.settings,
+        supabase_url="https://x.supabase.co",
+        supabase_service_key="k",
+        google_service_account_json="{}",
+        planilha_sdrs_id=None,
+        planilha_closers_id="C",
+        planilha_funil_linkedin_id="LI",
+        planilha_funil_instagram_id="IG",
+        planilha_financeiro_id=None,
+        planilha_logs_id=None,
+        worker_intervalo_segundos=5.0,
+        workers_ativos=True,
+    )
+
+    workers.iniciar(base)
+    for t in threading.enumerate():
+        if t.name.startswith("worker-"):
+            t.join(timeout=1)
+
+    assert sorted(w.planilha.nome for w in workers.ATIVOS) == ["closers", "funil_instagram", "funil_linkedin"]
+    funis = {w.canal: w for w in workers.ATIVOS if isinstance(w, workers.WorkerFunil)}
+    assert set(funis) == {"linkedin", "instagram"}
+    assert funis["linkedin"].planilha_id == "LI"
+    assert funis["instagram"].planilha_id == "IG"
 
 
 def test_iniciar_sobe_worker_financeiro_com_id_e_ano_da_config(monkeypatch):
@@ -264,10 +295,8 @@ def test_iniciar_sobe_worker_financeiro_com_id_e_ano_da_config(monkeypatch):
         supabase_url="https://x.supabase.co",
         supabase_service_key="k",
         google_service_account_json="{}",
-        planilha_sellers_id="S",
         planilha_sdrs_id=None,
         planilha_closers_id="C",
-        planilha_dripify_id=None,
         planilha_financeiro_id="F",
         planilha_financeiro_ano=2026,
         planilha_logs_id=None,
@@ -306,10 +335,8 @@ def test_iniciar_sobe_worker_de_logs_com_id_da_config(monkeypatch):
         supabase_url="https://x.supabase.co",
         supabase_service_key="k",
         google_service_account_json="{}",
-        planilha_sellers_id=None,
         planilha_sdrs_id=None,
         planilha_closers_id=None,
-        planilha_dripify_id=None,
         planilha_financeiro_id=None,
         planilha_logs_id="L",
         workers_ativos=True,
@@ -345,7 +372,7 @@ def test_iniciar_sem_credencial_loga_warning_e_guarda_motivo(monkeypatch, caplog
         supabase_url="https://x.supabase.co",
         supabase_service_key="k",
         google_service_account_json=None,
-        planilha_sellers_id="S",
+        planilha_sdrs_id="S",
         planilha_logs_id=None,
     )
 
@@ -372,7 +399,7 @@ def test_iniciar_com_json_invalido_nao_levanta_e_guarda_motivo(caplog):
         supabase_url="https://x.supabase.co",
         supabase_service_key="k",
         google_service_account_json="{nao e json",
-        planilha_sellers_id="S",
+        planilha_sdrs_id="S",
         planilha_logs_id=None,
     )
 
@@ -797,3 +824,95 @@ def test_logs_linha_invalida_e_usuario_sem_cadastro_logam_uma_vez(monkeypatch, c
     mensagens = [r.getMessage() for r in caplog.records]
     assert len([m for m in mensagens if "linha ignorada" in m]) == 1
     assert len([m for m in mensagens if "'Thalyson' não está em users" in m]) == 1
+
+
+CAB_LINKEDIN = ["Dia", "Conexões Enviadas", "Conexões Aceitas", "Mensagem de Abordagem", "Abordagens", "Follow de abordagem", "Respondidos", "InMails Enviados", "Follow-ups", "Números Captados"]
+META_LINKEDIN = ["Meta diária", 40, 20, 20, 20, 30, 10, 5, 150, 0]
+
+
+def test_worker_funil_grava_aba_do_seller_e_nao_avisa_pelas_contas(monkeypatch, caplog):
+    banco = _Banco({
+        "users": [{"id": 4, "nome": "Duda"}, {"id": 1, "nome": "Jacob"}],
+        "user_cargos": [{"id_user": 4}],
+        "contas_funil": [{"id": 10, "canal": "linkedin", "nome": "Jacob", "id_seller": 4}],
+    })
+    _instalar(monkeypatch, banco)
+    abas = [
+        ("Linkedin Jacob", [CAB_LINKEDIN, META_LINKEDIN, [], [5, 42, 33, 33, 71, 38, 24, 19, None, 8]]),
+        ("Duda", [CAB_LINKEDIN, ["Meta diária", 180, 90, 95, 100, 150, 50, 25, 750, 13], [], [5, 155, 103, 103, 175, 71, 63, 19, 7, 19]]),
+        ("Funil de Vendas LinkedIn", [[]]),
+    ]
+    w = workers.WorkerFunil("linkedin", "ID_LI", lambda _id: abas, hoje=lambda: date(2026, 11, 13))
+    caplog.set_level(logging.WARNING)
+
+    w.ciclo()
+
+    metricas = [u for u in banco.upserts if u[0] == "metricas_sellers"]
+    assert len(metricas) == 1
+    assert _sem_carimbo(metricas[0][1]) == [
+        {"id_user": 4, "data": "2026-11-05", "key_data_ref_user": "05/11/2026-duda", "fups": 7, "numeros_captados": 19, "indicacoes": None},
+    ]
+    metas = [u for u in banco.upserts if u[0] == "metas"]
+    assert len(metas) == 1
+    assert _sem_carimbo(metas[0][1]) == [
+        {"id_user": 4, "cargo": "seller", "metrica": "fups", "valor_diario": 750},
+        {"id_user": 4, "cargo": "seller", "metrica": "numeros_captados", "valor_diario": 13},
+    ]
+    assert not any("pulada" in r.getMessage() for r in caplog.records)
+
+
+CAB_IG = ["Dia", "Abordagens feita", "Follow Up", "Respondidos", "Números Captados", "Indicações Captadas"]
+META_IG = ["Meta diária", 50, 50, 20, 7, 0]
+
+
+def test_worker_funil_cria_contas_novas_com_o_seller_da_planilha(monkeypatch):
+    banco = _Banco({
+        "users": [{"id": 13, "nome": "Lucas"}],
+        "user_cargos": [{"id_user": 13}],
+        "contas_funil": [{"id": 20, "canal": "instagram", "nome": "Jacob", "id_seller": 13}],
+    })
+    _instalar(monkeypatch, banco)
+    abas = [
+        ("Jacob", [CAB_IG, META_IG, [], [9, None, 75, None, 12]]),
+        ("Mary", [CAB_IG, META_IG, [], [11, None, None, None, 6]]),
+        ("Lucas", [CAB_IG, ["Meta diária", 150, 150, 60, 21, 0], [], [9, None, 75, None, 12]]),
+        ("Dashboard", [[]]),
+    ]
+    w = workers.WorkerFunil("instagram", "ID_IG", lambda _id: abas, hoje=lambda: date(2026, 11, 13))
+
+    w.ciclo()
+
+    contas = [u for u in banco.upserts if u[0] == "contas_funil"]
+    assert len(contas) == 1
+    assert contas[0][2] == "canal,nome"
+    assert _sem_carimbo(contas[0][1]) == [{"canal": "instagram", "nome": "Mary", "id_seller": 13}]
+
+
+def test_worker_funil_grava_metricas_das_contas_e_anula_dia_apagado(monkeypatch):
+    banco = _Banco({
+        "users": [{"id": 13, "nome": "Lucas"}],
+        "user_cargos": [{"id_user": 13}],
+        "contas_funil": [{"id": 20, "canal": "instagram", "nome": "Jacob", "id_seller": 13}],
+        "metricas_contas": [{"id_conta": 20, "data": "2026-11-03", "abordagens": 5, "conexoes_enviadas": None, "conexoes_aceitas": None, "mensagens_abordagem": None, "follows_abordagem": None, "respondidos": None, "in_mails": None, "fups": None, "numeros_captados": None, "indicacoes": None}],
+    })
+    _instalar(monkeypatch, banco)
+    abas = [
+        ("Jacob", [CAB_IG, META_IG, [], [9, None, 75, None, 12]]),
+        ("Lucas", [CAB_IG, ["Meta diária", 150, 150, 60, 21, 0], [], [9, None, 75, None, 12]]),
+    ]
+    w = workers.WorkerFunil("instagram", "ID_IG", lambda _id: abas, hoje=lambda: date(2026, 11, 13))
+
+    w.ciclo()
+
+    contas = [u for u in banco.upserts if u[0] == "metricas_contas"]
+    assert len(contas) == 1
+    assert contas[0][2] == "id_conta,data"
+    assert _sem_carimbo(contas[0][1]) == [
+        {"id_conta": 20, "data": "2026-11-03", "abordagens": None, "conexoes_enviadas": None, "conexoes_aceitas": None, "mensagens_abordagem": None, "follows_abordagem": None, "respondidos": None, "in_mails": None, "fups": None, "numeros_captados": None, "indicacoes": None},
+        {"id_conta": 20, "data": "2026-11-09", "abordagens": None, "fups": 75, "respondidos": None, "numeros_captados": 12, "indicacoes": None, "conexoes_enviadas": None, "conexoes_aceitas": None, "mensagens_abordagem": None, "follows_abordagem": None, "in_mails": None},
+    ]
+
+    banco.upserts.clear()
+    w.ciclo()
+
+    assert [u for u in banco.upserts if u[0] == "metricas_contas"] == []
