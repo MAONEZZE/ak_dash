@@ -347,9 +347,47 @@ def test_funil_sdr_traz_a_proxima_confraria_para_o_velocimetro(monkeypatch):
     monkeypatch.setattr(geral_banco_mod, "query", query_com_evento)
     corpo = client.get("/funil-sdr", params={"granularidade": "mes", "periodo": "2026-11"}).json()
     assert corpo["evento"] == {
-        "titulo": "Confraria Akeel SP", "data": "2026-11-20T22:00:00",
+        "id": "e1", "titulo": "Confraria Akeel SP", "data": "2026-11-20T22:00:00",
         "inscritos": 3, "aprovados": 1, "pendentes": 2, "rejeitados": 1, "capacidade": 80,
     }
+
+
+def test_funil_sdr_com_evento_escolhido_traz_os_numeros_dele(monkeypatch):
+    client = _client(monkeypatch)
+    filtros_eventos: list[dict] = []
+
+    def query_com_evento(tabela, filtros=None, *a, **kw):
+        if tabela == "events":
+            filtros_eventos.append(filtros)
+            return [{"id": "e-antigo", "title": "Confraria Akeel RJ", "event_date": "2026-10-10T22:00:00", "capacity": 50}]
+        if tabela == "registrations":
+            return [{"event_id": "e-antigo", "status": s} for s in ("approved", "approved", "rejected")]
+        return _fake_query(tabela, filtros, *a, **kw)
+
+    monkeypatch.setattr(geral_banco_mod, "query", query_com_evento)
+    corpo = client.get("/funil-sdr", params={"granularidade": "mes", "periodo": "2026-11", "evento": "e-antigo"}).json()
+    assert filtros_eventos[0]["and"] == '(id.eq."e-antigo")'
+    assert (corpo["evento"]["id"], corpo["evento"]["aprovados"], corpo["evento"]["rejeitados"]) == ("e-antigo", 2, 1)
+
+
+def test_funil_sdr_evento_com_caractere_invalido_400(monkeypatch):
+    resposta = _client(monkeypatch).get(
+        "/funil-sdr", params={"granularidade": "mes", "periodo": "2026-11", "evento": 'x",title.neq.y'}
+    )
+    assert resposta.status_code == 400
+
+
+def test_funil_sdr_eventos_lista_os_proximos_eventos(monkeypatch):
+    client = _client(monkeypatch)
+
+    def query_eventos(tabela, filtros=None, *a, **kw):
+        if tabela == "events":
+            return [{"id": "e1", "title": "Imersão Alta Cadência", "event_date": "2026-11-18T22:00:00"}]
+        return _fake_query(tabela, filtros, *a, **kw)
+
+    monkeypatch.setattr(geral_banco_mod, "query", query_eventos)
+    corpo = client.get("/funil-sdr/eventos").json()
+    assert corpo["eventos"] == [{"id": "e1", "titulo": "Imersão Alta Cadência", "data": "2026-11-18T22:00:00"}]
 
 
 def test_funil_sdr_periodo_invalido_400(monkeypatch):

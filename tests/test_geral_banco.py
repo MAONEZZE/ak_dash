@@ -294,25 +294,25 @@ def test_limites_do_mes_nunca_usam_offset_numerico(monkeypatch):
     assert "+" not in valor
 
 
-def test_proxima_confraria_busca_a_partir_de_agora_so_uma_com_inscricoes(monkeypatch):
+def test_proximo_evento_busca_a_partir_de_agora_so_um_de_qualquer_titulo_com_inscricoes(monkeypatch):
     chamadas = _mockar_duas_queries(
         monkeypatch,
         [{"id": "e1", "title": "Confraria Akeel SP", "event_date": "2026-11-20T22:00:00", "capacity": 80}],
         [{"event_id": "e1", "status": "approved"}, {"event_id": "e1", "status": "rejected"}],
     )
-    evento = banco_mod.buscar_proxima_confraria(datetime(2026, 11, 17, 10, 30, tzinfo=banco_mod.TZ_SP))
+    evento = banco_mod.buscar_proximo_evento(datetime(2026, 11, 17, 10, 30, tzinfo=banco_mod.TZ_SP))
     assert (evento.titulo, evento.data, evento.inscritos, evento.capacidade) == (
         "Confraria Akeel SP", "2026-11-20T22:00:00", 2, 80,
     )
     assert chamadas[0]["filtros"]["and"] == '(event_date.gte."2026-11-17T13:30:00Z")'
-    assert chamadas[0]["filtros"]["title"] == "ilike.*confraria akeel*"
+    assert "title" not in chamadas[0]["filtros"]
     assert chamadas[0]["filtros"]["order"] == "event_date.asc"
     assert chamadas[0]["filtros"]["limit"] == "1"
 
 
-def test_sem_proxima_confraria_devolve_none(monkeypatch):
+def test_sem_proximo_evento_devolve_none(monkeypatch):
     _mockar_duas_queries(monkeypatch, [], [])
-    assert banco_mod.buscar_proxima_confraria(datetime(2026, 11, 17, tzinfo=banco_mod.TZ_SP)) is None
+    assert banco_mod.buscar_proximo_evento(datetime(2026, 11, 17, tzinfo=banco_mod.TZ_SP)) is None
 
 
 # --- buscar_logs (dash2.logs_pipedrive, espelho da planilha de logs)
@@ -363,3 +363,34 @@ def test_logs_limita_aos_mais_recentes(monkeypatch):
     logs = banco_mod.buscar_logs(date(2026, 10, 1), date(2026, 10, 31))
     assert len(logs) == banco_mod.LIMITE_LOGS
     assert logs[0].cliente == str(total - 1)
+
+
+def test_lista_os_proximos_eventos_de_qualquer_titulo_do_mais_proximo(monkeypatch):
+    chamadas = _mockar_duas_queries(
+        monkeypatch,
+        [
+            {"id": "e1", "title": "Imersão Alta Cadência", "event_date": "2026-11-18T22:00:00"},
+            {"id": "e2", "title": None, "event_date": "2026-11-20T22:00:00"},
+        ],
+        [],
+    )
+    eventos = banco_mod.listar_proximos_eventos(datetime(2026, 11, 17, 10, 30, tzinfo=banco_mod.TZ_SP))
+    assert eventos == [
+        {"id": "e1", "titulo": "Imersão Alta Cadência", "data": "2026-11-18T22:00:00"},
+        {"id": "e2", "titulo": "Sem título", "data": "2026-11-20T22:00:00"},
+    ]
+    assert chamadas[0]["filtros"]["and"] == '(event_date.gte."2026-11-17T13:30:00Z")'
+    assert chamadas[0]["filtros"]["order"] == "event_date.asc"
+    assert "title" not in chamadas[0]["filtros"]
+
+
+def test_evento_escolhido_e_buscado_pelo_id_sem_filtro_de_titulo(monkeypatch):
+    chamadas = _mockar_duas_queries(
+        monkeypatch,
+        [{"id": "e1", "title": "Imersão", "event_date": "2026-11-18T22:00:00", "capacity": None}],
+        [{"event_id": "e1", "status": "pending"}],
+    )
+    evento = banco_mod.buscar_evento("e1")
+    assert (evento.id, evento.pendentes) == ("e1", 1)
+    assert chamadas[0]["filtros"]["and"] == '(id.eq."e1")'
+    assert "title" not in chamadas[0]["filtros"]

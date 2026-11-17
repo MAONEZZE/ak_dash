@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -9,7 +10,7 @@ from app.cache import obter_ou_calcular
 from app.config import settings
 from app.dominios.funil import sdr
 from app.dominios.funil.banco import buscar_contas
-from app.dominios.geral.banco import buscar_proxima_confraria
+from app.dominios.geral.banco import buscar_evento, buscar_proximo_evento, listar_proximos_eventos
 from app.dominios.pessoas.banco import listar_ativas
 from app.fontes.banco import iniciar_registro_de_falhas, tabelas_com_falha
 from app.metas import buscar_metas
@@ -18,6 +19,9 @@ from app.periodo import TZ_SP, hoje_sp, resolver_periodo
 router = APIRouter(tags=["funil"])
 
 CANAIS = ("linkedin", "instagram")
+
+# Id de evento do SED (uuid): vai dentro do filtro do PostgREST, então só letras, dígitos e hífen.
+ID_EVENTO_VALIDO = re.compile(r"^[A-Za-z0-9-]{1,64}$")
 
 # No filtro de dia o gráfico de linhas teria um ponto só; a série traz a semana até o dia.
 DIAS_SERIE_FILTRO_DIA = 7
@@ -77,12 +81,28 @@ def get_funil(
     }
 
 
+@router.get("/funil-sdr/eventos")
+def get_eventos_funil_sdr(_usuario: dict = Depends(exigir_usuario)) -> dict:
+    """Opções do filtro de evento (header, só habilitado na página Funil SDR)."""
+    iniciar_registro_de_falhas()
+    eventos = obter_ou_calcular(
+        "eventos:proximos", settings.cache_ttl_metricas_segundos, lambda: listar_proximos_eventos(datetime.now(TZ_SP))
+    )
+    return {"eventos": eventos, "avisos": [f"fonte_indisponivel:{t}" for t in tabelas_com_falha()]}
+
+
 @router.get("/funil-sdr")
 def get_funil_sdr(
     granularidade: str = Query(...),
     periodo: str = Query(...),
+    evento: str | None = Query(None),
     _usuario: dict = Depends(exigir_usuario),
 ) -> dict:
+    if evento is not None and not ID_EVENTO_VALIDO.match(evento):
+        raise HTTPException(
+            status_code=400,
+            detail={"erro": {"codigo": "parametro_invalido", "mensagem": "evento inválido"}},
+        )
     iniciar_registro_de_falhas()
     p = _resolver_periodo_ou_400(granularidade, periodo)
     linhas = obter_ou_calcular(
@@ -119,25 +139,32 @@ def get_funil_sdr(
         expediente_fim=settings.expediente_fim,
         numeros_captados=numeros_captados,
     )
-    # Velocímetro: inscritos da próxima Confraria (SED), fora do filtro de período.
-    evento = obter_ou_calcular(
-        "confraria:proxima",
-        settings.cache_ttl_metricas_segundos,
-        lambda: buscar_proxima_confraria(datetime.now(TZ_SP)),
-    )
+    # Velocímetro e cards do evento: o evento escolhido no filtro ou, sem
+    # escolha, o próximo (SED, qualquer título), fora do filtro de período.
+    if evento is None:
+        dados_evento = obter_ou_calcular(
+            "evento:proximo",
+            settings.cache_ttl_metricas_segundos,
+            lambda: buscar_proximo_evento(datetime.now(TZ_SP)),
+        )
+    else:
+        dados_evento = obter_ou_calcular(
+            f"evento:{evento}", settings.cache_ttl_metricas_segundos, lambda: buscar_evento(evento)
+        )
     return {
         **corpo,
         "evento": None
-        if evento is None
+        if dados_evento is None
         else {
-            "titulo": evento.titulo,
-            "data": evento.data,
+            "id": dados_evento.id,
+            "titulo": dados_evento.titulo,
+            "data": dados_evento.data,
             # Aqui inscrito = aprovado + pendente (recusado não conta), diferente da Geral.
-            "inscritos": evento.aprovados + evento.pendentes,
-            "aprovados": evento.aprovados,
-            "pendentes": evento.pendentes,
-            "rejeitados": evento.rejeitados,
-            "capacidade": evento.capacidade,
+            "inscritos": dados_evento.aprovados + dados_evento.pendentes,
+            "aprovados": dados_evento.aprovados,
+            "pendentes": dados_evento.pendentes,
+            "rejeitados": dados_evento.rejeitados,
+            "capacidade": dados_evento.capacidade,
         },
         "avisos": [f"fonte_indisponivel:{t}" for t in tabelas_com_falha()],
     }
