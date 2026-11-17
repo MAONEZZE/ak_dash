@@ -1,4 +1,4 @@
-"""Workers que espelham as planilhas (SDRs, Closers, funis LinkedIn/Instagram, Financeiro, Logs) no schema dash_new a cada N segundos. Substituem os fluxos n8n de métricas. Gravam só o que mudou (estado em memória, carregado do banco na subida e na virada do mês), no mês corrente em America/Sao_Paulo. Nunca criam usuário nem cargo: aba de quem não está em users/user_cargos é pulada."""
+"""Workers que espelham as planilhas (SDRs, inclusive o Funil SDR, Closers, funis LinkedIn/Instagram, Financeiro, Logs) no schema dash_new a cada N segundos. Substituem os fluxos n8n de métricas. Gravam só o que mudou (estado em memória, carregado do banco na subida e na virada do mês), no mês corrente em America/Sao_Paulo. Nunca criam usuário nem cargo: aba de quem não está em users/user_cargos é pulada."""
 from __future__ import annotations
 
 import logging
@@ -15,7 +15,16 @@ from app.fontes.google_sheets import LeitorSheets, criar_credenciais
 from app.periodo import TZ_SP, hoje_sp
 from app.planilha_financeiro import APELIDOS, COLUNAS_VENDA, ler_base_vendas
 from app.planilha_logs import COLUNAS_LOG, ler_logs
-from app.planilhas import COLUNAS_POR_TABELA, Aba, ler_linhas, linhas_metricas, normalizar, resolver_usuario
+from app.planilhas import (
+    COLUNAS_POR_TABELA,
+    Aba,
+    ler_linhas,
+    ler_metas_dashboard_sdr,
+    linhas_metricas,
+    normalizar,
+    resolver_sdr_do_dashboard,
+    resolver_usuario,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -27,10 +36,8 @@ class Planilha:
     cargo: str
 
 
-PLANILHAS = [
-    Planilha("sdrs", "metricas_sdrs", "sdr"),
-    Planilha("closers", "metricas_closers", "closer"),
-]
+SDRS = Planilha("sdrs", "metricas_sdrs", "sdr")
+CLOSERS = Planilha("closers", "metricas_closers", "closer")
 
 
 class Worker:
@@ -180,6 +187,124 @@ class Worker:
             self.executar_ciclo()
             if parar.wait(intervalo):
                 return
+
+
+class WorkerSdr(Worker):
+    """Planilha de SDRs: além de metricas_sdrs/metas (Geral e Time), espelha as abas por pessoa em metricas_funil_sdr e as metas da aba "Dashboard SDR" em metas_funil_sdr (página Funil SDR). Uma leitura da planilha por ciclo."""
+
+    def __init__(
+        self,
+        planilha_id: str,
+        ler_abas: Callable[[str], list[tuple[str, list[list]]]],
+        hoje: Callable[[], date] = hoje_sp,
+        agora: Callable[[], datetime] = lambda: datetime.now(TZ_SP),
+    ):
+        super().__init__(SDRS, planilha_id, ler_abas, hoje, agora)
+        self.funil: dict[tuple[int, str], dict] = {}
+        self.metas_funil: dict[tuple[str, str, int | None], int] = {}
+
+    def _carregar_estado(self, ano: int, mes: int) -> None:
+        super()._carregar_estado(ano, mes)
+        inicio = date(ano, mes, 1)
+        fim = date(ano, mes, monthrange(ano, mes)[1])
+        colunas = COLUNAS_POR_TABELA["metricas_funil_sdr"]
+        self.funil = {
+            (l["id_user"], l["data"]): l
+            for l in self._consultar(
+                "metricas_funil_sdr",
+                {"and": f"(data.gte.{inicio},data.lte.{fim})"},
+                "id_user,data," + ",".join(colunas),
+            )
+        }
+        self.metas_funil = {
+            (l["metrica"], l["periodo"], l["id_user"]): l["valor"]
+            for l in self._consultar("metas_funil_sdr", {}, "metrica,periodo,id_user,valor")
+        }
+
+    def _sincronizar_funil(self, abas: list[Aba], usuarios: list[dict], com_cargo: set[int], hoje: date) -> bool:
+        colunas = COLUNAS_POR_TABELA["metricas_funil_sdr"]
+        novas: dict[tuple[int, str], dict] = {}
+        for aba in abas:
+            u = resolver_usuario(aba.pessoa, usuarios)
+            if u is None or u["id"] not in com_cargo:
+                continue
+            desejadas = {}
+            for d, valores in aba.dias.items():
+                try:
+                    dia = date(hoje.year, hoje.month, d).isoformat()
+                except ValueError:
+                    continue
+                desejadas[(u["id"], dia)] = {"id_user": u["id"], "data": dia, **{c: valores.get(c) for c in colunas}}
+            for chave, linha in self.funil.items():
+                if linha["id_user"] == u["id"] and chave not in desejadas:
+                    desejadas[chave] = {**linha, **{c: None for c in colunas}}
+            novas.update({k: l for k, l in desejadas.items() if self.funil.get(k) != l})
+        if not novas:
+            return False
+        banco.upsert(
+            "metricas_funil_sdr",
+            [{**l, "atualizado_em": self.agora().isoformat()} for _, l in sorted(novas.items())],
+            on_conflict="id_user,data",
+        )
+        self.funil.update(novas)
+        return True
+
+    def _sincronizar_metas_funil(self, linhas: list[list], usuarios: list[dict], com_cargo: set[int]) -> bool:
+        lidas = ler_metas_dashboard_sdr(linhas)
+        if not (lidas.diarias or lidas.semanais or lidas.mensais):
+            raise RuntimeError("aba Dashboard SDR sem metas reconhecíveis; nada foi apagado")
+        sdrs = [u for u in usuarios if u["id"] in com_cargo]
+        desejadas: dict[tuple[str, str, int | None], int] = {}
+        for nome, metas in lidas.diarias.items():
+            u = resolver_sdr_do_dashboard(nome, sdrs)
+            if u is None:
+                if nome not in self._puladas:
+                    self._puladas.add(nome)
+                    logger.warning("Planilha sdrs: '%s' da aba Dashboard SDR sem user sdr, meta diária ignorada", nome)
+                continue
+            desejadas.update({(m, "dia", u["id"]): v for m, v in metas.items()})
+        desejadas.update({(m, "semana", None): v for m, v in lidas.semanais.items()})
+        desejadas.update({(m, "mes", None): v for m, v in lidas.mensais.items()})
+
+        novas = {k: v for k, v in desejadas.items() if self.metas_funil.get(k) != v}
+        apagadas = [k for k in self.metas_funil if k not in desejadas]
+        carimbo = self.agora().isoformat()
+        if novas:
+            banco.upsert(
+                "metas_funil_sdr",
+                [
+                    {"metrica": m, "periodo": p, "id_user": i, "valor": v, "atualizado_em": carimbo}
+                    for (m, p, i), v in sorted(novas.items(), key=lambda kv: (kv[0][0], kv[0][1], kv[0][2] or 0))
+                ],
+                on_conflict="metrica,periodo,id_user",
+            )
+            self.metas_funil.update(novas)
+        for m, p, i in apagadas:
+            banco.apagar(
+                "metas_funil_sdr",
+                {"metrica": f"eq.{m}", "periodo": f"eq.{p}", "id_user": "is.null" if i is None else f"eq.{i}"},
+            )
+            self.metas_funil.pop((m, p, i))
+        return bool(novas or apagadas)
+
+    def ciclo(self) -> None:
+        hoje = self.hoje()
+        if (hoje.year, hoje.month) != self.mes:
+            self._carregar_estado(hoje.year, hoje.month)
+
+        brutas = self.ler_abas(self.planilha_id)
+        abas = [a for titulo, linhas in brutas if (a := ler_linhas(titulo, linhas)) is not None]
+        usuarios = self._consultar("users", {}, "id,nome")
+        com_cargo = {l["id_user"] for l in self._consultar("user_cargos", {"cargo": f"eq.{self.planilha.cargo}"}, "id_user")}
+
+        gravou = self._sincronizar(abas, usuarios, com_cargo, hoje)
+        if self._sincronizar_funil(abas, usuarios, com_cargo, hoje):
+            gravou = True
+        dashboard = next((linhas for titulo, linhas in brutas if normalizar(titulo) == "dashboard sdr"), None)
+        if dashboard is not None and self._sincronizar_metas_funil(dashboard, usuarios, com_cargo):
+            gravou = True
+        if gravou:
+            cache.invalidar()
 
 
 class WorkerFunil(Worker):
@@ -529,16 +654,14 @@ def iniciar(config: Settings) -> threading.Event:
         MOTIVO_INATIVOS = f"GOOGLE_SERVICE_ACCOUNT_JSON inválido: {type(erro).__name__}"
         logger.warning("Workers das planilhas não subiram: %s", MOTIVO_INATIVOS)
         return parar
-    ids = {
-        "sdrs": config.planilha_sdrs_id,
-        "closers": config.planilha_closers_id,
-    }
-    for p in PLANILHAS:
-        if not ids[p.nome]:
-            continue
-        w = Worker(p, ids[p.nome], LeitorSheets(credenciais).abas)
-        ATIVOS.append(w)
-        threading.Thread(target=w.rodar, args=(parar, config.worker_intervalo_segundos), name=f"worker-{p.nome}", daemon=True).start()
+    if config.planilha_sdrs_id:
+        sdrs = WorkerSdr(config.planilha_sdrs_id, LeitorSheets(credenciais).abas)
+        ATIVOS.append(sdrs)
+        threading.Thread(target=sdrs.rodar, args=(parar, config.worker_intervalo_segundos), name="worker-sdrs", daemon=True).start()
+    if config.planilha_closers_id:
+        closers = Worker(CLOSERS, config.planilha_closers_id, LeitorSheets(credenciais).abas)
+        ATIVOS.append(closers)
+        threading.Thread(target=closers.rodar, args=(parar, config.worker_intervalo_segundos), name="worker-closers", daemon=True).start()
     for canal, planilha_id in (("linkedin", config.planilha_funil_linkedin_id), ("instagram", config.planilha_funil_instagram_id)):
         if not planilha_id:
             continue

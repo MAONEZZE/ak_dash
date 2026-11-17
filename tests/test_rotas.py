@@ -18,6 +18,7 @@ from app.auth import exigir_usuario
 from app.dominios.comercial import banco as comercial_banco_mod
 from app.dominios.financeiro import banco as financeiro_banco_mod
 from app.dominios.funil import banco as funil_banco_mod
+from app.dominios.funil import sdr as funil_sdr_mod
 from app.dominios.geral import banco as geral_banco_mod
 from app.dominios.geral import rotas as geral_rotas_mod
 from app.dominios.pessoas import banco as pessoas_banco_mod
@@ -40,6 +41,12 @@ def _fake_query(tabela, filtros=None, schema="dash", colunas="*", **kwargs):
         return _USER_CARGOS
     if tabela == "contas_funil":
         return _CONTAS
+    if tabela == "metricas_funil_sdr":
+        return [
+            {"id_user": 9, "data": "2026-11-03", "abordagens": 12, "respondidos": 5, "inscricoes_realizadas": 3, "indicacoes": 2, "reunioes_agendadas": 1}
+        ]
+    if tabela == "metas_funil_sdr":
+        return [{"metrica": "inscricoes_realizadas", "periodo": "mes", "id_user": None, "valor": 88}]
     if tabela == "metricas_contas":
         return [
             {
@@ -61,7 +68,7 @@ def _fake_query(tabela, filtros=None, schema="dash", colunas="*", **kwargs):
 
 
 def _sobrescrever_query(monkeypatch) -> None:
-    for mod in (pessoas_banco_mod, comercial_banco_mod, geral_banco_mod, financeiro_banco_mod, funil_banco_mod, metas_mod):
+    for mod in (pessoas_banco_mod, comercial_banco_mod, geral_banco_mod, financeiro_banco_mod, funil_banco_mod, funil_sdr_mod, metas_mod):
         monkeypatch.setattr(mod, "query", _fake_query)
 
 
@@ -78,7 +85,7 @@ def test_saude():
 
 
 def test_saude_mostra_status_dos_workers(monkeypatch):
-    w = workers.Worker(workers.PLANILHAS[0], "ID", lambda _id: [])
+    w = workers.Worker(workers.SDRS, "ID", lambda _id: [])
     w.status = {"ultima_leitura_ok": "2026-10-27T10:00:00-03:00", "ultimo_erro": None}
     monkeypatch.setattr(workers, "ATIVOS", [w])
     monkeypatch.setattr(workers, "MOTIVO_INATIVOS", None)
@@ -300,3 +307,66 @@ def test_funil_canal_invalido_404(monkeypatch):
     resposta = _client(monkeypatch).get("/funil/tiktok", params={"granularidade": "mes", "periodo": "2026-11"})
     assert resposta.status_code == 404
     assert resposta.json() == {"erro": {"codigo": "canal_invalido", "mensagem": "canal deve ser linkedin ou instagram"}}
+
+
+def test_funil_sdr_200_com_sdrs_e_metricas_do_dashboard(monkeypatch):
+    client = _client(monkeypatch)
+
+    # Uma conta por canal, com 7 números captados no período.
+    def query_com_numeros(tabela, *a, **kw):
+        if tabela == "metricas_contas":
+            return [{"id_conta": 1, "data": "2026-11-02", "numeros_captados": 7}]
+        return _fake_query(tabela, *a, **kw)
+
+    monkeypatch.setattr(funil_banco_mod, "query", query_com_numeros)
+    resposta = client.get("/funil-sdr", params={"granularidade": "mes", "periodo": "2026-11"})
+    assert resposta.status_code == 200
+    corpo = resposta.json()
+    assert set(corpo) == {"periodo", "dias_uteis", "avisos", "metricas_time", "funil", "sdrs", "evento"}
+    assert corpo["evento"] is None  # sem Confraria agendada
+    # Oportunidades = números captados LinkedIn (7) + Instagram (7) + indicações dos SDRs (2).
+    assert corpo["funil"] == {
+        "numeros_captados": 14, "indicacoes": 2, "oportunidades": 16, "abordados": 12, "respondidos": 5, "inscritos": 3,
+    }
+    assert [(s["id_user"], s["nome"], s["metricas"]["inscricoes_realizadas"]) for s in corpo["sdrs"]] == [("9", "Nathan", 3)]
+    inscricoes = corpo["metricas_time"][0]
+    assert (inscricoes["metrica"], inscricoes["realizado"], inscricoes["meta_periodo"]) == ("inscricoes_realizadas", 3, 88)
+    assert corpo["avisos"] == []
+
+
+def test_funil_sdr_traz_a_proxima_confraria_para_o_velocimetro(monkeypatch):
+    client = _client(monkeypatch)
+
+    def query_com_evento(tabela, *a, **kw):
+        if tabela == "events":
+            return [{"id": "e1", "title": "Confraria Akeel SP", "event_date": "2026-11-20T22:00:00", "capacity": 80}]
+        if tabela == "registrations":
+            return [{"event_id": "e1", "status": s} for s in ("pending", "pending", "approved", "rejected")]
+        return _fake_query(tabela, *a, **kw)
+
+    monkeypatch.setattr(geral_banco_mod, "query", query_com_evento)
+    corpo = client.get("/funil-sdr", params={"granularidade": "mes", "periodo": "2026-11"}).json()
+    assert corpo["evento"] == {
+        "titulo": "Confraria Akeel SP", "data": "2026-11-20T22:00:00",
+        "inscritos": 3, "aprovados": 1, "pendentes": 2, "rejeitados": 1, "capacidade": 80,
+    }
+
+
+def test_funil_sdr_periodo_invalido_400(monkeypatch):
+    resposta = _client(monkeypatch).get("/funil-sdr", params={"granularidade": "mes", "periodo": "xx"})
+    assert resposta.status_code == 400
+
+
+def test_funil_sdr_no_filtro_de_dia_busca_a_semana_ate_o_dia_para_o_grafico(monkeypatch):
+    client = _client(monkeypatch)
+    filtros_sdr: list[dict] = []
+
+    def query_espia(tabela, filtros=None, *a, **kw):
+        if tabela == "metricas_funil_sdr":
+            filtros_sdr.append(filtros)
+        return _fake_query(tabela, filtros, *a, **kw)
+
+    monkeypatch.setattr(funil_sdr_mod, "query", query_espia)
+    resposta = client.get("/funil-sdr", params={"granularidade": "dia", "periodo": "2026-11-16"})
+    assert resposta.status_code == 200
+    assert filtros_sdr == [{"and": "(data.gte.2026-11-10,data.lte.2026-11-16)"}]

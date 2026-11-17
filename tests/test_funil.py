@@ -50,3 +50,27 @@ def test_buscar_contas_soma_metricas_por_conta_no_periodo(monkeypatch):
     filtros_metricas = next(c["filtros"] for c in chamadas if c["tabela"] == "metricas_contas")
     assert filtros_metricas["id_conta"] == "in.(1,2)"
     assert filtros_metricas["and"] == "(data.gte.2026-11-01,data.lte.2026-11-30)"
+
+
+def test_buscar_contas_serie_desde_inicio_serie_mas_soma_so_o_periodo(monkeypatch):
+    """Filtro de dia: a série traz a semana até o dia (gráfico com linha); o total é só do dia."""
+    chamadas: list[dict] = []
+    vazio = {c: None for c in COLUNAS_POR_TABELA["metricas_contas"]}
+
+    def fake(tabela, filtros=None, schema=None, colunas="*", **kw):
+        chamadas.append({"tabela": tabela, "filtros": filtros})
+        if tabela == "contas_funil":
+            return [{"id": 1, "nome": "Jacob", "id_seller": None}]
+        return [
+            {**vazio, "id_conta": 1, "data": "2026-11-10", "fups": 5},
+            {**vazio, "id_conta": 1, "data": "2026-11-16", "fups": 2},
+        ]
+
+    monkeypatch.setattr(funil_banco, "query", fake)
+
+    (conta,) = funil_banco.buscar_contas("linkedin", date(2026, 11, 16), date(2026, 11, 16), date(2026, 11, 10))
+
+    assert conta.metricas["fups"] == 2
+    assert [d["data"] for d in conta.serie] == ["2026-11-10", "2026-11-16"]
+    filtros_metricas = next(c["filtros"] for c in chamadas if c["tabela"] == "metricas_contas")
+    assert filtros_metricas["and"] == "(data.gte.2026-11-10,data.lte.2026-11-16)"

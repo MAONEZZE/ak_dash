@@ -18,7 +18,11 @@ class ContaFunil:
     serie: list[dict]
 
 
-def buscar_contas(canal: str, inicio: date, fim: date) -> list[ContaFunil]:
+def buscar_contas(canal: str, inicio: date, fim: date, inicio_serie: date | None = None) -> list[ContaFunil]:
+    """`metricas` soma de `inicio` a `fim`; `serie` começa em `inicio_serie`
+    (padrão `inicio`) — no filtro de dia, a série traz os dias anteriores
+    pro gráfico ter linha."""
+    inicio_serie = inicio_serie or inicio
     colunas_metricas = COLUNAS_POR_TABELA["metricas_contas"]
 
     contas = query("contas_funil", {"canal": f"eq.{canal}"}, colunas="id,nome,id_seller")
@@ -31,7 +35,7 @@ def buscar_contas(canal: str, inicio: date, fim: date) -> list[ContaFunil]:
         "metricas_contas",
         {
             "id_conta": f"in.({','.join(str(i) for i in ids)})",
-            "and": f"(data.gte.{inicio.isoformat()},data.lte.{fim.isoformat()})",
+            "and": f"(data.gte.{inicio_serie.isoformat()},data.lte.{fim.isoformat()})",
         },
         colunas="id_conta,data," + ",".join(colunas_metricas),
     )
@@ -41,6 +45,8 @@ def buscar_contas(canal: str, inicio: date, fim: date) -> list[ContaFunil]:
     for linha in sorted(linhas, key=lambda l: l["data"]):
         do_dia = {m: linha.get(m) or 0 for m in colunas_metricas}
         series[linha["id_conta"]].append({"data": linha["data"], "metricas": do_dia})
+        if linha["data"] < inicio.isoformat():
+            continue
         acumulado = somas[linha["id_conta"]]
         for m in colunas_metricas:
             acumulado[m] += do_dia[m]

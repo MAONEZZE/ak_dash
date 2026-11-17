@@ -164,18 +164,31 @@ def buscar_confrarias_do_mes(inicio: date, fim: date) -> list[EventoInscricoes]:
     """
     de = _instante_utc(datetime.combine(inicio, time.min, tzinfo=TZ_SP))
     ate = _instante_utc(datetime.combine(fim + timedelta(days=1), time.min, tzinfo=TZ_SP))
+    return _buscar_confrarias(f'(event_date.gte."{de}",event_date.lt."{ate}")', LIMITE_EVENTOS)
+
+
+def buscar_proxima_confraria(agora: datetime) -> EventoInscricoes | None:
+    """A Confraria com `event_date` a partir de `agora` mais próxima, com as
+    inscrições dela (mesma contagem da Geral) — o velocímetro do Funil SDR.
+    `None` quando não há nenhuma agendada (ou sem as envs do SED)."""
+    eventos = _buscar_confrarias(f'(event_date.gte."{_instante_utc(agora)}")', 1)
+    return eventos[0] if eventos else None
+
+
+def _buscar_confrarias(filtro_data: str, limite: int) -> list[EventoInscricoes]:
     eventos = query(
         "events",
         {
-            "and": f'(event_date.gte."{de}",event_date.lt."{ate}")',
+            "and": filtro_data,
             "title": FILTRO_TITULO_EVENTOS,
             "order": "event_date.asc",
+            "limit": str(limite),
         },
         schema=settings.supabase_inscricoes_schema or "public",
         colunas="id,title,event_date,capacity",
         url_base=settings.supabase_inscricoes_url,
         service_key=settings.supabase_inscricoes_service_key,
-    )[:LIMITE_EVENTOS]
+    )[:limite]
     if not eventos:
         return []
 
