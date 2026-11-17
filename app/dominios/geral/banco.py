@@ -167,23 +167,44 @@ def buscar_confrarias_do_mes(inicio: date, fim: date) -> list[EventoInscricoes]:
     return _buscar_confrarias(f'(event_date.gte."{de}",event_date.lt."{ate}")', LIMITE_EVENTOS)
 
 
-def buscar_proxima_confraria(agora: datetime) -> EventoInscricoes | None:
-    """A Confraria com `event_date` a partir de `agora` mais próxima, com as
-    inscrições dela (mesma contagem da Geral) — o velocímetro do Funil SDR.
-    `None` quando não há nenhuma agendada (ou sem as envs do SED)."""
-    eventos = _buscar_confrarias(f'(event_date.gte."{_instante_utc(agora)}")', 1)
+def buscar_proximo_evento(agora: datetime) -> EventoInscricoes | None:
+    """O evento (qualquer título, não só Confraria) com `event_date` a partir de
+    `agora` mais próximo, com as inscrições dele — padrão do velocímetro do
+    Funil SDR. `None` quando não há nenhum agendado (ou sem as envs do SED)."""
+    eventos = _buscar_confrarias(f'(event_date.gte."{_instante_utc(agora)}")', 1, so_confrarias=False)
     return eventos[0] if eventos else None
 
 
-def _buscar_confrarias(filtro_data: str, limite: int) -> list[EventoInscricoes]:
+def listar_proximos_eventos(agora: datetime, limite: int = LIMITE_EVENTOS) -> list[dict]:
+    """Opções do filtro de evento do Funil SDR: todos os eventos a partir de
+    `agora` (qualquer título), do mais próximo ao mais distante, só
+    id/título/data — sem contar inscrições, que só o escolhido precisa."""
     eventos = query(
         "events",
-        {
-            "and": filtro_data,
-            "title": FILTRO_TITULO_EVENTOS,
-            "order": "event_date.asc",
-            "limit": str(limite),
-        },
+        {"and": f'(event_date.gte."{_instante_utc(agora)}")', "order": "event_date.asc", "limit": str(limite)},
+        schema=settings.supabase_inscricoes_schema or "public",
+        colunas="id,title,event_date",
+        url_base=settings.supabase_inscricoes_url,
+        service_key=settings.supabase_inscricoes_service_key,
+    )[:limite]
+    return [{"id": str(e["id"]), "titulo": e.get("title") or "Sem título", "data": e["event_date"]} for e in eventos]
+
+
+def buscar_evento(id_evento: str) -> EventoInscricoes | None:
+    """Um evento pelo id (qualquer título), com as inscrições — o escolhido no
+    filtro de evento. Quem chama valida o id antes: ele vai dentro do filtro do PostgREST."""
+    eventos = _buscar_confrarias(f'(id.eq."{id_evento}")', 1, so_confrarias=False)
+    return eventos[0] if eventos else None
+
+
+def _buscar_confrarias(filtro_data: str, limite: int, *, so_confrarias: bool = True) -> list[EventoInscricoes]:
+    """`so_confrarias=False` tira o filtro de título: o Funil SDR olha qualquer evento."""
+    filtros = {"and": filtro_data, "order": "event_date.asc", "limit": str(limite)}
+    if so_confrarias:
+        filtros["title"] = FILTRO_TITULO_EVENTOS
+    eventos = query(
+        "events",
+        filtros,
         schema=settings.supabase_inscricoes_schema or "public",
         colunas="id,title,event_date,capacity",
         url_base=settings.supabase_inscricoes_url,
