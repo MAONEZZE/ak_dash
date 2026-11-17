@@ -5,7 +5,7 @@ mesmo `buscar_totais` do Comercial (ver tests/test_banco_comercial.py).
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 
 import pytest
 
@@ -292,6 +292,27 @@ def test_limites_do_mes_nunca_usam_offset_numerico(monkeypatch):
     valor = chamadas[0]["filtros"]["and"]
     assert '"2027-01-01T03:00:00Z"' in valor
     assert "+" not in valor
+
+
+def test_proxima_confraria_busca_a_partir_de_agora_so_uma_com_inscricoes(monkeypatch):
+    chamadas = _mockar_duas_queries(
+        monkeypatch,
+        [{"id": "e1", "title": "Confraria Akeel SP", "event_date": "2026-11-20T22:00:00", "capacity": 80}],
+        [{"event_id": "e1", "status": "approved"}, {"event_id": "e1", "status": "rejected"}],
+    )
+    evento = banco_mod.buscar_proxima_confraria(datetime(2026, 11, 17, 10, 30, tzinfo=banco_mod.TZ_SP))
+    assert (evento.titulo, evento.data, evento.inscritos, evento.capacidade) == (
+        "Confraria Akeel SP", "2026-11-20T22:00:00", 2, 80,
+    )
+    assert chamadas[0]["filtros"]["and"] == '(event_date.gte."2026-11-17T13:30:00Z")'
+    assert chamadas[0]["filtros"]["title"] == "ilike.*confraria akeel*"
+    assert chamadas[0]["filtros"]["order"] == "event_date.asc"
+    assert chamadas[0]["filtros"]["limit"] == "1"
+
+
+def test_sem_proxima_confraria_devolve_none(monkeypatch):
+    _mockar_duas_queries(monkeypatch, [], [])
+    assert banco_mod.buscar_proxima_confraria(datetime(2026, 11, 17, tzinfo=banco_mod.TZ_SP)) is None
 
 
 # --- buscar_logs (dash2.logs_pipedrive, espelho da planilha de logs)

@@ -251,6 +251,7 @@ def test_iniciar_sobe_um_worker_por_planilha_configurada(monkeypatch):
 
     assert sorted(w.planilha.nome for w in workers.ATIVOS) == ["closers", "sdrs"]
     assert sorted(rodados) == [("closers", "C", 5.0), ("sdrs", "S", 5.0)]
+    assert isinstance(next(w for w in workers.ATIVOS if w.planilha.nome == "sdrs"), workers.WorkerSdr)
     assert isinstance(parar, threading.Event)
     assert parar.is_set() is False
 
@@ -916,3 +917,97 @@ def test_worker_funil_grava_metricas_das_contas_e_anula_dia_apagado(monkeypatch)
     w.ciclo()
 
     assert [u for u in banco.upserts if u[0] == "metricas_contas"] == []
+
+
+# ---- WorkerSdr (página Funil SDR) ----
+
+# Formato atual das abas por SDR: "Oportunidades" não é gravada (a página calcula).
+CABECALHO_SDR = ["Dia", "Oportunidades", "Abordagens", "Responderam", "Inscrições realizadas", "Indicações Captadas", "Reuniões Agendadas"]
+DASHBOARD_SDR = [
+    [None, "📊 DASHBOARD DE SDR"],
+    [None, "Métrica", "Meta Semanal [Editar]", "Meta Mensal [Editar]", "Observações", None, "Vendedor", "Inscrições realizadas", "Indicações captadas", "Reuniões agendadas"],
+    [None, "Inscrições realizadas", 55, 88, "Meta do SDR", None, "Juca", 7, 1, 2],
+    [None, "Indicações captadas", 20, 88, "Meta do SDR", None, "Jenni", 6, 1, 3],
+    [None, "Reuniões agendadas", 10, 44, "Meta do SDR", None, "SDR3", 0, 0, 0],
+    [None, "Data de referência", 46342, None, None, None, "META DIÁRIA TOTAL", 13, 2, 5],
+]
+
+
+def _banco_sdr(**extra):
+    return _Banco({
+        "users": [{"id": 11, "nome": "Juca"}, {"id": 14, "nome": "Jennifer"}, {"id": 4, "nome": "Duda"}],
+        "user_cargos": [{"id_user": 11}, {"id_user": 14}],
+        **extra,
+    })
+
+
+def _worker_sdr(abas, hoje=date(2026, 11, 16)):
+    return workers.WorkerSdr("ID_SDRS", lambda _id: abas, hoje=lambda: hoje)
+
+
+def test_worker_sdr_grava_abas_das_pessoas_em_metricas_funil_sdr_e_ignora_sdr3(monkeypatch):
+    banco = _banco_sdr()
+    _instalar(monkeypatch, banco)
+    w = _worker_sdr([
+        ("Juca", [CABECALHO_SDR, ["Meta diária", None, None, None, 4, 1, 2], [], [3, 99, 20, 6, 3, 1, 1]]),
+        ("Jennifer", [CABECALHO_SDR, ["Meta diária", None, None, None, 4, 1, 2], [], [4, None, 34, 5, 0, 1, 0]]),
+        ("SDR3", [CABECALHO_SDR, ["Meta diária", 0, 0, 0, 0, 0, 0], [], [3, 9, 9, 9, 9, 9, 9]]),
+    ])
+
+    w.ciclo()
+
+    funil = next(linhas for tabela, linhas, _ in banco.upserts if tabela == "metricas_funil_sdr")
+    assert _sem_carimbo(funil) == [
+        {"id_user": 11, "data": "2026-11-03", "abordagens": 20, "respondidos": 6, "inscricoes_realizadas": 3, "indicacoes": 1, "reunioes_agendadas": 1},
+        {"id_user": 14, "data": "2026-11-04", "abordagens": 34, "respondidos": 5, "inscricoes_realizadas": 0, "indicacoes": 1, "reunioes_agendadas": 0},
+    ]
+    assert next(o for t, _, o in banco.upserts if t == "metricas_funil_sdr") == "id_user,data"
+    # Geral/Time continuam lendo metricas_sdrs
+    assert any(t == "metricas_sdrs" for t, _, _ in banco.upserts)
+
+
+def test_worker_sdr_grava_metas_da_aba_dashboard_sdr(monkeypatch):
+    banco = _banco_sdr()
+    _instalar(monkeypatch, banco)
+    w = _worker_sdr([("Dashboard SDR", DASHBOARD_SDR)])
+
+    w.ciclo()
+
+    (tabela, linhas, on_conflict), = [u for u in banco.upserts if u[0] == "metas_funil_sdr"]
+    assert on_conflict == "metrica,periodo,id_user"
+    assert {(l["metrica"], l["periodo"], l["id_user"]): l["valor"] for l in linhas} == {
+        ("inscricoes_realizadas", "dia", 11): 7, ("indicacoes", "dia", 11): 1, ("reunioes_agendadas", "dia", 11): 2,
+        # "Jenni" na aba casa com a user Jennifer
+        ("inscricoes_realizadas", "dia", 14): 6, ("indicacoes", "dia", 14): 1, ("reunioes_agendadas", "dia", 14): 3,
+        ("inscricoes_realizadas", "semana", None): 55, ("indicacoes", "semana", None): 20, ("reunioes_agendadas", "semana", None): 10,
+        ("inscricoes_realizadas", "mes", None): 88, ("indicacoes", "mes", None): 88, ("reunioes_agendadas", "mes", None): 44,
+    }
+
+
+def test_worker_sdr_so_regrava_meta_que_mudou_e_apaga_a_que_saiu(monkeypatch):
+    banco = _banco_sdr(metas_funil_sdr=[
+        {"metrica": "inscricoes_realizadas", "periodo": "semana", "id_user": None, "valor": 50},
+        {"metrica": "ligacoes_efetuadas", "periodo": "mes", "id_user": None, "valor": 9},
+    ])
+    _instalar(monkeypatch, banco)
+    w = _worker_sdr([("Dashboard SDR", DASHBOARD_SDR)])
+    w.ciclo()
+    banco.upserts.clear()
+
+    w.ciclo()
+
+    assert banco.upserts == []
+    assert banco.apagados == [
+        ("metas_funil_sdr", {"metrica": "eq.ligacoes_efetuadas", "periodo": "eq.mes", "id_user": "is.null"}),
+    ]
+
+
+def test_worker_sdr_dashboard_irreconhecivel_falha_sem_apagar_metas(monkeypatch):
+    banco = _banco_sdr(metas_funil_sdr=[{"metrica": "inscricoes_realizadas", "periodo": "mes", "id_user": None, "valor": 88}])
+    _instalar(monkeypatch, banco)
+    w = _worker_sdr([("Dashboard SDR", [["layout novo"]])])
+
+    w.executar_ciclo()
+
+    assert banco.apagados == []
+    assert "Dashboard SDR" in w.status["ultimo_erro"]["mensagem"]

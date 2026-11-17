@@ -68,3 +68,27 @@ def test_ler_linhas_mapeia_cabecalhos_das_planilhas_de_funil():
     assert instagram.pessoa == "Mary"
     assert instagram.dias[11] == {"abordagens": None, "fups": None, "respondidos": None, "numeros_captados": 6, "indicacoes": None}
     assert instagram.metas == {"abordagens": 50, "fups": 50, "respondidos": 20, "numeros_captados": 7, "indicacoes": 0}
+
+
+def test_ler_metas_dashboard_sdr_acha_as_tabelas_pelos_rotulos():
+    linhas = [
+        [],
+        [None, "Métrica", "Meta Semanal [Editar]", "Meta Mensal [Editar]", None, None, "Vendedor", "Inscrições realizadas", "Reuniões agendadas"],
+        [None, "Inscrições realizadas", 55, 88, None, None, "Juca", 7, 2],
+        [None, "Reuniões agendadas", 10, 44, None, None, "Jenni", 6],
+        [None, "Data de referência", 1, 2, None, None, "META DIÁRIA TOTAL", 13, 2],
+    ]
+
+    metas = planilhas.ler_metas_dashboard_sdr(linhas)
+
+    assert metas.diarias == {"Juca": {"inscricoes_realizadas": 7, "reunioes_agendadas": 2}, "Jenni": {"inscricoes_realizadas": 6}}
+    assert metas.semanais == {"inscricoes_realizadas": 55, "reunioes_agendadas": 10}
+    assert metas.mensais == {"inscricoes_realizadas": 88, "reunioes_agendadas": 44}
+
+
+def test_resolver_sdr_do_dashboard_casa_apelido_pelo_comeco_do_nome():
+    usuarios = [{"id": 11, "nome": "Juca"}, {"id": 14, "nome": "Jennifer"}, {"id": 15, "nome": "Jéssica"}]
+    assert planilhas.resolver_sdr_do_dashboard("Jenni", usuarios)["id"] == 14
+    assert planilhas.resolver_sdr_do_dashboard("Juca", usuarios)["id"] == 11
+    assert planilhas.resolver_sdr_do_dashboard("Je", usuarios) is None  # ambíguo
+    assert planilhas.resolver_sdr_do_dashboard("SDR3", usuarios) is None

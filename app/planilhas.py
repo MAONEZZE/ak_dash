@@ -34,6 +34,7 @@ COLUNA_POR_CABECALHO: dict[str, str] = {
     "mensagem de abordagem": "mensagens_abordagem",
     "follow de abordagem": "follows_abordagem",
     "respondidos": "respondidos",
+    "responderam": "respondidos",
     "abordagens feita": "abordagens",
     "follow up": "fups",
 }
@@ -110,6 +111,9 @@ def resolver_usuario(nome_aba: str, usuarios: list[dict]) -> dict | None:
 COLUNAS_POR_TABELA: dict[str, list[str]] = {
     "metricas_sellers": ["fups", "numeros_captados", "indicacoes"],
     "metricas_sdrs": ["ligacoes_efetuadas", "ligacoes_realizadas", "inscricoes_realizadas", "indicacoes", "reunioes_agendadas"],
+    # Colunas atuais das abas por SDR. "Oportunidades" da planilha não é lida: na página ela é
+    # números captados (funis LinkedIn + Instagram) + indicações captadas.
+    "metricas_funil_sdr": ["abordagens", "respondidos", "inscricoes_realizadas", "indicacoes", "reunioes_agendadas"],
     "metricas_closers": [
         "ligacoes_agendadas",
         "ligacoes_realizadas",
@@ -131,3 +135,74 @@ COLUNAS_POR_TABELA: dict[str, list[str]] = {
         "indicacoes",
     ],
 }
+
+
+@dataclass(frozen=True)
+class MetasDashboardSdr:
+    # nome como está na aba ("Juca", "Jenni") -> métrica -> meta diária
+    diarias: dict[str, dict[str, int]]
+    semanais: dict[str, int]
+    mensais: dict[str, int]
+
+
+def _achar(linhas: list[list], prefixo: str) -> tuple[int, int] | None:
+    for i, linha in enumerate(linhas):
+        for j, c in enumerate(linha):
+            if isinstance(c, str) and normalizar(c).startswith(prefixo):
+                return i, j
+    return None
+
+
+def ler_metas_dashboard_sdr(linhas: list[list]) -> MetasDashboardSdr:
+    """Metas da aba "Dashboard SDR", achadas pelos rótulos e não por posição fixa.
+
+    Tabela "Vendedor": uma linha por SDR com a meta diária de cada métrica, até
+    "META DIÁRIA TOTAL" ou linha vazia. Tabela "Meta Semanal [Editar]" /
+    "Meta Mensal [Editar]": uma linha por métrica, rótulo na coluna "Métrica".
+    """
+    diarias: dict[str, dict[str, int]] = {}
+    if (pos := _achar(linhas, "vendedor")) is not None:
+        i, j = pos
+        cabecalho = linhas[i]
+        colunas = {
+            k: COLUNA_POR_CABECALHO[normalizar(c)]
+            for k, c in enumerate(cabecalho)
+            if k > j and isinstance(c, str) and normalizar(c) in COLUNA_POR_CABECALHO
+        }
+        for linha in linhas[i + 1:]:
+            nome = _celula(linha, j)
+            if not isinstance(nome, str) or not nome.strip() or normalizar(nome).startswith("meta diaria total"):
+                break
+            diarias[nome.strip()] = {
+                m: v for k, m in colunas.items() if (v := _inteiro(_celula(linha, k))) is not None
+            }
+
+    def por_metrica(prefixo: str) -> dict[str, int]:
+        pos = _achar(linhas, prefixo)
+        if pos is None:
+            return {}
+        i, j = pos
+        # rótulos na coluna "Métrica" do mesmo cabeçalho
+        rotulos = next((k for k, c in enumerate(linhas[i]) if isinstance(c, str) and normalizar(c) == "metrica"), None)
+        if rotulos is None:
+            return {}
+        metas: dict[str, int] = {}
+        for linha in linhas[i + 1:]:
+            rotulo = _celula(linha, rotulos)
+            metrica = COLUNA_POR_CABECALHO.get(normalizar(rotulo)) if isinstance(rotulo, str) else None
+            if metrica is None:
+                break
+            if (v := _inteiro(_celula(linha, j))) is not None:
+                metas[metrica] = v
+        return metas
+
+    return MetasDashboardSdr(diarias=diarias, semanais=por_metrica("meta semanal"), mensais=por_metrica("meta mensal"))
+
+
+def resolver_sdr_do_dashboard(nome: str, usuarios: list[dict]) -> dict | None:
+    """Nome da tabela "Vendedor" -> user. Exato primeiro; senão, o único user cujo nome começa com ele ("Jenni" -> "Jennifer")."""
+    if (u := resolver_usuario(nome, usuarios)) is not None:
+        return u
+    alvo = normalizar(nome)
+    candidatos = [u for u in usuarios if normalizar(u["nome"]).startswith(alvo)]
+    return candidatos[0] if len(candidatos) == 1 else None
