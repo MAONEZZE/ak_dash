@@ -24,6 +24,19 @@ def test_meta_do_time_segue_a_granularidade():
     assert METAS.do_time(resolver_periodo("dia", "2026-11-16"), [14], "reunioes_agendadas") is None
 
 
+def test_meta_do_sdr_e_a_parte_dele_na_meta_do_time_pela_diaria():
+    ids = [11, 14]
+    # dia: a própria diária
+    assert METAS.da_pessoa(resolver_periodo("dia", "2026-11-16"), ids, 11, "inscricoes_realizadas") == 7
+    # mês: 88 × 7/13 e 88 × 6/13
+    assert METAS.da_pessoa(resolver_periodo("mes", "2026-11"), ids, 11, "inscricoes_realizadas") == 47
+    assert METAS.da_pessoa(resolver_periodo("mes", "2026-11"), ids, 14, "inscricoes_realizadas") == 41
+    # custom: diária × dias úteis (16 a 20/11 = 5)
+    assert METAS.da_pessoa(resolver_periodo("custom", "2026-11-16..2026-11-20"), ids, 14, "inscricoes_realizadas") == 30
+    # sem diária do SDR, sem meta
+    assert METAS.da_pessoa(resolver_periodo("mes", "2026-11"), [11, 99], 99, "inscricoes_realizadas") is None
+
+
 def test_montar_resposta_soma_por_sdr_e_calcula_metricas_do_time():
     periodo = resolver_periodo("mes", "2026-11")
     sdrs = [{"id": 11, "nome": "Juca", "imagem_url": None}, {"id": 14, "nome": "Jennifer", "imagem_url": "j.png"}]

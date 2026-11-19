@@ -197,6 +197,29 @@ def buscar_evento(id_evento: str) -> EventoInscricoes | None:
     return eventos[0] if eventos else None
 
 
+def contar_inscritos_no_periodo(id_evento: str, inicio: date, fim: date) -> int:
+    """Inscrições `approved`/`pending` do evento feitas (`created_at`) de
+    `inicio` a `fim`, dias de São Paulo — velocímetro do Funil SDR, que segue o
+    filtro de data. Mesmo formato de limites de `buscar_confrarias_do_mes`.
+    Quem chama valida o id: ele vai dentro do filtro do PostgREST."""
+    de = _instante_utc(datetime.combine(inicio, time.min, tzinfo=TZ_SP))
+    ate = _instante_utc(datetime.combine(fim + timedelta(days=1), time.min, tzinfo=TZ_SP))
+    return len(
+        query(
+            "registrations",
+            {
+                "event_id": f"eq.{id_evento}",
+                "status": "in.(approved,pending)",
+                "and": f'(created_at.gte."{de}",created_at.lt."{ate}")',
+            },
+            schema=settings.supabase_inscricoes_schema or "public",
+            colunas="id",
+            url_base=settings.supabase_inscricoes_url,
+            service_key=settings.supabase_inscricoes_service_key,
+        )
+    )
+
+
 def _buscar_confrarias(filtro_data: str, limite: int, *, so_confrarias: bool = True) -> list[EventoInscricoes]:
     """`so_confrarias=False` tira o filtro de título: o Funil SDR olha qualquer evento."""
     filtros = {"and": filtro_data, "order": "event_date.asc", "limit": str(limite)}

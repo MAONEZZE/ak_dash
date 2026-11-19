@@ -33,6 +33,16 @@ class MetasFunilSdr:
         dias = 1 if periodo.granularidade == "dia" else dias_uteis_totais(periodo.inicio, periodo.fim)
         return sum(diarias) * dias
 
+    def da_pessoa(self, periodo: Periodo, ids: list[int], id_user: int, metrica: str) -> int | None:
+        """Parte do SDR na meta do time, na proporção da meta diária dele entre as do time
+        (dia/ano/custom: diária × dias úteis; semana/mês: fatia da meta editável). Sem diária, `None`."""
+        diaria = self.diarias.get((id_user, metrica))
+        soma = sum(self.diarias.get((i, metrica), 0) for i in ids)
+        do_time = self.do_time(periodo, ids, metrica)
+        if not diaria or not soma or do_time is None:
+            return None
+        return round(do_time * diaria / soma)
+
 
 def buscar_metas_funil_sdr() -> MetasFunilSdr:
     diarias: dict[tuple[int, str], int] = {}
@@ -121,6 +131,8 @@ def montar_resposta(
                 "nome": s["nome"],
                 "imagem_url": s.get("imagem_url"),
                 "metricas": somas[s["id"]],
+                # Cards de inscrições por SDR (fundo pisca na cor do atingimento).
+                "meta_inscricoes": metas.da_pessoa(periodo, ids, s["id"], "inscricoes_realizadas"),
                 "serie": series[s["id"]],
             }
             for s in sdrs

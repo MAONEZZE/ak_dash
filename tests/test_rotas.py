@@ -337,19 +337,30 @@ def test_funil_sdr_200_com_sdrs_e_metricas_do_dashboard(monkeypatch):
 def test_funil_sdr_traz_a_proxima_confraria_para_o_velocimetro(monkeypatch):
     client = _client(monkeypatch)
 
-    def query_com_evento(tabela, *a, **kw):
+    filtros_periodo: list[dict] = []
+
+    def query_com_evento(tabela, filtros=None, *a, **kw):
         if tabela == "events":
             return [{"id": "e1", "title": "Confraria Akeel SP", "event_date": "2026-11-20T22:00:00", "capacity": 80}]
+        if tabela == "registrations" and "created_at" in (filtros or {}).get("and", ""):
+            filtros_periodo.append(filtros)
+            return [{"id": "r1"}, {"id": "r2"}]
         if tabela == "registrations":
             return [{"event_id": "e1", "status": s} for s in ("pending", "pending", "approved", "rejected")]
-        return _fake_query(tabela, *a, **kw)
+        return _fake_query(tabela, filtros, *a, **kw)
 
     monkeypatch.setattr(geral_banco_mod, "query", query_com_evento)
     corpo = client.get("/funil-sdr", params={"granularidade": "mes", "periodo": "2026-11"}).json()
     assert corpo["evento"] == {
         "id": "e1", "titulo": "Confraria Akeel SP", "data": "2026-11-20T22:00:00",
-        "inscritos": 3, "aprovados": 1, "pendentes": 2, "rejeitados": 1, "capacidade": 80,
+        "inscritos": 3, "inscritos_periodo": 2, "aprovados": 1, "pendentes": 2, "rejeitados": 1, "capacidade": 80,
     }
+    # Inscritos do velocímetro: só approved/pending, feitos no mês (meia-noite de SP em UTC).
+    assert filtros_periodo == [{
+        "event_id": "eq.e1",
+        "status": "in.(approved,pending)",
+        "and": '(created_at.gte."2026-11-01T03:00:00Z",created_at.lt."2026-12-01T03:00:00Z")',
+    }]
 
 
 def test_funil_sdr_com_evento_escolhido_traz_os_numeros_dele(monkeypatch):
