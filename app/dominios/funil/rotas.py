@@ -10,7 +10,12 @@ from app.cache import obter_ou_calcular
 from app.config import settings
 from app.dominios.funil import sdr
 from app.dominios.funil.banco import buscar_contas
-from app.dominios.geral.banco import buscar_evento, buscar_proximo_evento, listar_proximos_eventos
+from app.dominios.geral.banco import (
+    buscar_evento,
+    buscar_proximo_evento,
+    contar_inscritos_no_periodo,
+    listar_proximos_eventos,
+)
 from app.dominios.pessoas.banco import listar_ativas
 from app.fontes.banco import iniciar_registro_de_falhas, tabelas_com_falha
 from app.metas import buscar_metas
@@ -151,6 +156,15 @@ def get_funil_sdr(
         dados_evento = obter_ou_calcular(
             f"evento:{evento}", settings.cache_ttl_metricas_segundos, lambda: buscar_evento(evento)
         )
+    inscritos_periodo = (
+        0
+        if dados_evento is None
+        else obter_ou_calcular(
+            f"evento:{dados_evento.id}:inscritos:{p.inicio}:{p.fim}",
+            settings.cache_ttl_metricas_segundos,
+            lambda: contar_inscritos_no_periodo(dados_evento.id, p.inicio, p.fim),
+        )
+    )
     return {
         **corpo,
         "evento": None
@@ -161,6 +175,8 @@ def get_funil_sdr(
             "data": dados_evento.data,
             # Aqui inscrito = aprovado + pendente (recusado não conta), diferente da Geral.
             "inscritos": dados_evento.aprovados + dados_evento.pendentes,
+            # Os mesmos inscritos, só os feitos dentro do filtro de data (velocímetro).
+            "inscritos_periodo": inscritos_periodo,
             "aprovados": dados_evento.aprovados,
             "pendentes": dados_evento.pendentes,
             "rejeitados": dados_evento.rejeitados,
