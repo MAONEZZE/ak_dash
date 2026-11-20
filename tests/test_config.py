@@ -96,6 +96,38 @@ def test_expediente_padrao_10_as_19_e_lido_das_envs(monkeypatch):
     assert s.expediente_fim == time(18, 0)
 
 
+def test_settings_le_envs_do_pipedrive(monkeypatch):
+    monkeypatch.setenv("PIPE_TOKEN", "tok")
+    monkeypatch.setenv("PIPE_BASE_URL_V2", "https://x.pipedrive.com/api/v2/")
+    monkeypatch.setenv("PIPE_ID_PIPELINE_INSTAGRAM", "3")
+    monkeypatch.setenv("PIPE_ID_ABORDADOS_PIPELINE_LINKEDIN", "11")
+    monkeypatch.setenv("PIPE_ID_RESPONDIDOS_PIPELINE_LINKEDIN", "12")
+    monkeypatch.setenv("PIPE_ID_ABORDADOS_PIPELINE_INSTAGRAM", "21")
+    monkeypatch.setenv("PIPE_ID_RESPONDIDOS_PIPELINE_INSTAGRAM", "22")
+    monkeypatch.setenv("PIPE_ID_ETIQUETA_NEGOCIO_LINKEDIN", "101")
+    monkeypatch.setenv("PIPE_ID_ETIQUETA_NEGOCIO_INDICACAO", "102")
+
+    s = config.Settings()
+
+    assert s.pipe_token == "tok"
+    assert s.pipe_base_url_v2 == "https://x.pipedrive.com/api/v2"
+    assert s.pipe_id_pipeline_instagram == 3
+    assert s.pipe_id_abordados_pipeline_linkedin == 11
+    assert s.pipe_id_respondidos_pipeline_linkedin == 12
+    assert s.pipe_id_abordados_pipeline_instagram == 21
+    assert s.pipe_id_respondidos_pipeline_instagram == 22
+    assert s.pipe_id_etiqueta_negocio_linkedin == 101
+    assert s.pipe_id_etiqueta_negocio_indicacao == 102
+
+    monkeypatch.setenv("PIPE_TOKEN", "")
+    monkeypatch.delenv("PIPE_ID_PIPELINE_INSTAGRAM", raising=False)
+
+    s = config.Settings()
+
+    assert s.pipe_token is None
+    assert s.pipe_id_pipeline_instagram is None
+
+
 def test_schema_vem_de_nome_schema(monkeypatch):
     monkeypatch.setenv("NOME_SCHEMA", "dash_x")
     monkeypatch.setenv("SUPABASE_SCHEMA", "dash2")
