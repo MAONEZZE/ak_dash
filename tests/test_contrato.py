@@ -76,7 +76,7 @@ def test_schema_respostageral_tem_os_campos_que_o_bff_produz():
 
 def test_schema_respostafunil_tem_os_campos_que_o_bff_produz():
     schemas = _carregar_openapi()["components"]["schemas"]
-    assert set(schemas["RespostaFunil"]["required"]) == {"periodo", "avisos", "contas", "meta_numeros_captados"}
+    assert set(schemas["RespostaFunil"]["required"]) == {"periodo", "avisos", "contas", "meta_numeros_captados", "sem_conta"}
     assert "DashboardFunil" not in schemas
     assert set(schemas["ContaFunil"]["required"]) == {"id_conta", "nome", "metricas", "serie"}
     assert set(schemas["DiaContaFunil"]["required"]) == {"data", "metricas"}
