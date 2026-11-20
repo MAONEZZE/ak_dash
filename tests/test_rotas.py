@@ -24,7 +24,10 @@ from app.dominios.funil.pipedrive import DadosPipedrive, Fato
 from app.dominios.geral import banco as geral_banco_mod
 from app.dominios.geral import rotas as geral_rotas_mod
 from app.dominios.pessoas import banco as pessoas_banco_mod
+from app.fontes import pipedrive as fonte_pipedrive_mod
 from app.main import app
+
+_BUSCAR_PIPEDRIVE_REAL = funil_pipedrive_mod.buscar_pipedrive
 
 # Pessoas vêm de `dash2.users` + `dash2.user_cargos` (um vínculo por cargo).
 _USERS = [
@@ -328,6 +331,22 @@ def test_funil_devolve_meta_de_numeros_captados_do_seller_no_periodo(monkeypatch
 def test_funil_sem_seller_ligado_nao_tem_meta(monkeypatch):
     corpo = _client(monkeypatch).get("/funil/linkedin", params={"granularidade": "mes", "periodo": "2026-11"}).json()
     assert corpo["meta_numeros_captados"] is None
+
+
+def test_funil_com_pipedrive_fora_do_ar_avisa_e_zera(monkeypatch):
+    cliente = _client(monkeypatch)
+    monkeypatch.setattr(funil_pipedrive_mod, "buscar_pipedrive", _BUSCAR_PIPEDRIVE_REAL)
+
+    def negocios_fora_do_ar(inicio):
+        raise fonte_pipedrive_mod.PipedriveIndisponivel("fora")
+
+    monkeypatch.setattr(fonte_pipedrive_mod, "negocios_criados_desde", negocios_fora_do_ar)
+
+    # Falha não vai pro cache: a 2ª requisição tenta o Pipedrive de novo e avisa de novo.
+    for _ in range(2):
+        corpo = cliente.get("/funil/instagram", params={"granularidade": "mes", "periodo": "2026-11"}).json()
+        assert "fonte_indisponivel:pipedrive" in corpo["avisos"]
+        assert corpo["sem_conta"]["abordagens"] == 0
 
 
 def test_funil_canal_invalido_404(monkeypatch):
