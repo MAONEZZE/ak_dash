@@ -16,9 +16,9 @@ from app.planilhas import COLUNAS_POR_TABELA
 logger = logging.getLogger(__name__)
 
 # Métricas que o Pipedrive sobrescreve em cada página de canal (o resto vem da planilha).
+# Instagram fica 100% na planilha: o pipeline "Prospecção Insta" não é usado (decisão de 20/11/2026).
 METRICAS_POR_CANAL: dict[str, tuple[str, ...]] = {
     "linkedin": ("numeros_captados",),
-    "instagram": ("numeros_captados", "abordagens", "respondidos"),
 }
 # owner_id do Pipedrive que é SDR → normalizar(users.nome) do SDR no dash.
 DONOS_SDR: dict[int, str] = {28932026: "juca", 27369234: "jennifer"}

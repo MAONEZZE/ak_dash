@@ -154,31 +154,6 @@ def test_numeros_captados_do_linkedin_vao_para_a_conta_da_etiqueta():
     assert jacob.serie[0]["metricas"]["numeros_captados"] == 9
 
 
-def test_instagram_troca_abordagens_respondidos_e_numeros_captados():
-    COLUNAS = COLUNAS_POR_TABELA["metricas_contas"]
-
-    def _m(**kw):
-        return {c: kw.get(c, 0) for c in COLUNAS}
-
-    lucas = ContaFunil(3, "Lucas", None, _m(abordagens=50, respondidos=20, numeros_captados=8, fups=7), [])
-    dados = pipedrive.DadosPipedrive(
-        [
-            Fato("abordagens", "instagram", 28932026, 801, "2026-11-10"),
-            Fato("abordagens", "instagram", 1, 801, "2026-11-10"),
-            Fato("respondidos", "instagram", 1, 801, "2026-11-11"),
-            Fato("numeros_captados", "instagram", 1, 801, "2026-11-09"),
-            Fato("respondidos", "linkedin", 1, 801, "2026-11-11"),
-        ],
-        {801: (90,)},
-    )
-    etiqueta = {"Lucas": 90}.get
-
-    contas, sem_conta = pipedrive.aplicar_em_contas([lucas], dados, "instagram", date(2026, 11, 1), etiqueta)
-
-    assert contas[0].metricas == _m(abordagens=2, respondidos=1, numeros_captados=1, fups=7)
-    assert sem_conta == _m()
-
-
 def test_linhas_sdr_somam_por_sdr_e_dia_so_dos_donos_sdr():
     dados = pipedrive.DadosPipedrive(
         [

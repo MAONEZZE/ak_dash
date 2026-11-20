@@ -20,7 +20,7 @@ from app.dominios.pessoas.banco import listar_ativas
 from app.fontes.banco import iniciar_registro_de_falhas, tabelas_com_falha
 from app.metas import buscar_metas
 from app.periodo import TZ_SP, hoje_sp, resolver_periodo
-from app.planilhas import normalizar
+from app.planilhas import COLUNAS_POR_TABELA, normalizar
 
 router = APIRouter(tags=["funil"])
 
@@ -54,6 +54,8 @@ def _contas_do_canal(canal: str, p):
         settings.cache_ttl_metricas_segundos,
         lambda: buscar_contas(canal, p.inicio, p.fim, _inicio_serie(p)),
     )
+    if canal not in pipedrive.METRICAS_POR_CANAL:  # canal só da planilha: nem consulta o Pipedrive
+        return contas, {k: 0 for k in COLUNAS_POR_TABELA["metricas_contas"]}
     return pipedrive.aplicar_em_contas(contas, _pipedrive(p), canal, p.inicio, lambda nome: etiqueta_pessoa(canal, nome))
 
 
