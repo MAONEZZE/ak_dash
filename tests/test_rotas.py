@@ -18,7 +18,9 @@ from app.auth import exigir_usuario
 from app.dominios.comercial import banco as comercial_banco_mod
 from app.dominios.financeiro import banco as financeiro_banco_mod
 from app.dominios.funil import banco as funil_banco_mod
+from app.dominios.funil import pipedrive as funil_pipedrive_mod
 from app.dominios.funil import sdr as funil_sdr_mod
+from app.dominios.funil.pipedrive import DadosPipedrive, Fato
 from app.dominios.geral import banco as geral_banco_mod
 from app.dominios.geral import rotas as geral_rotas_mod
 from app.dominios.pessoas import banco as pessoas_banco_mod
@@ -74,6 +76,7 @@ def _sobrescrever_query(monkeypatch) -> None:
 
 def _client(monkeypatch) -> TestClient:
     _sobrescrever_query(monkeypatch)
+    monkeypatch.setattr(funil_pipedrive_mod, "buscar_pipedrive", lambda inicio, fim: funil_pipedrive_mod.VAZIO)
     cache.invalidar()
     app.dependency_overrides[exigir_usuario] = lambda: {"sub": "dev"}
     client = TestClient(app)
@@ -273,7 +276,31 @@ def test_funil_linkedin_200_com_contas_do_periodo(monkeypatch):
         }
     ]
     assert corpo["avisos"] == []
-    assert set(corpo) == {"periodo", "avisos", "contas", "meta_numeros_captados"}
+    assert set(corpo) == {"periodo", "avisos", "contas", "sem_conta", "meta_numeros_captados"}
+    assert corpo["sem_conta"] == {k: 0 for k in corpo["contas"][0]["metricas"]}
+
+
+def test_funil_linkedin_numeros_captados_vem_do_pipedrive(monkeypatch):
+    cliente = _client(monkeypatch)
+    chamadas = []
+    monkeypatch.setattr(
+        funil_pipedrive_mod,
+        "buscar_pipedrive",
+        lambda inicio, fim: chamadas.append((inicio, fim))
+        or DadosPipedrive(
+            [Fato("numeros_captados", "linkedin", 1, 501, "2026-11-02"), Fato("numeros_captados", "linkedin", 1, 502, "2026-11-03")],
+            {501: (55,)},
+        ),
+    )
+    monkeypatch.setenv("PIPE_ID_ETIQUETA_PESSOA_LINKEDIN_JACOB", "55")
+
+    corpo = cliente.get("/funil/linkedin", params={"granularidade": "mes", "periodo": "2026-11"}).json()
+
+    assert corpo["contas"][0]["metricas"]["numeros_captados"] == 1
+    assert corpo["contas"][0]["metricas"]["conexoes_enviadas"] == 43  # planilha continua
+    assert corpo["contas"][0]["serie"][0]["metricas"]["numeros_captados"] == 1
+    assert corpo["sem_conta"]["numeros_captados"] == 1
+    assert chamadas == [(date(2026, 11, 1), date(2026, 11, 30))]
 
 
 def test_funil_devolve_meta_de_numeros_captados_do_seller_no_periodo(monkeypatch):

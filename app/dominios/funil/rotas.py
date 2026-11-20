@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.auth import exigir_usuario
 from app.cache import obter_ou_calcular
-from app.config import settings
-from app.dominios.funil import sdr
+from app.config import etiqueta_pessoa, settings
+from app.dominios.funil import pipedrive, sdr
 from app.dominios.funil.banco import buscar_contas
 from app.dominios.geral.banco import (
     buscar_evento,
@@ -36,6 +36,26 @@ def _inicio_serie(p):
     return p.inicio - timedelta(days=DIAS_SERIE_FILTRO_DIA - 1) if p.granularidade == "dia" else p.inicio
 
 
+def _pipedrive(p):
+    """Dados do Pipedrive do período (com os dias da série), uma busca compartilhada pelas três páginas de funil."""
+    inicio = _inicio_serie(p)
+    return obter_ou_calcular(
+        f"pipedrive:{inicio}:{p.fim}",
+        settings.cache_ttl_metricas_segundos,
+        lambda: pipedrive.buscar_pipedrive(inicio, p.fim),
+    )
+
+
+def _contas_do_canal(canal: str, p):
+    """Contas do canal (planilha) com as métricas do Pipedrive aplicadas, e o que não tem conta (`sem_conta`)."""
+    contas = obter_ou_calcular(
+        f"funil:{canal}:{p.inicio}:{p.fim}",
+        settings.cache_ttl_metricas_segundos,
+        lambda: buscar_contas(canal, p.inicio, p.fim, _inicio_serie(p)),
+    )
+    return pipedrive.aplicar_em_contas(contas, _pipedrive(p), canal, p.inicio, lambda nome: etiqueta_pessoa(canal, nome))
+
+
 def _resolver_periodo_ou_400(granularidade: str, periodo: str):
     try:
         return resolver_periodo(granularidade, periodo)
@@ -60,11 +80,7 @@ def get_funil(
         )
     iniciar_registro_de_falhas()
     p = _resolver_periodo_ou_400(granularidade, periodo)
-    contas = obter_ou_calcular(
-        f"funil:{canal}:{p.inicio}:{p.fim}",
-        settings.cache_ttl_metricas_segundos,
-        lambda: buscar_contas(canal, p.inicio, p.fim, _inicio_serie(p)),
-    )
+    contas, sem_conta = _contas_do_canal(canal, p)
 
     # Meta de números captados do período: soma das metas dos sellers ativos ligados às contas do canal.
     ids_seller = {c.id_seller for c in contas if c.id_seller is not None}
@@ -82,6 +98,7 @@ def get_funil(
         "contas": [
             {"id_conta": str(c.id_conta), "nome": c.nome, "metricas": c.metricas, "serie": c.serie} for c in contas
         ],
+        "sem_conta": sem_conta,
         "meta_numeros_captados": meta,
     }
 
