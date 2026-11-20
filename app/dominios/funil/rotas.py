@@ -20,6 +20,7 @@ from app.dominios.pessoas.banco import listar_ativas
 from app.fontes.banco import iniciar_registro_de_falhas, tabelas_com_falha
 from app.metas import buscar_metas
 from app.periodo import TZ_SP, hoje_sp, resolver_periodo
+from app.planilhas import normalizar
 
 router = APIRouter(tags=["funil"])
 
@@ -133,23 +134,28 @@ def get_funil_sdr(
         lambda: sdr.buscar_metricas_funil_sdr(_inicio_serie(p), p.fim),
     )
     metas = obter_ou_calcular("metas-funil-sdr", settings.cache_ttl_metricas_segundos, sdr.buscar_metas_funil_sdr)
+    pessoas = obter_ou_calcular("pessoas:ativas", settings.cache_ttl_pessoas_segundos, listar_ativas)
     sdrs = sorted(
         (
             {"id": int(pessoa.id), "nome": pessoa.nome, "imagem_url": pessoa.imagem_url}
-            for pessoa in obter_ou_calcular("pessoas:ativas", settings.cache_ttl_pessoas_segundos, listar_ativas)
+            for pessoa in pessoas
             if pessoa.cargo == "sdr"
         ),
         key=lambda s: s["id"],
     )
-    numeros_captados = sum(
-        c.metricas["numeros_captados"]
-        for canal in CANAIS
-        for c in obter_ou_calcular(
-            f"funil:{canal}:{p.inicio}:{p.fim}",
-            settings.cache_ttl_metricas_segundos,
-            lambda canal=canal: buscar_contas(canal, p.inicio, p.fim, _inicio_serie(p)),
-        )
-    )
+    # Abordagens, respondidos e indicações dos SDRs vêm do Pipedrive, não da planilha.
+    id_dash_por_dono = {
+        dono: int(pessoa.id)
+        for dono, nome in pipedrive.DONOS_SDR.items()
+        for pessoa in pessoas
+        if pessoa.cargo == "sdr" and normalizar(pessoa.nome) == nome
+    }
+    sem_metricas_pipedrive = [{k: v for k, v in l.items() if k not in pipedrive.METRICAS_SDR} for l in linhas]
+    linhas = sem_metricas_pipedrive + pipedrive.linhas_sdr(_pipedrive(p), id_dash_por_dono)
+    numeros_captados = 0
+    for canal in CANAIS:
+        contas, sem_conta = _contas_do_canal(canal, p)
+        numeros_captados += sum(c.metricas["numeros_captados"] for c in contas) + sem_conta["numeros_captados"]
     corpo = sdr.montar_resposta(
         p,
         sdrs,
