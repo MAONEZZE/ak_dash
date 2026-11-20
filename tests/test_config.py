@@ -139,3 +139,13 @@ def test_schema_vem_de_nome_schema(monkeypatch):
     monkeypatch.delenv("NOME_SCHEMA", raising=False)
 
     assert config.Settings().supabase_schema == "dash_new"
+
+
+def test_etiqueta_pessoa_le_env_pelo_canal_e_nome_da_conta(monkeypatch):
+    monkeypatch.setenv("PIPE_ID_ETIQUETA_PESSOA_LINKEDIN_LETICIA_SOUZA", "55")
+    monkeypatch.setenv("PIPE_ID_ETIQUETA_PESSOA_INSTAGRAM_JACOB", "66")
+    monkeypatch.delenv("PIPE_ID_ETIQUETA_PESSOA_LINKEDIN_MARY", raising=False)
+
+    assert config.etiqueta_pessoa("linkedin", "Letícia Souza") == 55
+    assert config.etiqueta_pessoa("instagram", "jacob") == 66
+    assert config.etiqueta_pessoa("linkedin", "Mary") is None

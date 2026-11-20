@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import os
+import re
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import time
 
@@ -123,3 +125,12 @@ class Settings:
 
 
 settings = Settings()
+
+
+def etiqueta_pessoa(canal: str, conta: str) -> int | None:
+    """Id da etiqueta de pessoa que marca a conta no Pipedrive: env PIPE_ID_ETIQUETA_PESSOA_<CANAL>_<CONTA> (conta sem acento, maiúscula, o que não é letra/dígito vira _). Lida na hora, para contas novas não exigirem restart."""
+    sem_acento = "".join(
+        c for c in unicodedata.normalize("NFKD", conta) if not unicodedata.combining(c)
+    )
+    sufixo = re.sub(r"[^A-Z0-9]+", "_", sem_acento.upper()).strip("_")
+    return _int_env(f"PIPE_ID_ETIQUETA_PESSOA_{canal.upper()}_{sufixo}")
