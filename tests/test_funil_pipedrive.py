@@ -7,9 +7,11 @@ from datetime import date, datetime
 import pytest
 
 from app.dominios.funil import pipedrive
+from app.dominios.funil.banco import ContaFunil
 from app.dominios.funil.pipedrive import Fato
 from app.fontes import banco
 from app.periodo import TZ_SP
+from app.planilhas import COLUNAS_POR_TABELA
 
 
 @pytest.fixture(autouse=True)
@@ -115,3 +117,38 @@ def test_buscar_pipedrive_junta_dados_e_degrada_quando_cai(monkeypatch):
     assert pipedrive.buscar_pipedrive(date(2026, 11, 1), date(2026, 11, 30)) is pipedrive.VAZIO
     assert banco.tabelas_com_falha() == ["pipedrive"]
     assert banco.falhas_na_thread() == antes + 1
+
+
+def test_numeros_captados_do_linkedin_vao_para_a_conta_da_etiqueta():
+    COLUNAS = COLUNAS_POR_TABELA["metricas_contas"]
+
+    def _m(**kw):
+        return {c: kw.get(c, 0) for c in COLUNAS}
+
+    jacob = ContaFunil(1, "Jacob", None, _m(conexoes_enviadas=40, numeros_captados=9), [{"data": "2026-11-03", "metricas": _m(conexoes_enviadas=40, numeros_captados=9)}])
+    mary = ContaFunil(2, "Mary", None, _m(numeros_captados=4), [])
+    dados = pipedrive.DadosPipedrive(
+        [
+            Fato("numeros_captados", "linkedin", 1, 501, "2026-11-03"),
+            Fato("numeros_captados", "linkedin", 1, 501, "2026-11-05"),
+            Fato("numeros_captados", "linkedin", 1, 502, "2026-11-05"),
+            Fato("numeros_captados", "linkedin", 1, 501, "2026-10-29"),
+            Fato("abordagens", "linkedin", 28932026, 501, "2026-11-05"),
+            Fato("numeros_captados", "instagram", 1, 501, "2026-11-05"),
+        ],
+        {501: (55,), 502: (77,)},
+    )
+    etiqueta = {"Jacob": 55}.get
+
+    contas, sem_conta = pipedrive.aplicar_em_contas([jacob, mary], dados, "linkedin", date(2026, 11, 1), etiqueta)
+
+    assert contas[0].metricas == _m(conexoes_enviadas=40, numeros_captados=2)
+    assert contas[0].serie == [
+        {"data": "2026-10-29", "metricas": _m(numeros_captados=1)},
+        {"data": "2026-11-03", "metricas": _m(conexoes_enviadas=40, numeros_captados=1)},
+        {"data": "2026-11-05", "metricas": _m(numeros_captados=1)},
+    ]
+    assert contas[1].metricas == _m()
+    assert sem_conta == _m(numeros_captados=1)
+    assert jacob.metricas["numeros_captados"] == 9
+    assert jacob.serie[0]["metricas"]["numeros_captados"] == 9

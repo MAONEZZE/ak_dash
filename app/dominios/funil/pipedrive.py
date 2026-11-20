@@ -2,15 +2,24 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, time
+from typing import Callable
 
 from app.config import settings
+from app.dominios.funil.banco import ContaFunil
 from app.fontes import pipedrive as api
 from app.fontes.banco import registrar_falha
 from app.periodo import TZ_SP
+from app.planilhas import COLUNAS_POR_TABELA
 
 logger = logging.getLogger(__name__)
+
+# Métricas que o Pipedrive sobrescreve em cada página de canal (o resto vem da planilha).
+METRICAS_POR_CANAL: dict[str, tuple[str, ...]] = {
+    "linkedin": ("numeros_captados",),
+    "instagram": ("numeros_captados", "abordagens", "respondidos"),
+}
 
 
 @dataclass(frozen=True)
@@ -101,3 +110,39 @@ def buscar_pipedrive(inicio: date, fim: date) -> DadosPipedrive:
         registrar_falha("pipedrive")
         return VAZIO
     return DadosPipedrive(fatos, etiquetas)
+
+
+def aplicar_em_contas(
+    contas: list[ContaFunil], dados: DadosPipedrive, canal: str, inicio: date, etiqueta_da_conta: Callable[[str], int | None]
+) -> tuple[list[ContaFunil], dict[str, int]]:
+    """Troca as métricas do Pipedrive do canal em cada conta (soma e série) e devolve o que não tem conta em `sem_conta` (só dias a partir de `inicio`). Não altera `contas`."""
+    colunas = COLUNAS_POR_TABELA["metricas_contas"]
+    metricas = METRICAS_POR_CANAL[canal]
+    zerar = {m: 0 for m in metricas}
+
+    somas = {c.id_conta: {**c.metricas, **zerar} for c in contas}
+    series = {c.id_conta: {d["data"]: {**d["metricas"], **zerar} for d in c.serie} for c in contas}
+    sem_conta = {k: 0 for k in colunas}
+    etiquetas = [(c.id_conta, etiqueta_da_conta(c.nome)) for c in contas]
+
+    for f in dados.fatos:
+        if f.canal != canal or f.metrica not in metricas:
+            continue
+        da_pessoa = dados.etiquetas_por_pessoa.get(f.id_pessoa, ())
+        conta = next((i for i, e in etiquetas if e is not None and e in da_pessoa), None)
+        no_periodo = f.data >= inicio.isoformat()
+        if conta is None:
+            if no_periodo:
+                sem_conta[f.metrica] += 1
+            continue
+        series[conta].setdefault(f.data, {k: 0 for k in colunas})[f.metrica] += 1
+        if no_periodo:
+            somas[conta][f.metrica] += 1
+
+    return (
+        [
+            replace(c, metricas=somas[c.id_conta], serie=[{"data": d, "metricas": series[c.id_conta][d]} for d in sorted(series[c.id_conta])])
+            for c in contas
+        ],
+        sem_conta,
+    )
