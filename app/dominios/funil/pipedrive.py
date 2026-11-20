@@ -20,6 +20,10 @@ METRICAS_POR_CANAL: dict[str, tuple[str, ...]] = {
     "linkedin": ("numeros_captados",),
     "instagram": ("numeros_captados", "abordagens", "respondidos"),
 }
+# owner_id do Pipedrive que é SDR → normalizar(users.nome) do SDR no dash.
+DONOS_SDR: dict[int, str] = {28932026: "juca", 27369234: "jennifer"}
+# Colunas de metricas_funil_sdr que vêm do Pipedrive.
+METRICAS_SDR = ("abordagens", "respondidos", "indicacoes")
 
 
 @dataclass(frozen=True)
@@ -146,3 +150,14 @@ def aplicar_em_contas(
         ],
         sem_conta,
     )
+
+
+def linhas_sdr(dados: DadosPipedrive, id_dash_por_dono: dict[int, int]) -> list[dict]:
+    """Linhas no formato de metricas_funil_sdr (id_user, data + METRICAS_SDR), uma por SDR e dia, só de donos em `id_dash_por_dono`."""
+    linhas: dict[tuple[str, int], dict] = {}
+    for f in dados.fatos:
+        if f.metrica in METRICAS_SDR and f.id_dono in id_dash_por_dono:
+            id_user = id_dash_por_dono[f.id_dono]
+            linha = linhas.setdefault((f.data, id_user), {"id_user": id_user, "data": f.data, **{m: 0 for m in METRICAS_SDR}})
+            linha[f.metrica] += 1
+    return [linhas[k] for k in sorted(linhas)]

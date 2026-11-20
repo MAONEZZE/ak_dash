@@ -177,3 +177,24 @@ def test_instagram_troca_abordagens_respondidos_e_numeros_captados():
 
     assert contas[0].metricas == _m(abordagens=2, respondidos=1, numeros_captados=1, fups=7)
     assert sem_conta == _m()
+
+
+def test_linhas_sdr_somam_por_sdr_e_dia_so_dos_donos_sdr():
+    dados = pipedrive.DadosPipedrive(
+        [
+            Fato("abordagens", "linkedin", 28932026, 1, "2026-11-10"),
+            Fato("abordagens", "instagram", 28932026, 2, "2026-11-10"),
+            Fato("respondidos", "linkedin", 27369234, 3, "2026-11-11"),
+            Fato("indicacoes", None, 27369234, 4, "2026-11-10"),
+            Fato("abordagens", "linkedin", 25564860, 5, "2026-11-10"),
+            Fato("numeros_captados", "linkedin", 28932026, 6, "2026-11-10"),
+        ],
+        {},
+    )
+    id_dash_por_dono = {28932026: 11, 27369234: 14}
+
+    assert pipedrive.linhas_sdr(dados, id_dash_por_dono) == [
+        {"id_user": 11, "data": "2026-11-10", "abordagens": 2, "respondidos": 0, "indicacoes": 0},
+        {"id_user": 14, "data": "2026-11-10", "abordagens": 0, "respondidos": 0, "indicacoes": 1},
+        {"id_user": 14, "data": "2026-11-11", "abordagens": 0, "respondidos": 1, "indicacoes": 0},
+    ]
