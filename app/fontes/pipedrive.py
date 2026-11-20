@@ -8,6 +8,7 @@ import httpx
 from app.config import settings
 
 TAMANHO_PAGINA = 500
+LOTE_PESSOAS = 100
 
 
 class PipedriveIndisponivel(Exception):
@@ -63,4 +64,16 @@ def negocios_criados_desde(inicio: datetime) -> list[dict]:
             if _momento(n["add_time"]) < inicio:
                 return resultado
             resultado.append(n)
+    return resultado
+
+
+def etiquetas_das_pessoas(ids: list[int]) -> dict[int, tuple[int, ...]]:
+    """Etiquetas (label_ids) de cada pessoa. Ids repetidos são pedidos uma vez só."""
+    unicos = sorted(set(ids))
+    resultado = {}
+    for i in range(0, len(unicos), LOTE_PESSOAS):
+        lote = unicos[i:i + LOTE_PESSOAS]
+        for pagina in _paginas("/persons", {"ids": ",".join(str(x) for x in lote)}):
+            for p in pagina:
+                resultado[p["id"]] = tuple(p.get("label_ids") or [])
     return resultado
