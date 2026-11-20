@@ -49,3 +49,18 @@ def negocios_no_estagio(id_estagio: int, atualizados_desde: datetime) -> list[di
         for pagina in _paginas("/deals", {"stage_id": str(id_estagio), "updated_since": _rfc3339(atualizados_desde)})
         for negocio in pagina
     ]
+
+
+def _momento(texto: str) -> datetime:
+    return datetime.fromisoformat(texto.replace("Z", "+00:00"))
+
+
+def negocios_criados_desde(inicio: datetime) -> list[dict]:
+    """Negócios criados a partir de `inicio` (tz-aware), do mais novo ao mais antigo. A v2 não filtra por add_time: ordena por ele e para no primeiro mais antigo que `inicio`."""
+    resultado = []
+    for pagina in _paginas("/deals", {"sort_by": "add_time", "sort_direction": "desc"}):
+        for n in pagina:
+            if _momento(n["add_time"]) < inicio:
+                return resultado
+            resultado.append(n)
+    return resultado

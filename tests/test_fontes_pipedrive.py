@@ -41,3 +41,25 @@ def test_negocios_no_estagio_pagina_pelo_cursor(monkeypatch):
     assert chamadas[0][1] == {"stage_id": "11", "updated_since": "2026-11-01T03:00:00Z", "limit": "500"}
     assert chamadas[1][1]["cursor"] == "c2"
     assert chamadas[0][2] == {"x-api-token": "tok"}
+
+
+def test_negocios_criados_desde_para_no_primeiro_anterior_ao_inicio(monkeypatch):
+    chamadas = []
+    respostas = [
+        _resposta({"data": [{"id": 3, "add_time": "2026-11-02T12:00:00Z"}, {"id": 2, "add_time": "2026-11-01T03:00:00Z"}], "additional_data": {"next_cursor": "c2"}}),
+        _resposta({"data": [{"id": 1, "add_time": "2026-11-01T02:59:59Z"}, {"id": 0, "add_time": "2026-10-20T10:00:00Z"}], "additional_data": {"next_cursor": "c3"}}),
+    ]
+
+    def _get(url, params=None, headers=None, **kwargs):
+        chamadas.append((url, params, headers))
+        if not respostas:
+            raise AssertionError("não devia pedir mais páginas")
+        return respostas.pop(0)
+
+    monkeypatch.setattr(pipedrive.httpx, "get", _get)
+
+    negocios = pipedrive.negocios_criados_desde(datetime(2026, 11, 1, tzinfo=TZ_SP))
+
+    assert [n["id"] for n in negocios] == [3, 2]
+    assert len(chamadas) == 2
+    assert chamadas[0][1] == {"sort_by": "add_time", "sort_direction": "desc", "limit": "500"}
