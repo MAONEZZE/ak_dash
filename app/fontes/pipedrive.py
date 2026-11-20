@@ -20,14 +20,19 @@ def _rfc3339(momento: datetime) -> str:
 
 
 def _get(caminho: str, params: dict[str, str]) -> dict:
-    resposta = httpx.get(
-        f"{settings.pipe_base_url_v2}{caminho}",
-        params=params,
-        headers={"x-api-token": settings.pipe_token},
-        timeout=15.0,
-    )
-    resposta.raise_for_status()
-    return resposta.json()
+    if not settings.pipe_token or not settings.pipe_base_url_v2:
+        raise PipedriveIndisponivel("Pipedrive não configurado (PIPE_TOKEN/PIPE_BASE_URL_V2)")
+    try:
+        resposta = httpx.get(
+            f"{settings.pipe_base_url_v2}{caminho}",
+            params=params,
+            headers={"x-api-token": settings.pipe_token},
+            timeout=15.0,
+        )
+        resposta.raise_for_status()
+        return resposta.json()
+    except httpx.HTTPError as exc:
+        raise PipedriveIndisponivel(str(exc)) from exc
 
 
 def _paginas(caminho: str, params: dict[str, str]):

@@ -92,3 +92,34 @@ def test_etiquetas_das_pessoas_em_lotes_de_100(monkeypatch):
     chamadas.clear()
     assert pipedrive.etiquetas_das_pessoas([]) == {}
     assert chamadas == []
+
+
+def test_sem_configuracao_ou_com_erro_sobe_pipedrive_indisponivel(monkeypatch):
+    monkeypatch.setattr(pipedrive, "settings", dataclasses.replace(pipedrive.settings, pipe_token=None))
+
+    def _nao_deve_chamar(url, params=None, headers=None, **kwargs):
+        raise AssertionError("httpx.get não devia ser chamado sem configuração")
+
+    monkeypatch.setattr(pipedrive.httpx, "get", _nao_deve_chamar)
+
+    with pytest.raises(pipedrive.PipedriveIndisponivel):
+        pipedrive.negocios_no_estagio(11, datetime(2026, 11, 1, tzinfo=TZ_SP))
+
+    monkeypatch.setattr(pipedrive, "settings", dataclasses.replace(pipedrive.settings, pipe_token="tok", pipe_base_url_v2="https://x.pipedrive.com/api/v2"))
+
+    monkeypatch.setattr(
+        pipedrive.httpx,
+        "get",
+        lambda url, params=None, headers=None, **kwargs: httpx.Response(401, json={"success": False}, request=httpx.Request("GET", "https://x.pipedrive.com")),
+    )
+
+    with pytest.raises(pipedrive.PipedriveIndisponivel):
+        pipedrive.negocios_no_estagio(11, datetime(2026, 11, 1, tzinfo=TZ_SP))
+
+    def _timeout(url, params=None, headers=None, **kwargs):
+        raise httpx.ReadTimeout("lento")
+
+    monkeypatch.setattr(pipedrive.httpx, "get", _timeout)
+
+    with pytest.raises(pipedrive.PipedriveIndisponivel):
+        pipedrive.negocios_no_estagio(11, datetime(2026, 11, 1, tzinfo=TZ_SP))
