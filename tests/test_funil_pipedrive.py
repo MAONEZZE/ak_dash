@@ -41,3 +41,20 @@ def test_criado_no_periodo_vira_numero_captado_do_canal():
         Fato("numeros_captados", "linkedin", 25564860, 501, "2026-11-05"),
         Fato("numeros_captados", "instagram", 28932026, 502, "2026-11-04"),
     ]
+
+
+def test_negocio_na_coluna_2_ou_3_conta_pela_data_de_entrada():
+    e = {"id": 5, "stage_id": 11, "stage_change_time": "2026-11-10T13:00:00Z", "owner_id": 28932026, "person_id": 601}
+    # entrou antes do início
+    f = {"id": 6, "stage_id": 11, "stage_change_time": "2026-10-31T13:00:00Z", "owner_id": 28932026, "person_id": 602}
+    g = {"id": 7, "stage_id": 22, "stage_change_time": "2026-11-11T13:00:00Z", "owner_id": 1, "person_id": 603}
+    # sem data de entrada
+    i = {"id": 9, "stage_id": 22, "stage_change_time": None, "owner_id": 1, "person_id": 605}
+    # estágio não configurado
+    h = {"id": 8, "stage_id": 99, "stage_change_time": "2026-11-11T13:00:00Z", "owner_id": 1, "person_id": 604}
+    por_estagio = {11: [e, f], 22: [g, i], 99: [h]}
+
+    assert pipedrive.contar([], por_estagio, date(2026, 11, 1), date(2026, 11, 30)) == [
+        Fato("abordagens", "linkedin", 28932026, 601, "2026-11-10"),
+        Fato("respondidos", "instagram", 1, 603, "2026-11-11"),
+    ]
