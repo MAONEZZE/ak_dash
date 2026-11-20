@@ -61,6 +61,12 @@ def tabelas_com_falha() -> list[str]:
     return list(dict.fromkeys(getattr(_local, "tabelas_com_falha", [])))
 
 
+def registrar_falha(fonte: str) -> None:
+    """Fonte externa (ex.: Pipedrive) que degradou para vazio: conta em `falhas_na_thread` (o cache não guarda) e vira aviso `fonte_indisponivel:<fonte>`."""
+    _local.falhas = falhas_na_thread() + 1
+    _local.tabelas_com_falha = [*getattr(_local, "tabelas_com_falha", []), fonte]
+
+
 def _get(url: str, params: dict[str, str], headers: dict[str, str]) -> httpx.Response:
     for tentativa in range(1, _TENTATIVAS + 1):
         try:

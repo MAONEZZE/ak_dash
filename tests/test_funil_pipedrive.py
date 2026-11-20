@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import dataclasses
-from datetime import date
+from datetime import date, datetime
 
 import pytest
 
 from app.dominios.funil import pipedrive
 from app.dominios.funil.pipedrive import Fato
+from app.fontes import banco
+from app.periodo import TZ_SP
 
 
 @pytest.fixture(autouse=True)
@@ -67,3 +69,49 @@ def test_etiqueta_de_indicacao_vira_indicacao_do_dono():
         Fato("numeros_captados", "linkedin", 27369234, 701, "2026-11-12"),
         Fato("indicacoes", None, 27369234, 701, "2026-11-12"),
     ]
+
+
+def test_buscar_pipedrive_junta_dados_e_degrada_quando_cai(monkeypatch):
+    A = {"id": 1, "add_time": "2026-11-05T15:00:00Z", "pipeline_id": 1, "label_ids": [101], "owner_id": 25564860, "person_id": 501}
+    E = {"id": 5, "stage_id": 11, "stage_change_time": "2026-11-10T13:00:00Z", "owner_id": 28932026, "person_id": 601}
+    criados = []
+    estagios_pedidos = []
+    pessoas_pedidas = []
+
+    def no_estagio(id_estagio, desde):
+        estagios_pedidos.append((id_estagio, desde))
+        return [E] if id_estagio == 11 else []
+
+    def etiquetas(ids):
+        pessoas_pedidas.extend(ids)
+        return {501: (55,), 601: (66,)}
+
+    monkeypatch.setattr(pipedrive.api, "negocios_criados_desde", lambda inicio: criados.append(inicio) or [A])
+    monkeypatch.setattr(pipedrive.api, "negocios_no_estagio", no_estagio)
+    monkeypatch.setattr(pipedrive.api, "etiquetas_das_pessoas", etiquetas)
+
+    resultado = pipedrive.buscar_pipedrive(date(2026, 11, 1), date(2026, 11, 30))
+
+    desde = datetime(2026, 11, 1, tzinfo=TZ_SP)
+    assert criados == [desde]
+    assert sorted(i for i, _ in estagios_pedidos) == [11, 12, 21, 22]
+    assert all(d == desde for _, d in estagios_pedidos)
+    assert sorted(pessoas_pedidas) == [501, 601]
+    assert resultado == pipedrive.DadosPipedrive(
+        fatos=[
+            Fato("numeros_captados", "linkedin", 25564860, 501, "2026-11-05"),
+            Fato("abordagens", "linkedin", 28932026, 601, "2026-11-10"),
+        ],
+        etiquetas_por_pessoa={501: (55,), 601: (66,)},
+    )
+
+    def fora(inicio):
+        raise pipedrive.api.PipedriveIndisponivel("fora")
+
+    monkeypatch.setattr(pipedrive.api, "negocios_criados_desde", fora)
+    banco.iniciar_registro_de_falhas()
+    antes = banco.falhas_na_thread()
+
+    assert pipedrive.buscar_pipedrive(date(2026, 11, 1), date(2026, 11, 30)) is pipedrive.VAZIO
+    assert banco.tabelas_com_falha() == ["pipedrive"]
+    assert banco.falhas_na_thread() == antes + 1
