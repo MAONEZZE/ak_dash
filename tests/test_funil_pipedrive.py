@@ -58,3 +58,12 @@ def test_negocio_na_coluna_2_ou_3_conta_pela_data_de_entrada():
         Fato("abordagens", "linkedin", 28932026, 601, "2026-11-10"),
         Fato("respondidos", "instagram", 1, 603, "2026-11-11"),
     ]
+
+
+def test_etiqueta_de_indicacao_vira_indicacao_do_dono():
+    j = {"id": 10, "add_time": "2026-11-12T15:00:00Z", "pipeline_id": 1, "label_ids": [102, 101], "owner_id": 27369234, "person_id": 701}
+
+    assert pipedrive.contar([j], {}, date(2026, 11, 1), date(2026, 11, 30)) == [
+        Fato("numeros_captados", "linkedin", 27369234, 701, "2026-11-12"),
+        Fato("indicacoes", None, 27369234, 701, "2026-11-12"),
+    ]

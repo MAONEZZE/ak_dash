@@ -40,6 +40,8 @@ def contar(criados: list[dict], por_estagio: dict[int, list[dict]], inicio: date
             fatos.append(Fato("numeros_captados", "linkedin", dono, pessoa, d))
         if settings.pipe_id_pipeline_instagram is not None and n.get("pipeline_id") == settings.pipe_id_pipeline_instagram:
             fatos.append(Fato("numeros_captados", "instagram", dono, pessoa, d))
+        if settings.pipe_id_etiqueta_negocio_indicacao is not None and settings.pipe_id_etiqueta_negocio_indicacao in etiquetas:
+            fatos.append(Fato("indicacoes", None, dono, pessoa, d))
 
     estagios = {
         settings.pipe_id_abordados_pipeline_linkedin: ("abordagens", "linkedin"),
