@@ -18,11 +18,16 @@ from app.auth import exigir_usuario
 from app.dominios.comercial import banco as comercial_banco_mod
 from app.dominios.financeiro import banco as financeiro_banco_mod
 from app.dominios.funil import banco as funil_banco_mod
+from app.dominios.funil import pipedrive as funil_pipedrive_mod
 from app.dominios.funil import sdr as funil_sdr_mod
+from app.dominios.funil.pipedrive import DadosPipedrive, Fato
 from app.dominios.geral import banco as geral_banco_mod
 from app.dominios.geral import rotas as geral_rotas_mod
 from app.dominios.pessoas import banco as pessoas_banco_mod
+from app.fontes import pipedrive as fonte_pipedrive_mod
 from app.main import app
+
+_BUSCAR_PIPEDRIVE_REAL = funil_pipedrive_mod.buscar_pipedrive
 
 # Pessoas vêm de `dash2.users` + `dash2.user_cargos` (um vínculo por cargo).
 _USERS = [
@@ -74,6 +79,7 @@ def _sobrescrever_query(monkeypatch) -> None:
 
 def _client(monkeypatch) -> TestClient:
     _sobrescrever_query(monkeypatch)
+    monkeypatch.setattr(funil_pipedrive_mod, "buscar_pipedrive", lambda inicio, fim: funil_pipedrive_mod.VAZIO)
     cache.invalidar()
     app.dependency_overrides[exigir_usuario] = lambda: {"sub": "dev"}
     client = TestClient(app)
@@ -273,7 +279,31 @@ def test_funil_linkedin_200_com_contas_do_periodo(monkeypatch):
         }
     ]
     assert corpo["avisos"] == []
-    assert set(corpo) == {"periodo", "avisos", "contas", "meta_numeros_captados"}
+    assert set(corpo) == {"periodo", "avisos", "contas", "sem_conta", "meta_numeros_captados"}
+    assert corpo["sem_conta"] == {k: 0 for k in corpo["contas"][0]["metricas"]}
+
+
+def test_funil_linkedin_numeros_captados_vem_do_pipedrive(monkeypatch):
+    cliente = _client(monkeypatch)
+    chamadas = []
+    monkeypatch.setattr(
+        funil_pipedrive_mod,
+        "buscar_pipedrive",
+        lambda inicio, fim: chamadas.append((inicio, fim))
+        or DadosPipedrive(
+            [Fato("numeros_captados", "linkedin", 1, 501, "2026-11-02"), Fato("numeros_captados", "linkedin", 1, 502, "2026-11-03")],
+            {501: (55,)},
+        ),
+    )
+    monkeypatch.setenv("PIPE_ID_ETIQUETA_PESSOA_LINKEDIN_JACOB", "55")
+
+    corpo = cliente.get("/funil/linkedin", params={"granularidade": "mes", "periodo": "2026-11"}).json()
+
+    assert corpo["contas"][0]["metricas"]["numeros_captados"] == 1
+    assert corpo["contas"][0]["metricas"]["conexoes_enviadas"] == 43  # planilha continua
+    assert corpo["contas"][0]["serie"][0]["metricas"]["numeros_captados"] == 1
+    assert corpo["sem_conta"]["numeros_captados"] == 1
+    assert chamadas == [(date(2026, 11, 1), date(2026, 11, 30))]
 
 
 def test_funil_devolve_meta_de_numeros_captados_do_seller_no_periodo(monkeypatch):
@@ -303,6 +333,38 @@ def test_funil_sem_seller_ligado_nao_tem_meta(monkeypatch):
     assert corpo["meta_numeros_captados"] is None
 
 
+def test_funil_com_pipedrive_fora_do_ar_avisa_e_zera(monkeypatch):
+    cliente = _client(monkeypatch)
+    monkeypatch.setattr(funil_pipedrive_mod, "buscar_pipedrive", _BUSCAR_PIPEDRIVE_REAL)
+
+    def negocios_fora_do_ar(inicio):
+        raise fonte_pipedrive_mod.PipedriveIndisponivel("fora")
+
+    monkeypatch.setattr(fonte_pipedrive_mod, "negocios_criados_desde", negocios_fora_do_ar)
+
+    # Falha não vai pro cache: a 2ª requisição tenta o Pipedrive de novo e avisa de novo.
+    for _ in range(2):
+        corpo = cliente.get("/funil/linkedin", params={"granularidade": "mes", "periodo": "2026-11"}).json()
+        assert "fonte_indisponivel:pipedrive" in corpo["avisos"]
+        assert corpo["sem_conta"]["numeros_captados"] == 0
+
+
+def test_funil_instagram_vem_so_da_planilha_sem_consultar_o_pipedrive(monkeypatch):
+    # Decisão de 20/11/2026: o pipeline do Instagram no Pipedrive não é usado; a página volta para a planilha.
+    cliente = _client(monkeypatch)
+
+    def nao_devia_chamar(inicio, fim):
+        raise AssertionError("/funil/instagram não deve consultar o Pipedrive")
+
+    monkeypatch.setattr(funil_pipedrive_mod, "buscar_pipedrive", nao_devia_chamar)
+
+    corpo = cliente.get("/funil/instagram", params={"granularidade": "mes", "periodo": "2026-11"}).json()
+
+    assert corpo["avisos"] == []
+    assert corpo["contas"][0]["metricas"]["conexoes_enviadas"] == 43
+    assert corpo["sem_conta"] == {k: 0 for k in corpo["contas"][0]["metricas"]}
+
+
 def test_funil_canal_invalido_404(monkeypatch):
     resposta = _client(monkeypatch).get("/funil/tiktok", params={"granularidade": "mes", "periodo": "2026-11"})
     assert resposta.status_code == 404
@@ -310,27 +372,43 @@ def test_funil_canal_invalido_404(monkeypatch):
 
 
 def test_funil_sdr_200_com_sdrs_e_metricas_do_dashboard(monkeypatch):
+    monkeypatch.setattr(f"{__name__}._USERS", [*_USERS, {"id": 14, "nome": "Juca", "email": None, "imagem_url": None, "active": True}])
+    monkeypatch.setattr(f"{__name__}._USER_CARGOS", [*_USER_CARGOS, {"id_user": 14, "cargo": "sdr"}])
     client = _client(monkeypatch)
-
-    # Uma conta por canal, com 7 números captados no período.
-    def query_com_numeros(tabela, *a, **kw):
-        if tabela == "metricas_contas":
-            return [{"id_conta": 1, "data": "2026-11-02", "numeros_captados": 7}]
-        return _fake_query(tabela, *a, **kw)
-
-    monkeypatch.setattr(funil_banco_mod, "query", query_com_numeros)
+    monkeypatch.setattr(
+        funil_pipedrive_mod,
+        "buscar_pipedrive",
+        lambda inicio, fim: DadosPipedrive(
+            [
+                Fato("numeros_captados", "linkedin", 1, 501, "2026-11-02"),
+                Fato("numeros_captados", "linkedin", 1, 502, "2026-11-02"),
+                Fato("numeros_captados", "instagram", 1, 503, "2026-11-02"),
+                Fato("abordagens", "linkedin", 28932026, 504, "2026-11-03"),
+                Fato("abordagens", "instagram", 28932026, 505, "2026-11-04"),
+                Fato("respondidos", "linkedin", 28932026, 504, "2026-11-05"),
+                Fato("indicacoes", None, 28932026, 506, "2026-11-05"),
+                Fato("abordagens", "linkedin", 25564860, 507, "2026-11-03"),
+            ],
+            {501: (55,)},
+        ),
+    )
+    monkeypatch.setenv("PIPE_ID_ETIQUETA_PESSOA_LINKEDIN_JACOB", "55")
     resposta = client.get("/funil-sdr", params={"granularidade": "mes", "periodo": "2026-11"})
     assert resposta.status_code == 200
     corpo = resposta.json()
     assert set(corpo) == {"periodo", "dias_uteis", "avisos", "metricas_time", "funil", "sdrs", "evento"}
     assert corpo["evento"] is None  # sem Confraria agendada
-    # Oportunidades = números captados LinkedIn (7) + Instagram (7) + indicações dos SDRs (2).
+    # Oportunidades = números captados LinkedIn do Pipedrive (1 na conta + 1 sem conta) + Instagram da planilha (0;
+    # o Fato do Instagram no Pipedrive é ignorado) + indicações do SDR (1).
     assert corpo["funil"] == {
-        "numeros_captados": 14, "indicacoes": 2, "oportunidades": 16, "abordados": 12, "respondidos": 5, "inscritos": 3,
+        "numeros_captados": 2, "indicacoes": 1, "oportunidades": 3, "abordados": 2, "respondidos": 1, "inscritos": 3,
     }
-    assert [(s["id_user"], s["nome"], s["metricas"]["inscricoes_realizadas"]) for s in corpo["sdrs"]] == [("9", "Nathan", 3)]
-    inscricoes = corpo["metricas_time"][0]
-    assert (inscricoes["metrica"], inscricoes["realizado"], inscricoes["meta_periodo"]) == ("inscricoes_realizadas", 3, 88)
+    assert [(s["nome"], s["metricas"]["abordagens"], s["metricas"]["respondidos"], s["metricas"]["indicacoes"], s["metricas"]["inscricoes_realizadas"]) for s in corpo["sdrs"]] == [
+        ("Nathan", 0, 0, 0, 3),
+        ("Juca", 2, 1, 1, 0),
+    ]
+    indicacoes = next(m for m in corpo["metricas_time"] if m["metrica"] == "indicacoes")
+    assert indicacoes["realizado"] == 1
     assert corpo["avisos"] == []
 
 

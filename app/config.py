@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import os
+import re
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import time
 
@@ -13,6 +15,13 @@ load_dotenv()
 def _cors_origins() -> list[str]:
     bruto = os.getenv("CORS_ORIGINS", "http://localhost:5173")
     return [origem.strip() for origem in bruto.split(",") if origem.strip()]
+
+
+def _int_env(nome: str) -> int | None:
+    valor = os.getenv(nome)
+    if valor is None or not valor.strip():
+        return None
+    return int(valor)
 
 
 @dataclass(frozen=True)
@@ -87,6 +96,41 @@ class Settings:
     planilha_logs_id: str | None = field(
         default_factory=lambda: os.getenv("PLANILHA_LOGS_ID") or None
     )
+    # Pipedrive (API v2), lido ao vivo pelo BFF — docs/plans/pipedrive-fonte-de-dados.md.
+    pipe_token: str | None = field(default_factory=lambda: os.getenv("PIPE_TOKEN") or None)
+    pipe_base_url_v2: str | None = field(
+        default_factory=lambda: (os.getenv("PIPE_BASE_URL_V2") or "").rstrip("/") or None
+    )
+    pipe_id_pipeline_instagram: int | None = field(
+        default_factory=lambda: _int_env("PIPE_ID_PIPELINE_INSTAGRAM")
+    )
+    pipe_id_abordados_pipeline_linkedin: int | None = field(
+        default_factory=lambda: _int_env("PIPE_ID_ABORDADOS_PIPELINE_LINKEDIN")
+    )
+    pipe_id_respondidos_pipeline_linkedin: int | None = field(
+        default_factory=lambda: _int_env("PIPE_ID_RESPONDIDOS_PIPELINE_LINKEDIN")
+    )
+    pipe_id_abordados_pipeline_instagram: int | None = field(
+        default_factory=lambda: _int_env("PIPE_ID_ABORDADOS_PIPELINE_INSTAGRAM")
+    )
+    pipe_id_respondidos_pipeline_instagram: int | None = field(
+        default_factory=lambda: _int_env("PIPE_ID_RESPONDIDOS_PIPELINE_INSTAGRAM")
+    )
+    pipe_id_etiqueta_negocio_linkedin: int | None = field(
+        default_factory=lambda: _int_env("PIPE_ID_ETIQUETA_NEGOCIO_LINKEDIN")
+    )
+    pipe_id_etiqueta_negocio_indicacao: int | None = field(
+        default_factory=lambda: _int_env("PIPE_ID_ETIQUETA_NEGOCIO_INDICACAO")
+    )
 
 
 settings = Settings()
+
+
+def etiqueta_pessoa(canal: str, conta: str) -> int | None:
+    """Id da etiqueta de pessoa que marca a conta no Pipedrive: env PIPE_ID_ETIQUETA_PESSOA_<CANAL>_<CONTA> (conta sem acento, maiúscula, o que não é letra/dígito vira _). Lida na hora, para contas novas não exigirem restart."""
+    sem_acento = "".join(
+        c for c in unicodedata.normalize("NFKD", conta) if not unicodedata.combining(c)
+    )
+    sufixo = re.sub(r"[^A-Z0-9]+", "_", sem_acento.upper()).strip("_")
+    return _int_env(f"PIPE_ID_ETIQUETA_PESSOA_{canal.upper()}_{sufixo}")
