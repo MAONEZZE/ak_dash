@@ -174,7 +174,14 @@ def buscar_proximo_evento(agora: datetime) -> EventoInscricoes | None:
     """O evento (qualquer título, não só Confraria) com `event_date` a partir de
     `agora` mais próximo, com as inscrições dele — padrão do velocímetro do
     Funil SDR. `None` quando não há nenhum agendado (ou sem as envs do SED)."""
-    eventos = _buscar_confrarias(f'(event_date.gte."{_instante_utc(agora)}")', 1, so_confrarias=False)
+    eventos = _buscar_confrarias(f'(event_date.gte."{_instante_utc(agora)}")', 1, filtro_titulo=None)
+    return eventos[0] if eventos else None
+
+
+def buscar_proxima_imersao(agora: datetime) -> EventoInscricoes | None:
+    """A Imersão com `event_date` a partir de `agora` mais próxima, com as inscrições — padrão do
+    Funil Evento sem evento escolhido. `None` quando não há nenhuma agendada."""
+    eventos = _buscar_confrarias(f'(event_date.gte."{_instante_utc(agora)}")', 1, filtro_titulo=FILTRO_TITULO_IMERSOES)
     return eventos[0] if eventos else None
 
 
@@ -210,7 +217,7 @@ def listar_imersoes(limite: int = LIMITE_EVENTOS) -> list[dict]:
 def buscar_evento(id_evento: str) -> EventoInscricoes | None:
     """Um evento pelo id (qualquer título), com as inscrições — o escolhido no
     filtro de evento. Quem chama valida o id antes: ele vai dentro do filtro do PostgREST."""
-    eventos = _buscar_confrarias(f'(id.eq."{id_evento}")', 1, so_confrarias=False)
+    eventos = _buscar_confrarias(f'(id.eq."{id_evento}")', 1, filtro_titulo=None)
     return eventos[0] if eventos else None
 
 
@@ -237,11 +244,11 @@ def contar_inscritos_no_periodo(id_evento: str, inicio: date, fim: date) -> int:
     )
 
 
-def _buscar_confrarias(filtro_data: str, limite: int, *, so_confrarias: bool = True) -> list[EventoInscricoes]:
-    """`so_confrarias=False` tira o filtro de título: o Funil SDR olha qualquer evento."""
+def _buscar_confrarias(filtro_data: str, limite: int, *, filtro_titulo: str | None = FILTRO_TITULO_EVENTOS) -> list[EventoInscricoes]:
+    """`filtro_titulo=None` tira o filtro de título: o Funil SDR olha qualquer evento."""
     filtros = {"and": filtro_data, "order": "event_date.asc", "limit": str(limite)}
-    if so_confrarias:
-        filtros["title"] = FILTRO_TITULO_EVENTOS
+    if filtro_titulo:
+        filtros["title"] = filtro_titulo
     eventos = query(
         "events",
         filtros,

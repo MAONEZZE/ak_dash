@@ -315,6 +315,19 @@ def test_sem_proximo_evento_devolve_none(monkeypatch):
     assert banco_mod.buscar_proximo_evento(datetime(2026, 11, 17, tzinfo=banco_mod.TZ_SP)) is None
 
 
+def test_proxima_imersao_filtra_titulo_e_data_a_partir_de_agora(monkeypatch):
+    chamadas = _mockar_duas_queries(
+        monkeypatch,
+        [{"id": "i2", "title": "Imersão Alta Cadência", "event_date": "2026-12-02T16:00:00+00:00", "capacity": 60}],
+        [{"event_id": "i2", "status": "approved"}, {"event_id": "i2", "status": "pending"}, {"event_id": "i2", "status": "rejected"}],
+    )
+    evento = banco_mod.buscar_proxima_imersao(datetime(2026, 11, 17, 10, 30, tzinfo=banco_mod.TZ_SP))
+    assert (evento.id, evento.inscritos, evento.aprovados, evento.pendentes, evento.rejeitados) == ("i2", 3, 1, 1, 1)
+    assert chamadas[0]["filtros"]["title"] == "ilike.*imers*"
+    assert chamadas[0]["filtros"]["and"] == '(event_date.gte."2026-11-17T13:30:00Z")'
+    assert chamadas[0]["filtros"]["limit"] == "1"
+
+
 # --- buscar_logs (dash2.logs_pipedrive, espelho da planilha de logs)
 
 
