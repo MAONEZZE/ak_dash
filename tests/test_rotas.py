@@ -638,3 +638,13 @@ def test_no_stdout_so_saem_as_primeiras_leituras_com_horario_de_sp(monkeypatch):
     assert handler.filter(registro)
     aviso = logging.LogRecord("app.workers", logging.WARNING, "", 0, "Planilha sdrs: aba 'SDR3' pulada", None, None)
     assert not handler.filter(aviso)
+
+
+def test_funil_evento_parametro_invalido_400(monkeypatch):
+    client = _client(monkeypatch)
+    evento_invalido = client.get(
+        "/funil-evento", params={"granularidade": "mes", "periodo": "2026-11", "evento": 'x",title.neq.y'}
+    )
+    periodo_invalido = client.get("/funil-evento", params={"granularidade": "mes", "periodo": "xx"})
+    assert evento_invalido.status_code == 400
+    assert periodo_invalido.status_code == 400
