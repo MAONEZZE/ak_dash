@@ -566,6 +566,29 @@ def test_funil_evento_com_evento_escolhido_usa_a_data_dele(monkeypatch):
     assert chamadas_pipedrive == [(date(2026, 11, 17), date(2026, 11, 16), date(2026, 11, 22))]
 
 
+def test_funil_evento_sem_imersao_zera_o_funil(monkeypatch):
+    client = _client(monkeypatch)
+    chamadas_pipedrive: list[tuple] = []
+
+    def fake_pipedrive(data_evento, inicio, fim):
+        chamadas_pipedrive.append((data_evento, inicio, fim))
+        return dict(funil_evento_mod.ZERADO)
+
+    def query_sem_imersao(tabela, filtros=None, *a, **kw):
+        if tabela in ("events", "registrations"):
+            return []
+        return _fake_query(tabela, filtros, *a, **kw)
+
+    monkeypatch.setattr(funil_evento_mod, "buscar_pipedrive_evento", fake_pipedrive)
+    monkeypatch.setattr(geral_banco_mod, "query", query_sem_imersao)
+    resposta = client.get("/funil-evento", params={"granularidade": "mes", "periodo": "2026-11"})
+    assert resposta.status_code == 200
+    corpo = resposta.json()
+    assert corpo["evento"] is None
+    assert corpo["funil"] == {"inscritos": 0, "onboarding_agendado": 0, "onboarding_realizado": 0, "comparecimento": 0, "vendas": 0}
+    assert chamadas_pipedrive == []
+
+
 def test_funil_sdr_periodo_invalido_400(monkeypatch):
     resposta = _client(monkeypatch).get("/funil-sdr", params={"granularidade": "mes", "periodo": "xx"})
     assert resposta.status_code == 400
