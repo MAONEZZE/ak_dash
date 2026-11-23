@@ -499,10 +499,13 @@ def test_funil_sdr_no_filtro_de_dia_busca_a_semana_ate_o_dia_para_o_grafico(monk
     assert filtros_sdr == [{"and": "(data.gte.2026-11-10,data.lte.2026-11-16)"}]
 
 
-def test_logs_info_do_app_saem_no_stdout_com_horario():
+def test_no_stdout_so_saem_as_primeiras_leituras_com_horario_de_sp(monkeypatch):
     import logging
-    import re
     import sys
+    import time
+
+    monkeypatch.setenv("TZ", "UTC")  # como o container do Easypanel
+    time.tzset()
 
     import app.main  # noqa: F401  (configura o logging ao importar)
 
@@ -511,5 +514,17 @@ def test_logs_info_do_app_saem_no_stdout_com_horario():
     (handler,) = log.handlers
     assert handler.stream is sys.stdout
     registro = logging.LogRecord("app.workers", logging.INFO, "", 0, "Worker teste: primeira leitura ok", None, None)
-    linha = handler.format(registro)
-    assert re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} INFO app\.workers: Worker teste: primeira leitura ok", linha)
+    registro.created = 1795449600.0  # 2026-11-23 16:00:00 UTC
+    try:
+        linha = handler.format(registro)
+    finally:
+        monkeypatch.delenv("TZ")
+        time.tzset()
+    # horário de São Paulo (UTC-3), não o do container
+    assert linha == "2026-11-23 13:00:00 INFO app.workers: Worker teste: primeira leitura ok"
+
+    # no painel só sai o que vem marcado `no_painel` (as "primeiras leituras ok"); avisos e erros não
+    registro.no_painel = True
+    assert handler.filter(registro)
+    aviso = logging.LogRecord("app.workers", logging.WARNING, "", 0, "Planilha sdrs: aba 'SDR3' pulada", None, None)
+    assert not handler.filter(aviso)

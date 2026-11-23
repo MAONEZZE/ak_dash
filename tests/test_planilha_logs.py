@@ -75,7 +75,8 @@ def test_linha_sem_data_ou_atividade_vai_para_invalidas_e_vazia_e_ignorada():
     leitura = planilha_logs.ler_logs([CABECALHO, ok, sem_data, sem_atividade, vazia, []])
 
     assert len(leitura.eventos) == 1
-    assert leitura.invalidas == [tuple(sem_data), tuple(sem_atividade)]
+    # número da linha na planilha (cabeçalho = linha 1): o log aponta a linha sem expor nome/telefone do lead
+    assert leitura.invalidas == [3, 4]
 
 
 def test_cabecalho_sem_coluna_obrigatoria_levanta_value_error():

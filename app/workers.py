@@ -29,9 +29,6 @@ from app.planilhas import (
 
 logger = logging.getLogger(__name__)
 
-# De quanto em quanto tempo cada worker loga que segue lendo ok (prova de vida nos logs do deploy).
-PULSO_SEGUNDOS = 600
-
 
 @dataclass(frozen=True)
 class Planilha:
@@ -45,10 +42,8 @@ CLOSERS = Planilha("closers", "metricas_closers", "closer")
 
 
 class Worker:
-    # Estado dos logs de vida (padrão na classe: subclasses com __init__ próprio também têm).
-    _ultimo_log_ok: datetime | None = None
-    _ciclos_ok = 0
-    _em_erro = False
+    # Já logou a primeira leitura ok? (na classe: subclasses com __init__ próprio também têm)
+    _leu_ok = False
 
     def __init__(
         self,
@@ -185,22 +180,12 @@ class Worker:
         except Exception as erro:  # rede do Google/Supabase, 429, planilha sem acesso: não derruba o worker
             self.status["ultimo_erro"] = {"em": self.agora().isoformat(), "mensagem": f"{type(erro).__name__}: {erro}"}
             logger.warning("Worker %s: ciclo falhou", self.planilha.nome, exc_info=True)
-            self._em_erro = True
             return
-        agora = self.agora()
-        self.status["ultima_leitura_ok"] = agora.isoformat()
-        self._ciclos_ok += 1
-        if self._ultimo_log_ok is None:
-            logger.info("Worker %s: primeira leitura ok", self.planilha.nome)
-        elif self._em_erro:
-            logger.info("Worker %s: voltou a ler ok depois de erro", self.planilha.nome)
-        elif (agora - self._ultimo_log_ok).total_seconds() >= PULSO_SEGUNDOS:
-            logger.info("Worker %s: ok, %d leituras desde o último log", self.planilha.nome, self._ciclos_ok)
-        else:
-            return
-        self._ultimo_log_ok = agora
-        self._ciclos_ok = 0
-        self._em_erro = False
+        self.status["ultima_leitura_ok"] = self.agora().isoformat()
+        if not self._leu_ok:
+            self._leu_ok = True
+            # única linha que aparece no painel do deploy (filtro em app/main.py)
+            logger.info("Worker %s: primeira leitura ok", self.planilha.nome, extra={"no_painel": True})
 
     def rodar(self, parar: threading.Event, intervalo: float) -> None:
         """Agenda um ciclo a cada `intervalo` segundos (WORKER_INTERVALO_SEGUNDOS), contado do início do ciclo anterior. Ciclo mais longo que o intervalo: o próximo começa logo em seguida, sem sobrepor."""
@@ -605,10 +590,11 @@ class WorkerLogs(Worker):
         if "Logs" not in abas:
             raise RuntimeError("aba Logs não encontrada na planilha de logs")
         leitura = ler_logs(abas["Logs"])
-        for linha in leitura.invalidas:
-            if linha not in self._puladas:
-                self._puladas.add(linha)
-                logger.warning("Planilha logs: linha ignorada (sem data válida ou sem atividade): %s", list(linha))
+        for numero in leitura.invalidas:
+            # só o número da linha: o conteúdo tem nome e telefone de lead
+            if ("linha", numero) not in self._puladas:
+                self._puladas.add(("linha", numero))
+                logger.warning("Planilha logs: linha %d da aba Logs ignorada (sem data válida ou sem atividade)", numero)
         if not leitura.eventos:
             # leitura vazia não pode esvaziar a tabela (mesmo cuidado do financeiro)
             raise RuntimeError("aba Logs sem nenhum evento válido; nada foi apagado")
@@ -653,25 +639,8 @@ def iniciar(config: Settings) -> threading.Event:
     parar = threading.Event()
     ATIVOS.clear()
     MOTIVO_INATIVOS = None
-    ids = {
-        "sdrs": config.planilha_sdrs_id,
-        "closers": config.planilha_closers_id,
-        "funil_linkedin": config.planilha_funil_linkedin_id,
-        "funil_instagram": config.planilha_funil_instagram_id,
-        "financeiro": config.planilha_financeiro_id,
-        "logs": config.planilha_logs_id,
-    }
     if not config.workers_ativos:
-        logger.info("Workers das planilhas desligados (WORKERS_ATIVOS=false)")
         return parar
-    logger.info(
-        "Workers das planilhas: WORKERS_ATIVOS=true, intervalo=%ss, credencial google=%s, supabase=%s, com id: %s; sem id: %s",
-        config.worker_intervalo_segundos,
-        "sim" if config.google_service_account_json else "não",
-        "sim" if config.supabase_url and config.supabase_service_key else "não",
-        ", ".join(n for n, i in ids.items() if i) or "nenhuma",
-        ", ".join(n for n, i in ids.items() if not i) or "nenhuma",
-    )
     if not config.google_service_account_json:
         motivo = "GOOGLE_SERVICE_ACCOUNT_JSON ausente ou ilegível no .env"
     elif not (config.supabase_url and config.supabase_service_key):

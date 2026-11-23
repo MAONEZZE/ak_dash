@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import sys
 from contextlib import asynccontextmanager
+from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,13 +16,18 @@ from app.dominios.financeiro.rotas import router as financeiro_router
 from app.dominios.funil.rotas import router as funil_router
 from app.dominios.geral.rotas import router as geral_router
 from app.dominios.pessoas.rotas import router as pessoas_router
+from app.periodo import TZ_SP
 
-# Logs do app (workers, fontes) no stdout com horário, a partir de INFO — é o que o Easypanel mostra.
-# Só o logger "app": httpx e cia. ficam de fora (logariam cada request ao Supabase/Google).
+# Painel do Easypanel (stdout): só as linhas marcadas `no_painel` (as "primeiras leituras ok" dos workers),
+# com horário de SP. Os demais logs do app ficam fora; erros dos workers seguem no /saude.
 _log_app = logging.getLogger("app")
 if not _log_app.handlers:
     _saida = logging.StreamHandler(sys.stdout)
-    _saida.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s", "%Y-%m-%d %H:%M:%S"))
+    _formato = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s", "%Y-%m-%d %H:%M:%S")
+    # horário de São Paulo, não o do container (UTC no Easypanel)
+    _formato.converter = lambda segundos: datetime.fromtimestamp(segundos, TZ_SP).timetuple()
+    _saida.setFormatter(_formato)
+    _saida.addFilter(lambda registro: getattr(registro, "no_painel", False))
     _log_app.addHandler(_saida)
 _log_app.setLevel(logging.INFO)
 
