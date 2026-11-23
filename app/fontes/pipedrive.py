@@ -58,6 +58,15 @@ def negocios_no_estagio(id_estagio: int, atualizados_desde: datetime) -> list[di
     ]
 
 
+def negocios_ganhos_desde(inicio: datetime) -> list[dict]:
+    """Negócios ganhos atualizados desde `inicio` (ganhar atualiza update_time, então todo ganho no período vem)."""
+    return [
+        negocio
+        for pagina in _paginas("/deals", {"status": "won", "updated_since": _rfc3339(inicio)})
+        for negocio in pagina
+    ]
+
+
 def _momento(texto: str) -> datetime:
     return datetime.fromisoformat(texto.replace("Z", "+00:00"))
 
