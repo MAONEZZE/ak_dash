@@ -384,6 +384,27 @@ def test_lista_os_proximos_eventos_de_qualquer_titulo_do_mais_proximo(monkeypatc
     assert "title" not in chamadas[0]["filtros"]
 
 
+def test_lista_imersoes_passadas_e_futuras_da_mais_recente(monkeypatch):
+    chamadas = _mockar_duas_queries(
+        monkeypatch,
+        [
+            {"id": "i2", "title": "Imersão Alta Cadência", "event_date": "2026-12-02T16:00:00+00:00"},
+            {"id": "i1", "title": None, "event_date": "2026-11-17T12:00:00+00:00"},
+        ],
+        [],
+    )
+    imersoes = banco_mod.listar_imersoes()
+    assert imersoes == [
+        {"id": "i2", "titulo": "Imersão Alta Cadência", "data": "2026-12-02T16:00:00+00:00"},
+        {"id": "i1", "titulo": "Sem título", "data": "2026-11-17T12:00:00+00:00"},
+    ]
+    assert chamadas[0]["tabela"] == "events"
+    assert chamadas[0]["filtros"]["title"] == "ilike.*imers*"
+    assert chamadas[0]["filtros"]["event_date"] == "not.is.null"
+    assert chamadas[0]["filtros"]["order"] == "event_date.desc"
+    assert chamadas[0]["filtros"]["limit"] == "50"
+
+
 def test_evento_escolhido_e_buscado_pelo_id_sem_filtro_de_titulo(monkeypatch):
     chamadas = _mockar_duas_queries(
         monkeypatch,

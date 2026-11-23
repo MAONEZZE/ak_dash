@@ -49,6 +49,9 @@ LIMITE_EVENTOS = 50
 # com `*` dos dois lados = "contém", sem diferenciar maiúsculas.
 FILTRO_TITULO_EVENTOS = "ilike.*confraria akeel*"
 
+# Funil Evento: só Imersões ("imers" pega Imersão e Imersao).
+FILTRO_TITULO_IMERSOES = "ilike.*imers*"
+
 # "Inscrito" = TODA linha de `SED.registrations` do evento, seja qual for o
 # status — o card mede captação (quanta gente se inscreveu), não ocupação de
 # vaga. Por isso não há filtro de status na consulta.
@@ -182,6 +185,20 @@ def listar_proximos_eventos(agora: datetime, limite: int = LIMITE_EVENTOS) -> li
     eventos = query(
         "events",
         {"and": f'(event_date.gte."{_instante_utc(agora)}")', "order": "event_date.asc", "limit": str(limite)},
+        schema=settings.supabase_inscricoes_schema or "public",
+        colunas="id,title,event_date",
+        url_base=settings.supabase_inscricoes_url,
+        service_key=settings.supabase_inscricoes_service_key,
+    )[:limite]
+    return [{"id": str(e["id"]), "titulo": e.get("title") or "Sem título", "data": e["event_date"]} for e in eventos]
+
+
+def listar_imersoes(limite: int = LIMITE_EVENTOS) -> list[dict]:
+    """Opções do filtro de evento do Funil Evento: Imersões com data, passadas e futuras, da mais
+    recente/futura para a mais antiga — só id/título/data."""
+    eventos = query(
+        "events",
+        {"title": FILTRO_TITULO_IMERSOES, "event_date": "not.is.null", "order": "event_date.desc", "limit": str(limite)},
         schema=settings.supabase_inscricoes_schema or "public",
         colunas="id,title,event_date",
         url_base=settings.supabase_inscricoes_url,
