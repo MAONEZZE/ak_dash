@@ -1,11 +1,17 @@
 """Funil de Evento: etapas do Pipedrive de uma Imersão. Regras: docs/plans/funil-evento.md."""
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+import logging
+from datetime import date, datetime, time, timezone
 
+from app.config import settings
 from app.dominios.funil.pipedrive import _data_sp, _no_periodo
+from app.fontes import pipedrive as api
+from app.fontes.banco import registrar_falha
 from app.periodo import TZ_SP
 from app.planilhas import normalizar
+
+logger = logging.getLogger(__name__)
 
 ZERADO = {"onboarding_agendado": 0, "onboarding_realizado": 0, "vendas": 0}
 
@@ -42,3 +48,23 @@ def contar_pipedrive_evento(
         "onboarding_realizado": conta(realizados, "stage_change_time"),
         "vendas": conta(ganhos, "won_time"),
     }
+
+
+def buscar_pipedrive_evento(data_evento: date, inicio: date, fim: date) -> dict[str, int]:
+    """Onboarding Agendado/Realizado e Vendas do evento em [inicio, fim]. Pipedrive fora do ar ou sem
+    configuração: ZERADO + falha 'pipedrive' registrada (aviso na tela)."""
+    desde = datetime.combine(inicio, time.min, tzinfo=TZ_SP)
+    try:
+        ids = ids_etiquetas_do_evento(api.etiquetas_de_negocio(), data_evento)
+        if not ids:
+            return dict(ZERADO)
+        agendado = settings.pipe_id_onboarding_agendado_pipeline_linkedin
+        realizado = settings.pipe_id_onboarding_realizado_pipeline_linkedin
+        agendados = api.negocios_no_estagio(agendado, desde) if agendado is not None else []
+        realizados = api.negocios_no_estagio(realizado, desde) if realizado is not None else []
+        ganhos = api.negocios_ganhos_desde(desde)
+    except api.PipedriveIndisponivel:
+        logger.warning("Pipedrive indisponível — etapas do Funil Evento zeradas", exc_info=True)
+        registrar_falha("pipedrive")
+        return dict(ZERADO)
+    return contar_pipedrive_evento(ids, agendados, realizados, ganhos, inicio, fim)
