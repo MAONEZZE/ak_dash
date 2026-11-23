@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
@@ -13,6 +15,15 @@ from app.dominios.financeiro.rotas import router as financeiro_router
 from app.dominios.funil.rotas import router as funil_router
 from app.dominios.geral.rotas import router as geral_router
 from app.dominios.pessoas.rotas import router as pessoas_router
+
+# Logs do app (workers, fontes) no stdout com horário, a partir de INFO — é o que o Easypanel mostra.
+# Só o logger "app": httpx e cia. ficam de fora (logariam cada request ao Supabase/Google).
+_log_app = logging.getLogger("app")
+if not _log_app.handlers:
+    _saida = logging.StreamHandler(sys.stdout)
+    _saida.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s", "%Y-%m-%d %H:%M:%S"))
+    _log_app.addHandler(_saida)
+_log_app.setLevel(logging.INFO)
 
 @asynccontextmanager
 async def _ciclo_de_vida(_app: FastAPI):

@@ -20,21 +20,54 @@ def _limpar_ativos():
 
 
 class _Banco:
-    def __init__(self, tabelas):
+    def __init__(self, tabelas, persistir=True):
         self.tabelas = tabelas            # nome -> list[dict]
+        self.persistir = persistir        # True: upsert/apagar mudam `tabelas`, como o Supabase
         self.consultas = []               # (tabela, filtros, colunas)
         self.upserts = []                 # (tabela, linhas, on_conflict)
         self.apagados = []                # (tabela, filtros)
 
     def query(self, tabela, filtros=None, schema=None, colunas="*", **kwargs):
         self.consultas.append((tabela, filtros, colunas))
-        return [dict(l) for l in self.tabelas.get(tabela, [])]
+        linhas = self.tabelas.get(tabela, [])
+        if colunas == "*":
+            return [dict(l) for l in linhas]
+        return [{c: l.get(c) for c in colunas.split(",")} for l in linhas]
 
     def upsert(self, tabela, linhas, on_conflict, schema=None):
         self.upserts.append((tabela, [dict(l) for l in linhas], on_conflict))
+        if not self.persistir:
+            return
+        chaves = on_conflict.split(",")
+        atuais = self.tabelas.setdefault(tabela, [])
+        for nova in linhas:
+            igual = next((l for l in atuais if all(l.get(k) == nova.get(k) for k in chaves)), None)
+            if igual is None:
+                atuais.append(dict(nova))
+            else:
+                igual.update(nova)
 
     def apagar(self, tabela, filtros, schema=None):
         self.apagados.append((tabela, dict(filtros)))
+        if not self.persistir:
+            return
+
+        def casa(linha):
+            for coluna, filtro in filtros.items():
+                valor = linha.get(coluna)
+                if filtro == "is.null":
+                    ok = valor is None
+                elif filtro.startswith("eq."):
+                    ok = str(valor) == filtro[3:]
+                elif filtro.startswith("in.("):
+                    ok = str(valor) in filtro[4:-1].split(",")
+                else:
+                    ok = True
+                if not ok:
+                    return False
+            return True
+
+        self.tabelas[tabela] = [l for l in self.tabelas.get(tabela, []) if not casa(l)]
 
 
 def _instalar(monkeypatch, banco):
@@ -147,7 +180,7 @@ def test_meta_alterada_regrava_e_meta_apagada_e_removida(monkeypatch):
     banco = _Banco({
         "users": [{"id": 12, "nome": "Isaque"}],
         "user_cargos": [{"id_user": 12}],
-        "metas": [{"id_user": 12, "metrica": "fups", "valor_diario": 50}, {"id_user": 12, "metrica": "numeros_captados", "valor_diario": 3}],
+        "metas": [{"id_user": 12, "cargo": "seller", "metrica": "fups", "valor_diario": 50}, {"id_user": 12, "cargo": "seller", "metrica": "numeros_captados", "valor_diario": 3}],
     })
     _instalar(monkeypatch, banco)
     w, _ = _worker([("Isaque", [CABECALHO, ["Meta diária", None, 0]])])
@@ -429,7 +462,7 @@ def test_rodar_repete_ate_o_evento_de_parada(monkeypatch):
 
 
 def test_virada_do_mes_recarrega_estado_e_grava_no_mes_novo(monkeypatch):
-    banco = _Banco({"users": [{"id": 12, "nome": "Isaque"}], "user_cargos": [{"id_user": 12}]})
+    banco = _Banco({"users": [{"id": 12, "nome": "Isaque"}], "user_cargos": [{"id_user": 12}]}, persistir=False)  # o falso não filtra por mês
     _instalar(monkeypatch, banco)
     dias = {"hoje": date(2026, 10, 31)}
     w = workers.Worker(SELLERS, "ID_SELLERS", lambda _id: [("Isaque", [CABECALHO, ["Meta diária", 50], [1, 9]])], hoje=lambda: dias["hoje"])
@@ -574,7 +607,7 @@ def test_financeiro_cria_cliente_novo_e_reaproveita_cliente_sem_telefone_pelo_no
         "cliente_faturamento": [{"id": 90, "nome": "Renata Perri", "telefone": 0}],
         "metricas_faturamento": [],
         "recebimentos_faturamento": [],
-    })
+    }, persistir=False)  # o upsert acima já guarda os clientes
     _instalar(monkeypatch, banco)
     cab_fin = ["ID", "Data da Venda"] + [""] * 44
     def linha(id_, nome, telefone):
@@ -1011,3 +1044,98 @@ def test_worker_sdr_dashboard_irreconhecivel_falha_sem_apagar_metas(monkeypatch)
 
     assert banco.apagados == []
     assert "Dashboard SDR" in w.status["ultimo_erro"]["mensagem"]
+
+
+def test_iniciar_loga_o_diagnostico_da_subida(monkeypatch, caplog):
+    monkeypatch.setattr(workers.Worker, "rodar", lambda self, parar, intervalo: None)
+    monkeypatch.setattr(workers, "criar_credenciais", lambda texto: object())
+    base = dataclasses.replace(
+        config.settings,
+        supabase_url="https://x.supabase.co",
+        supabase_service_key="k",
+        google_service_account_json='{"private_key": "SEGREDO"}',
+        planilha_sdrs_id="S",
+        planilha_closers_id=None,
+        planilha_funil_linkedin_id=None,
+        planilha_funil_instagram_id=None,
+        planilha_financeiro_id=None,
+        planilha_logs_id=None,
+        worker_intervalo_segundos=5.0,
+    )
+    caplog.set_level(logging.INFO, logger="app.workers")
+
+    workers.iniciar(dataclasses.replace(base, workers_ativos=False))
+    workers.iniciar(dataclasses.replace(base, workers_ativos=True))
+
+    texto = "\n".join(r.getMessage() for r in caplog.records)
+    assert "WORKERS_ATIVOS=false" in texto and "desligados" in texto
+    assert "WORKERS_ATIVOS=true" in texto
+    assert "sem id: closers, funil_linkedin, funil_instagram, financeiro, logs" in texto
+    assert "Workers das planilhas ativos: ['sdrs']" in texto
+    assert "SEGREDO" not in texto
+
+
+def test_executar_ciclo_loga_primeira_leitura_recuperacao_e_pulso(monkeypatch, caplog):
+    banco = _Banco({"users": [{"id": 12, "nome": "Isaque"}], "user_cargos": [{"id_user": 12}]})
+    _instalar(monkeypatch, banco)
+    relogio = {"agora": datetime(2026, 10, 27, 10, 0, tzinfo=TZ_SP)}
+    w = workers.Worker(
+        SELLERS,
+        "ID_SELLERS",
+        lambda _id: [("Isaque", [CABECALHO, ["Meta diária", 50], [5, 10]])],
+        hoje=lambda: date(2026, 10, 27),
+        agora=lambda: relogio["agora"],
+    )
+    caplog.set_level(logging.INFO, logger="app.workers")
+
+    def infos():
+        return [r.getMessage() for r in caplog.records if r.levelno == logging.INFO]
+
+    w.executar_ciclo()
+    w.executar_ciclo()
+    assert infos() == ["Worker sellers: primeira leitura ok"]
+
+    w.ciclo = lambda: (_ for _ in ()).throw(RuntimeError("caiu"))
+    w.executar_ciclo()
+    del w.ciclo
+    w.executar_ciclo()
+    assert infos()[-1] == "Worker sellers: voltou a ler ok depois de erro"
+
+    relogio["agora"] = datetime(2026, 10, 27, 10, 11, tzinfo=TZ_SP)
+    w.executar_ciclo()
+    assert infos()[-1].startswith("Worker sellers: ok, ")
+
+
+def test_cada_ciclo_le_o_estado_do_banco_e_regrava_o_que_sumiu_por_fora(monkeypatch):
+    banco = _Banco({"users": [{"id": 12, "nome": "Isaque"}], "user_cargos": [{"id_user": 12}]}, persistir=True)
+    _instalar(monkeypatch, banco)
+    w, _ = _worker([("Isaque", [CABECALHO, ["Meta diária", 50, 3], [5, 10, 2], [6, 4]])])
+    w.ciclo()
+    # outro processo apaga a linha do dia 05 direto no banco
+    banco.tabelas["metricas_sellers"] = [l for l in banco.tabelas["metricas_sellers"] if l["data"] != "2026-10-05"]
+    banco.upserts.clear()
+
+    w.ciclo()
+
+    assert [(t, [l["key_data_ref_user"] for l in linhas]) for t, linhas, _ in banco.upserts] == [
+        ("metricas_sellers", ["05/10/2026-isaque"])
+    ]
+
+
+def test_rodar_agenda_um_ciclo_a_cada_intervalo_contado_do_inicio(monkeypatch):
+    relogio = {"t": 100.0}
+    monkeypatch.setattr(workers.time, "monotonic", lambda: relogio["t"])
+    duracoes = iter([3.0, 7.0, 1.0])
+    w, _ = _worker([])
+    w.executar_ciclo = lambda: relogio.__setitem__("t", relogio["t"] + next(duracoes))
+    esperas = []
+
+    class _Parar:
+        def wait(self, segundos):
+            esperas.append(segundos)
+            relogio["t"] += segundos
+            return len(esperas) == 3
+
+    w.rodar(_Parar(), 5.0)
+
+    assert esperas == [2.0, 0.0, 4.0]

@@ -497,3 +497,19 @@ def test_funil_sdr_no_filtro_de_dia_busca_a_semana_ate_o_dia_para_o_grafico(monk
     resposta = client.get("/funil-sdr", params={"granularidade": "dia", "periodo": "2026-11-16"})
     assert resposta.status_code == 200
     assert filtros_sdr == [{"and": "(data.gte.2026-11-10,data.lte.2026-11-16)"}]
+
+
+def test_logs_info_do_app_saem_no_stdout_com_horario():
+    import logging
+    import re
+    import sys
+
+    import app.main  # noqa: F401  (configura o logging ao importar)
+
+    log = logging.getLogger("app")
+    assert log.getEffectiveLevel() == logging.INFO
+    (handler,) = log.handlers
+    assert handler.stream is sys.stdout
+    registro = logging.LogRecord("app.workers", logging.INFO, "", 0, "Worker teste: primeira leitura ok", None, None)
+    linha = handler.format(registro)
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} INFO app\.workers: Worker teste: primeira leitura ok", linha)

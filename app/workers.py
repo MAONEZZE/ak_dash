@@ -1,8 +1,9 @@
-"""Workers que espelham as planilhas (SDRs, inclusive o Funil SDR, Closers, funis LinkedIn/Instagram, Financeiro, Logs) no schema dash_new a cada N segundos. Substituem os fluxos n8n de métricas. Gravam só o que mudou (estado em memória, carregado do banco na subida e na virada do mês), no mês corrente em America/Sao_Paulo. Nunca criam usuário nem cargo: aba de quem não está em users/user_cargos é pulada."""
+"""Workers que espelham as planilhas (SDRs, inclusive o Funil SDR, Closers, funis LinkedIn/Instagram, Financeiro, Logs) no schema dash_new a cada N segundos. Substituem os fluxos n8n de métricas. Cada ciclo é um job independente, agendado a cada WORKER_INTERVALO_SEGUNDOS: lê o estado atual do banco, compara com a planilha e grava só a diferença (o que outro processo mudar no banco é corrigido no job seguinte), no mês corrente em America/Sao_Paulo. Nunca criam usuário nem cargo: aba de quem não está em users/user_cargos é pulada."""
 from __future__ import annotations
 
 import logging
 import threading
+import time
 from calendar import monthrange
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -28,6 +29,9 @@ from app.planilhas import (
 
 logger = logging.getLogger(__name__)
 
+# De quanto em quanto tempo cada worker loga que segue lendo ok (prova de vida nos logs do deploy).
+PULSO_SEGUNDOS = 600
+
 
 @dataclass(frozen=True)
 class Planilha:
@@ -41,6 +45,11 @@ CLOSERS = Planilha("closers", "metricas_closers", "closer")
 
 
 class Worker:
+    # Estado dos logs de vida (padrão na classe: subclasses com __init__ próprio também têm).
+    _ultimo_log_ok: datetime | None = None
+    _ciclos_ok = 0
+    _em_erro = False
+
     def __init__(
         self,
         planilha: Planilha,
@@ -54,7 +63,6 @@ class Worker:
         self.ler_abas = ler_abas
         self.hoje = hoje
         self.agora = agora
-        self.mes: tuple[int, int] | None = None
         self.metricas: dict[str, dict] = {}
         self.metas: dict[tuple[int, str], int] = {}
         self.status = {"ultima_leitura_ok": None, "ultimo_erro": None}
@@ -83,12 +91,10 @@ class Worker:
             (l["id_user"], l["metrica"]): l["valor_diario"]
             for l in self._consultar("metas", {"cargo": f"eq.{self.planilha.cargo}"}, "id_user,metrica,valor_diario")
         }
-        self.mes = (ano, mes)
 
     def ciclo(self) -> None:
         hoje = self.hoje()
-        if (hoje.year, hoje.month) != self.mes:
-            self._carregar_estado(hoje.year, hoje.month)
+        self._carregar_estado(hoje.year, hoje.month)  # estado sempre do banco: cada ciclo é um job independente
 
         abas = [a for titulo, linhas in self.ler_abas(self.planilha_id) if (a := ler_linhas(titulo, linhas)) is not None]
         usuarios = self._consultar("users", {}, "id,nome")
@@ -179,13 +185,29 @@ class Worker:
         except Exception as erro:  # rede do Google/Supabase, 429, planilha sem acesso: não derruba o worker
             self.status["ultimo_erro"] = {"em": self.agora().isoformat(), "mensagem": f"{type(erro).__name__}: {erro}"}
             logger.warning("Worker %s: ciclo falhou", self.planilha.nome, exc_info=True)
+            self._em_erro = True
             return
-        self.status["ultima_leitura_ok"] = self.agora().isoformat()
+        agora = self.agora()
+        self.status["ultima_leitura_ok"] = agora.isoformat()
+        self._ciclos_ok += 1
+        if self._ultimo_log_ok is None:
+            logger.info("Worker %s: primeira leitura ok", self.planilha.nome)
+        elif self._em_erro:
+            logger.info("Worker %s: voltou a ler ok depois de erro", self.planilha.nome)
+        elif (agora - self._ultimo_log_ok).total_seconds() >= PULSO_SEGUNDOS:
+            logger.info("Worker %s: ok, %d leituras desde o último log", self.planilha.nome, self._ciclos_ok)
+        else:
+            return
+        self._ultimo_log_ok = agora
+        self._ciclos_ok = 0
+        self._em_erro = False
 
     def rodar(self, parar: threading.Event, intervalo: float) -> None:
+        """Agenda um ciclo a cada `intervalo` segundos (WORKER_INTERVALO_SEGUNDOS), contado do início do ciclo anterior. Ciclo mais longo que o intervalo: o próximo começa logo em seguida, sem sobrepor."""
         while True:
+            inicio = time.monotonic()
             self.executar_ciclo()
-            if parar.wait(intervalo):
+            if parar.wait(max(0.0, intervalo - (time.monotonic() - inicio))):
                 return
 
 
@@ -289,8 +311,7 @@ class WorkerSdr(Worker):
 
     def ciclo(self) -> None:
         hoje = self.hoje()
-        if (hoje.year, hoje.month) != self.mes:
-            self._carregar_estado(hoje.year, hoje.month)
+        self._carregar_estado(hoje.year, hoje.month)  # estado sempre do banco: cada ciclo é um job independente
 
         brutas = self.ler_abas(self.planilha_id)
         abas = [a for titulo, linhas in brutas if (a := ler_linhas(titulo, linhas)) is not None]
@@ -380,8 +401,7 @@ class WorkerFunil(Worker):
 
     def ciclo(self) -> None:
         hoje = self.hoje()
-        if (hoje.year, hoje.month) != self.mes:
-            self._carregar_estado(hoje.year, hoje.month)
+        self._carregar_estado(hoje.year, hoje.month)  # estado sempre do banco: cada ciclo é um job independente
 
         abas = [a for titulo, linhas in self.ler_abas(self.planilha_id) if (a := ler_linhas(titulo, linhas)) is not None]
         usuarios = self._consultar("users", {}, "id,nome")
@@ -434,7 +454,8 @@ class WorkerFinanceiro(Worker):
         self.recebimentos: dict[tuple[int, str], dict] = {}
         self.status = {"ultima_leitura_ok": None, "ultimo_erro": None}
         self._puladas: set[str] = set()
-        self._apagar_legado = False
+        # linhas do n8n antes do worker (backup em metricas_faturamento_bkp_20261028): apagadas uma vez por processo
+        self._apagar_legado = True
 
     def _carregar_estado(self) -> None:
         self.vendas = {
@@ -449,8 +470,6 @@ class WorkerFinanceiro(Worker):
             (l["id_planilha_venda"], l["mes"]): l
             for l in self._consultar("recebimentos_faturamento", {}, "id_planilha_venda,mes,pago,liquido")
         }
-        # linhas do n8n antes do worker; backup em metricas_faturamento_bkp_20261028
-        self._apagar_legado = True
 
     def _resolver_clientes(self, lidas: list) -> dict[int, int | None]:
         def casar() -> dict[int, int | None]:
@@ -482,8 +501,7 @@ class WorkerFinanceiro(Worker):
         return resolvidos
 
     def ciclo(self) -> None:
-        if self.vendas is None:
-            self._carregar_estado()
+        self._carregar_estado()  # estado sempre do banco: cada ciclo é um job independente
 
         abas = dict(self.ler_abas(self.planilha_id))
         if "BASE_VENDAS" not in abas:
@@ -581,8 +599,7 @@ class WorkerLogs(Worker):
         }
 
     def ciclo(self) -> None:
-        if self.logs is None:
-            self._carregar_estado()
+        self._carregar_estado()  # estado sempre do banco: cada ciclo é um job independente
 
         abas = dict(self.ler_abas(self.planilha_id))
         if "Logs" not in abas:
@@ -636,8 +653,25 @@ def iniciar(config: Settings) -> threading.Event:
     parar = threading.Event()
     ATIVOS.clear()
     MOTIVO_INATIVOS = None
+    ids = {
+        "sdrs": config.planilha_sdrs_id,
+        "closers": config.planilha_closers_id,
+        "funil_linkedin": config.planilha_funil_linkedin_id,
+        "funil_instagram": config.planilha_funil_instagram_id,
+        "financeiro": config.planilha_financeiro_id,
+        "logs": config.planilha_logs_id,
+    }
     if not config.workers_ativos:
+        logger.info("Workers das planilhas desligados (WORKERS_ATIVOS=false)")
         return parar
+    logger.info(
+        "Workers das planilhas: WORKERS_ATIVOS=true, intervalo=%ss, credencial google=%s, supabase=%s, com id: %s; sem id: %s",
+        config.worker_intervalo_segundos,
+        "sim" if config.google_service_account_json else "não",
+        "sim" if config.supabase_url and config.supabase_service_key else "não",
+        ", ".join(n for n, i in ids.items() if i) or "nenhuma",
+        ", ".join(n for n, i in ids.items() if not i) or "nenhuma",
+    )
     if not config.google_service_account_json:
         motivo = "GOOGLE_SERVICE_ACCOUNT_JSON ausente ou ilegível no .env"
     elif not (config.supabase_url and config.supabase_service_key):
