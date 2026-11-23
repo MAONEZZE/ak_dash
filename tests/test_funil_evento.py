@@ -5,6 +5,7 @@ import dataclasses
 from datetime import date, datetime
 
 from app.dominios.funil import evento
+from app.fontes import banco
 from app.periodo import TZ_SP
 
 
@@ -86,3 +87,16 @@ def test_buscar_pipedrive_evento_busca_as_colunas_de_onboarding_desde_o_inicio_d
     assert resultado == {"onboarding_agendado": 1, "onboarding_realizado": 0, "vendas": 1}
     assert estagios_pedidos == [(44, desde), (46, desde)]
     assert ganhos_pedidos == [desde]
+
+
+def test_pipedrive_fora_do_ar_zera_e_registra_falha(monkeypatch):
+    def fora():
+        raise evento.api.PipedriveIndisponivel("timeout")
+
+    monkeypatch.setattr(evento.api, "etiquetas_de_negocio", fora)
+    banco.iniciar_registro_de_falhas()
+
+    resultado = evento.buscar_pipedrive_evento(date(2026, 12, 2), date(2026, 11, 1), date(2026, 11, 30))
+
+    assert resultado == {"onboarding_agendado": 0, "onboarding_realizado": 0, "vendas": 0}
+    assert banco.tabelas_com_falha() == ["pipedrive"]
