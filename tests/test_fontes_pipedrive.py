@@ -13,7 +13,12 @@ def _configurado(monkeypatch):
     monkeypatch.setattr(
         pipedrive,
         "settings",
-        dataclasses.replace(pipedrive.settings, pipe_token="tok", pipe_base_url_v2="https://x.pipedrive.com/api/v2"),
+        dataclasses.replace(
+            pipedrive.settings,
+            pipe_token="tok",
+            pipe_base_url_v2="https://x.pipedrive.com/api/v2",
+            pipe_base_url_v1="https://x.pipedrive.com/api/v1",
+        ),
     )
 
 
@@ -41,6 +46,27 @@ def test_negocios_no_estagio_pagina_pelo_cursor(monkeypatch):
     assert chamadas[0][1] == {"stage_id": "11", "updated_since": "2026-11-01T03:00:00Z", "limit": "500"}
     assert chamadas[1][1]["cursor"] == "c2"
     assert chamadas[0][2] == {"x-api-token": "tok"}
+
+
+def test_negocios_ganhos_desde_filtra_won_e_pagina_pelo_cursor(monkeypatch):
+    chamadas = []
+    respostas = [
+        _resposta({"data": [{"id": 1}], "additional_data": {"next_cursor": "c2"}}),
+        _resposta({"data": [{"id": 2}], "additional_data": {"next_cursor": None}}),
+    ]
+
+    def _get(url, params=None, headers=None, **kwargs):
+        chamadas.append((url, params))
+        return respostas.pop(0)
+
+    monkeypatch.setattr(pipedrive.httpx, "get", _get)
+
+    negocios = pipedrive.negocios_ganhos_desde(datetime(2026, 11, 1, tzinfo=TZ_SP))
+
+    assert negocios == [{"id": 1}, {"id": 2}]
+    assert chamadas[0][1]["status"] == "won"
+    assert chamadas[0][1]["updated_since"] == "2026-11-01T03:00:00Z"
+    assert chamadas[1][1]["cursor"] == "c2"
 
 
 def test_negocios_criados_desde_para_no_primeiro_anterior_ao_inicio(monkeypatch):
@@ -92,6 +118,19 @@ def test_etiquetas_das_pessoas_em_lotes_de_100(monkeypatch):
     chamadas.clear()
     assert pipedrive.etiquetas_das_pessoas([]) == {}
     assert chamadas == []
+
+
+def test_etiquetas_de_negocio_le_as_opcoes_do_campo_label_na_v1(monkeypatch):
+    chamadas = []
+
+    def _get(url, params=None, headers=None, **kwargs):
+        chamadas.append(url)
+        return _resposta({"data": [{"key": "title"}, {"key": "label", "options": [{"id": 130, "label": "imersão_02/12"}, {"id": 189, "label": "IMERSÃO_17/11"}]}]})
+
+    monkeypatch.setattr(pipedrive.httpx, "get", _get)
+
+    assert pipedrive.etiquetas_de_negocio() == {130: "imersão_02/12", 189: "IMERSÃO_17/11"}
+    assert chamadas == ["https://x.pipedrive.com/api/v1/dealFields"]
 
 
 def test_sem_configuracao_ou_com_erro_sobe_pipedrive_indisponivel(monkeypatch):

@@ -315,6 +315,19 @@ def test_sem_proximo_evento_devolve_none(monkeypatch):
     assert banco_mod.buscar_proximo_evento(datetime(2026, 11, 17, tzinfo=banco_mod.TZ_SP)) is None
 
 
+def test_proxima_imersao_filtra_titulo_e_data_a_partir_de_agora(monkeypatch):
+    chamadas = _mockar_duas_queries(
+        monkeypatch,
+        [{"id": "i2", "title": "Imersão Alta Cadência", "event_date": "2026-12-02T16:00:00+00:00", "capacity": 60}],
+        [{"event_id": "i2", "status": "approved"}, {"event_id": "i2", "status": "pending"}, {"event_id": "i2", "status": "rejected"}],
+    )
+    evento = banco_mod.buscar_proxima_imersao(datetime(2026, 11, 17, 10, 30, tzinfo=banco_mod.TZ_SP))
+    assert (evento.id, evento.inscritos, evento.aprovados, evento.pendentes, evento.rejeitados) == ("i2", 3, 1, 1, 1)
+    assert chamadas[0]["filtros"]["title"] == "ilike.*imers*"
+    assert chamadas[0]["filtros"]["and"] == '(event_date.gte."2026-11-17T13:30:00Z")'
+    assert chamadas[0]["filtros"]["limit"] == "1"
+
+
 # --- buscar_logs (dash2.logs_pipedrive, espelho da planilha de logs)
 
 
@@ -384,6 +397,27 @@ def test_lista_os_proximos_eventos_de_qualquer_titulo_do_mais_proximo(monkeypatc
     assert "title" not in chamadas[0]["filtros"]
 
 
+def test_lista_imersoes_passadas_e_futuras_da_mais_recente(monkeypatch):
+    chamadas = _mockar_duas_queries(
+        monkeypatch,
+        [
+            {"id": "i2", "title": "Imersão Alta Cadência", "event_date": "2026-12-02T16:00:00+00:00"},
+            {"id": "i1", "title": None, "event_date": "2026-11-17T12:00:00+00:00"},
+        ],
+        [],
+    )
+    imersoes = banco_mod.listar_imersoes()
+    assert imersoes == [
+        {"id": "i2", "titulo": "Imersão Alta Cadência", "data": "2026-12-02T16:00:00+00:00"},
+        {"id": "i1", "titulo": "Sem título", "data": "2026-11-17T12:00:00+00:00"},
+    ]
+    assert chamadas[0]["tabela"] == "events"
+    assert chamadas[0]["filtros"]["title"] == "ilike.*imers*"
+    assert chamadas[0]["filtros"]["event_date"] == "not.is.null"
+    assert chamadas[0]["filtros"]["order"] == "event_date.desc"
+    assert chamadas[0]["filtros"]["limit"] == "50"
+
+
 def test_evento_escolhido_e_buscado_pelo_id_sem_filtro_de_titulo(monkeypatch):
     chamadas = _mockar_duas_queries(
         monkeypatch,
@@ -394,3 +428,10 @@ def test_evento_escolhido_e_buscado_pelo_id_sem_filtro_de_titulo(monkeypatch):
     assert (evento.id, evento.pendentes) == ("e1", 1)
     assert chamadas[0]["filtros"]["and"] == '(id.eq."e1")'
     assert "title" not in chamadas[0]["filtros"]
+
+
+def test_comparecimento_conta_checkins_do_evento_de_qualquer_status(monkeypatch):
+    chamadas = _mockar_duas_queries(monkeypatch, [], [{"id": "r1"}, {"id": "r2"}, {"id": "r3"}])
+    assert banco_mod.contar_comparecimento("i2") == 3
+    assert chamadas[0]["tabela"] == "registrations"
+    assert chamadas[0]["filtros"] == {"event_id": "eq.i2", "attended": "is.true"}

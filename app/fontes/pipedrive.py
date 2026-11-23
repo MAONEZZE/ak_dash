@@ -19,12 +19,13 @@ def _rfc3339(momento: datetime) -> str:
     return momento.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _get(caminho: str, params: dict[str, str]) -> dict:
-    if not settings.pipe_token or not settings.pipe_base_url_v2:
-        raise PipedriveIndisponivel("Pipedrive não configurado (PIPE_TOKEN/PIPE_BASE_URL_V2)")
+def _get(caminho: str, params: dict[str, str], versao: str = "v2") -> dict:
+    base = settings.pipe_base_url_v1 if versao == "v1" else settings.pipe_base_url_v2
+    if not settings.pipe_token or not base:
+        raise PipedriveIndisponivel(f"Pipedrive não configurado (PIPE_TOKEN/PIPE_BASE_URL_{versao.upper()})")
     try:
         resposta = httpx.get(
-            f"{settings.pipe_base_url_v2}{caminho}",
+            f"{base}{caminho}",
             params=params,
             headers={"x-api-token": settings.pipe_token},
             timeout=15.0,
@@ -57,6 +58,15 @@ def negocios_no_estagio(id_estagio: int, atualizados_desde: datetime) -> list[di
     ]
 
 
+def negocios_ganhos_desde(inicio: datetime) -> list[dict]:
+    """Negócios ganhos atualizados desde `inicio` (ganhar atualiza update_time, então todo ganho no período vem)."""
+    return [
+        negocio
+        for pagina in _paginas("/deals", {"status": "won", "updated_since": _rfc3339(inicio)})
+        for negocio in pagina
+    ]
+
+
 def _momento(texto: str) -> datetime:
     return datetime.fromisoformat(texto.replace("Z", "+00:00"))
 
@@ -70,6 +80,15 @@ def negocios_criados_desde(inicio: datetime) -> list[dict]:
                 return resultado
             resultado.append(n)
     return resultado
+
+
+def etiquetas_de_negocio() -> dict[int, str]:
+    """Id → texto de cada etiqueta de negócio (campo `label` de /v1/dealFields)."""
+    corpo = _get("/dealFields", {"limit": "500"}, versao="v1")
+    for campo in corpo.get("data") or []:
+        if campo.get("key") == "label":
+            return {int(o["id"]): o["label"] for o in campo.get("options") or []}
+    return {}
 
 
 def etiquetas_das_pessoas(ids: list[int]) -> dict[int, tuple[int, ...]]:
