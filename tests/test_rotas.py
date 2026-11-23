@@ -479,6 +479,25 @@ def test_funil_sdr_eventos_lista_os_proximos_eventos(monkeypatch):
     assert corpo["eventos"] == [{"id": "e1", "titulo": "Imersão Alta Cadência", "data": "2026-11-18T22:00:00"}]
 
 
+def test_funil_evento_eventos_lista_as_imersoes(monkeypatch):
+    client = _client(monkeypatch)
+    filtros_eventos: list[dict] = []
+
+    def query_imersoes(tabela, filtros=None, *a, **kw):
+        if tabela == "events":
+            filtros_eventos.append(filtros)
+            return [{"id": "i2", "title": "Imersão Alta Cadência", "event_date": "2026-12-02T16:00:00+00:00"}]
+        return _fake_query(tabela, filtros, *a, **kw)
+
+    monkeypatch.setattr(geral_banco_mod, "query", query_imersoes)
+    resposta = client.get("/funil-evento/eventos")
+    assert resposta.status_code == 200
+    corpo = resposta.json()
+    assert corpo["eventos"] == [{"id": "i2", "titulo": "Imersão Alta Cadência", "data": "2026-12-02T16:00:00+00:00"}]
+    assert corpo["avisos"] == []
+    assert filtros_eventos[0]["title"] == "ilike.*imers*"
+
+
 def test_funil_sdr_periodo_invalido_400(monkeypatch):
     resposta = _client(monkeypatch).get("/funil-sdr", params={"granularidade": "mes", "periodo": "xx"})
     assert resposta.status_code == 400

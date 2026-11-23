@@ -14,6 +14,7 @@ from app.dominios.geral.banco import (
     buscar_evento,
     buscar_proximo_evento,
     contar_inscritos_no_periodo,
+    listar_imersoes,
     listar_proximos_eventos,
 )
 from app.dominios.pessoas.banco import listar_ativas
@@ -113,6 +114,14 @@ def get_eventos_funil_sdr(_usuario: dict = Depends(exigir_usuario)) -> dict:
     eventos = obter_ou_calcular(
         "eventos:proximos", settings.cache_ttl_metricas_segundos, lambda: listar_proximos_eventos(datetime.now(TZ_SP))
     )
+    return {"eventos": eventos, "avisos": [f"fonte_indisponivel:{t}" for t in tabelas_com_falha()]}
+
+
+@router.get("/funil-evento/eventos")
+def get_eventos_funil_evento(_usuario: dict = Depends(exigir_usuario)) -> dict:
+    """Opções do filtro de evento na página Funil Evento: só Imersões, passadas e futuras."""
+    iniciar_registro_de_falhas()
+    eventos = obter_ou_calcular("eventos:imersoes", settings.cache_ttl_metricas_segundos, listar_imersoes)
     return {"eventos": eventos, "avisos": [f"fonte_indisponivel:{t}" for t in tabelas_com_falha()]}
 
 
