@@ -8,11 +8,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.auth import exigir_usuario
 from app.cache import obter_ou_calcular
 from app.config import etiqueta_pessoa, settings
-from app.dominios.funil import pipedrive, sdr
+from app.dominios.funil import evento as funil_evento, pipedrive, sdr
 from app.dominios.funil.banco import buscar_contas
 from app.dominios.geral.banco import (
     buscar_evento,
+    buscar_proxima_imersao,
     buscar_proximo_evento,
+    contar_comparecimento,
     contar_inscritos_no_periodo,
     listar_imersoes,
     listar_proximos_eventos,
@@ -217,4 +219,59 @@ def get_funil_sdr(
             "capacidade": dados_evento.capacidade,
         },
         "avisos": [f"fonte_indisponivel:{t}" for t in tabelas_com_falha()],
+    }
+
+
+FUNIL_EVENTO_ZERADO = {"inscritos": 0, "onboarding_agendado": 0, "onboarding_realizado": 0, "comparecimento": 0, "vendas": 0}
+
+
+@router.get("/funil-evento")
+def get_funil_evento(
+    granularidade: str = Query(...),
+    periodo: str = Query(...),
+    evento: str | None = Query(None),
+    _usuario: dict = Depends(exigir_usuario),
+) -> dict:
+    if evento is not None and not ID_EVENTO_VALIDO.match(evento):
+        raise HTTPException(
+            status_code=400,
+            detail={"erro": {"codigo": "parametro_invalido", "mensagem": "evento inválido"}},
+        )
+    iniciar_registro_de_falhas()
+    p = _resolver_periodo_ou_400(granularidade, periodo)
+    ttl = settings.cache_ttl_metricas_segundos
+    if evento is None:
+        dados = obter_ou_calcular("imersao:proxima", ttl, lambda: buscar_proxima_imersao(datetime.now(TZ_SP)))
+    else:
+        dados = obter_ou_calcular(f"evento:{evento}", ttl, lambda: buscar_evento(evento))
+    funil = dict(FUNIL_EVENTO_ZERADO)
+    if dados is not None:
+        pipe = dict(funil_evento.ZERADO)
+        if dados.data:
+            data_evento = funil_evento.data_do_evento_sp(dados.data)
+            pipe = obter_ou_calcular(
+                f"funil-evento:pipedrive:{dados.id}:{p.inicio}:{p.fim}",
+                ttl,
+                lambda: funil_evento.buscar_pipedrive_evento(data_evento, p.inicio, p.fim),
+            )
+        comparecimento = obter_ou_calcular(
+            f"evento:{dados.id}:comparecimento", ttl, lambda: contar_comparecimento(dados.id)
+        )
+        # Etapa 1 = aprovados + pendentes (recusado não conta); o card Total conta todos.
+        funil = {"inscritos": dados.aprovados + dados.pendentes, **pipe, "comparecimento": comparecimento}
+    return {
+        "periodo": {"granularidade": p.granularidade, "inicio": p.inicio.isoformat(), "fim": p.fim.isoformat()},
+        "avisos": [f"fonte_indisponivel:{t}" for t in tabelas_com_falha()],
+        "evento": None
+        if dados is None
+        else {
+            "id": dados.id,
+            "titulo": dados.titulo,
+            "data": dados.data,
+            "total": dados.inscritos,
+            "aprovados": dados.aprovados,
+            "pendentes": dados.pendentes,
+            "rejeitados": dados.rejeitados,
+        },
+        "funil": funil,
     }

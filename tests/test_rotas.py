@@ -18,6 +18,7 @@ from app.auth import exigir_usuario
 from app.dominios.comercial import banco as comercial_banco_mod
 from app.dominios.financeiro import banco as financeiro_banco_mod
 from app.dominios.funil import banco as funil_banco_mod
+from app.dominios.funil import evento as funil_evento_mod
 from app.dominios.funil import pipedrive as funil_pipedrive_mod
 from app.dominios.funil import sdr as funil_sdr_mod
 from app.dominios.funil.pipedrive import DadosPipedrive, Fato
@@ -80,6 +81,7 @@ def _sobrescrever_query(monkeypatch) -> None:
 def _client(monkeypatch) -> TestClient:
     _sobrescrever_query(monkeypatch)
     monkeypatch.setattr(funil_pipedrive_mod, "buscar_pipedrive", lambda inicio, fim: funil_pipedrive_mod.VAZIO)
+    monkeypatch.setattr(funil_evento_mod, "buscar_pipedrive_evento", lambda data_evento, inicio, fim: dict(funil_evento_mod.ZERADO))
     cache.invalidar()
     app.dependency_overrides[exigir_usuario] = lambda: {"sub": "dev"}
     client = TestClient(app)
@@ -495,6 +497,43 @@ def test_funil_evento_eventos_lista_as_imersoes(monkeypatch):
     corpo = resposta.json()
     assert corpo["eventos"] == [{"id": "i2", "titulo": "Imersão Alta Cadência", "data": "2026-12-02T16:00:00+00:00"}]
     assert corpo["avisos"] == []
+    assert filtros_eventos[0]["title"] == "ilike.*imers*"
+
+
+def test_funil_evento_sem_escolha_traz_a_proxima_imersao_com_o_funil(monkeypatch):
+    client = _client(monkeypatch)
+    chamadas_pipedrive: list[tuple] = []
+    filtros_eventos: list[dict] = []
+
+    def fake_pipedrive(data_evento, inicio, fim):
+        chamadas_pipedrive.append((data_evento, inicio, fim))
+        return {"onboarding_agendado": 4, "onboarding_realizado": 3, "vendas": 1}
+
+    def query_imersao(tabela, filtros=None, *a, **kw):
+        if tabela == "events":
+            filtros_eventos.append(filtros)
+            return [{"id": "i2", "title": "Imersão Alta Cadência", "event_date": "2026-12-02T16:00:00+00:00", "capacity": 60}]
+        if tabela == "registrations" and "attended" in (filtros or {}):
+            return [{"id": "r1"}, {"id": "r2"}]
+        if tabela == "registrations":
+            return [{"event_id": "i2", "status": s} for s in ("pending", "pending", "approved", "approved", "approved", "rejected")]
+        return _fake_query(tabela, filtros, *a, **kw)
+
+    monkeypatch.setattr(funil_evento_mod, "buscar_pipedrive_evento", fake_pipedrive)
+    monkeypatch.setattr(geral_banco_mod, "query", query_imersao)
+    resposta = client.get("/funil-evento", params={"granularidade": "mes", "periodo": "2026-11"})
+    assert resposta.status_code == 200
+    corpo = resposta.json()
+    assert corpo["periodo"] == {"granularidade": "mes", "inicio": "2026-11-01", "fim": "2026-11-30"}
+    assert corpo["avisos"] == []
+    assert corpo["evento"] == {
+        "id": "i2", "titulo": "Imersão Alta Cadência", "data": "2026-12-02T16:00:00+00:00",
+        "total": 6, "aprovados": 3, "pendentes": 2, "rejeitados": 1,
+    }
+    assert corpo["funil"] == {
+        "inscritos": 5, "onboarding_agendado": 4, "onboarding_realizado": 3, "comparecimento": 2, "vendas": 1,
+    }
+    assert chamadas_pipedrive == [(date(2026, 12, 2), date(2026, 11, 1), date(2026, 11, 30))]
     assert filtros_eventos[0]["title"] == "ilike.*imers*"
 
 
