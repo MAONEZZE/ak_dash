@@ -856,7 +856,8 @@ def test_logs_linha_invalida_e_usuario_sem_cadastro_logam_uma_vez(monkeypatch, c
     w.ciclo()
 
     mensagens = [r.getMessage() for r in caplog.records]
-    assert len([m for m in mensagens if "linha ignorada" in m]) == 1
+    ignoradas = [m for m in mensagens if "ignorada" in m]
+    assert ignoradas == ["Planilha logs: linha 3 da aba Logs ignorada (sem data válida ou sem atividade)"]
     assert len([m for m in mensagens if "'Thalyson' não está em users" in m]) == 1
 
 
@@ -1046,36 +1047,7 @@ def test_worker_sdr_dashboard_irreconhecivel_falha_sem_apagar_metas(monkeypatch)
     assert "Dashboard SDR" in w.status["ultimo_erro"]["mensagem"]
 
 
-def test_iniciar_loga_o_diagnostico_da_subida(monkeypatch, caplog):
-    monkeypatch.setattr(workers.Worker, "rodar", lambda self, parar, intervalo: None)
-    monkeypatch.setattr(workers, "criar_credenciais", lambda texto: object())
-    base = dataclasses.replace(
-        config.settings,
-        supabase_url="https://x.supabase.co",
-        supabase_service_key="k",
-        google_service_account_json='{"private_key": "SEGREDO"}',
-        planilha_sdrs_id="S",
-        planilha_closers_id=None,
-        planilha_funil_linkedin_id=None,
-        planilha_funil_instagram_id=None,
-        planilha_financeiro_id=None,
-        planilha_logs_id=None,
-        worker_intervalo_segundos=5.0,
-    )
-    caplog.set_level(logging.INFO, logger="app.workers")
-
-    workers.iniciar(dataclasses.replace(base, workers_ativos=False))
-    workers.iniciar(dataclasses.replace(base, workers_ativos=True))
-
-    texto = "\n".join(r.getMessage() for r in caplog.records)
-    assert "WORKERS_ATIVOS=false" in texto and "desligados" in texto
-    assert "WORKERS_ATIVOS=true" in texto
-    assert "sem id: closers, funil_linkedin, funil_instagram, financeiro, logs" in texto
-    assert "Workers das planilhas ativos: ['sdrs']" in texto
-    assert "SEGREDO" not in texto
-
-
-def test_executar_ciclo_loga_primeira_leitura_recuperacao_e_pulso(monkeypatch, caplog):
+def test_executar_ciclo_so_loga_a_primeira_leitura_ok_marcada_para_o_painel(monkeypatch, caplog):
     banco = _Banco({"users": [{"id": 12, "nome": "Isaque"}], "user_cargos": [{"id_user": 12}]})
     _instalar(monkeypatch, banco)
     relogio = {"agora": datetime(2026, 10, 27, 10, 0, tzinfo=TZ_SP)}
@@ -1088,23 +1060,18 @@ def test_executar_ciclo_loga_primeira_leitura_recuperacao_e_pulso(monkeypatch, c
     )
     caplog.set_level(logging.INFO, logger="app.workers")
 
-    def infos():
-        return [r.getMessage() for r in caplog.records if r.levelno == logging.INFO]
-
     w.executar_ciclo()
     w.executar_ciclo()
-    assert infos() == ["Worker sellers: primeira leitura ok"]
-
     w.ciclo = lambda: (_ for _ in ()).throw(RuntimeError("caiu"))
     w.executar_ciclo()
     del w.ciclo
     w.executar_ciclo()
-    assert infos()[-1] == "Worker sellers: voltou a ler ok depois de erro"
-
-    relogio["agora"] = datetime(2026, 10, 27, 10, 11, tzinfo=TZ_SP)
+    relogio["agora"] = datetime(2026, 10, 27, 11, 0, tzinfo=TZ_SP)
     w.executar_ciclo()
-    assert infos()[-1].startswith("Worker sellers: ok, ")
 
+    painel = [r.getMessage() for r in caplog.records if getattr(r, "no_painel", False)]
+    assert painel == ["Worker sellers: primeira leitura ok"]
+    assert [r.getMessage() for r in caplog.records if r.levelno == logging.INFO] == painel
 
 def test_cada_ciclo_le_o_estado_do_banco_e_regrava_o_que_sumiu_por_fora(monkeypatch):
     banco = _Banco({"users": [{"id": 12, "nome": "Isaque"}], "user_cargos": [{"id_user": 12}]}, persistir=True)
