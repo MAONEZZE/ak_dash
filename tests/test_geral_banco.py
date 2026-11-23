@@ -428,3 +428,10 @@ def test_evento_escolhido_e_buscado_pelo_id_sem_filtro_de_titulo(monkeypatch):
     assert (evento.id, evento.pendentes) == ("e1", 1)
     assert chamadas[0]["filtros"]["and"] == '(id.eq."e1")'
     assert "title" not in chamadas[0]["filtros"]
+
+
+def test_comparecimento_conta_checkins_do_evento_de_qualquer_status(monkeypatch):
+    chamadas = _mockar_duas_queries(monkeypatch, [], [{"id": "r1"}, {"id": "r2"}, {"id": "r3"}])
+    assert banco_mod.contar_comparecimento("i2") == 3
+    assert chamadas[0]["tabela"] == "registrations"
+    assert chamadas[0]["filtros"] == {"event_id": "eq.i2", "attended": "is.true"}

@@ -244,6 +244,21 @@ def contar_inscritos_no_periodo(id_evento: str, inicio: date, fim: date) -> int:
     )
 
 
+def contar_comparecimento(id_evento: str) -> int:
+    """Check-ins do evento (`attended = true`), qualquer status — etapa Comparecimento do Funil Evento.
+    Sem horário de check-in no SED, então não segue o filtro de data. Quem chama valida o id."""
+    return len(
+        query(
+            "registrations",
+            {"event_id": f"eq.{id_evento}", "attended": "is.true"},
+            schema=settings.supabase_inscricoes_schema or "public",
+            colunas="id",
+            url_base=settings.supabase_inscricoes_url,
+            service_key=settings.supabase_inscricoes_service_key,
+        )
+    )
+
+
 def _buscar_confrarias(filtro_data: str, limite: int, *, filtro_titulo: str | None = FILTRO_TITULO_EVENTOS) -> list[EventoInscricoes]:
     """`filtro_titulo=None` tira o filtro de título: o Funil SDR olha qualquer evento."""
     filtros = {"and": filtro_data, "order": "event_date.asc", "limit": str(limite)}
