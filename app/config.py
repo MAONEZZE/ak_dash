@@ -101,6 +101,9 @@ class Settings:
     pipe_base_url_v2: str | None = field(
         default_factory=lambda: (os.getenv("PIPE_BASE_URL_V2") or "").rstrip("/") or None
     )
+    pipe_base_url_v1: str | None = field(
+        default_factory=lambda: (os.getenv("PIPE_BASE_URL_V1") or "").rstrip("/") or None
+    )
     pipe_id_pipeline_instagram: int | None = field(
         default_factory=lambda: _int_env("PIPE_ID_PIPELINE_INSTAGRAM")
     )
@@ -121,6 +124,13 @@ class Settings:
     )
     pipe_id_etiqueta_negocio_indicacao: int | None = field(
         default_factory=lambda: _int_env("PIPE_ID_ETIQUETA_NEGOCIO_INDICACAO")
+    )
+    # Colunas de onboarding do pipeline LinkedIn — página Funil Evento (docs/plans/funil-evento.md).
+    pipe_id_onboarding_agendado_pipeline_linkedin: int | None = field(
+        default_factory=lambda: _int_env("PIPE_ID_ONBOARDING_AGENDADO_PIPELINE_LINKEDIN")
+    )
+    pipe_id_onboarding_realizado_pipeline_linkedin: int | None = field(
+        default_factory=lambda: _int_env("PIPE_ID_ONBOARDING_REALIZADO_PIPELINE_LINKEDIN")
     )
 
 
