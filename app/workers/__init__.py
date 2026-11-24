@@ -322,14 +322,9 @@ class WorkerFunil(Worker):
         super()._carregar_estado(ano, mes)
         inicio = date(ano, mes, 1)
         fim = date(ano, mes, monthrange(ano, mes)[1])
-        colunas = COLUNAS_POR_TABELA["metricas_contas"]
         self.metricas_contas = {
             (l["id_conta"], l["data"]): l
-            for l in self._consultar(
-                "metricas_contas",
-                {"and": f"(data.gte.{inicio},data.lte.{fim})"},
-                "id_conta,data," + ",".join(colunas),
-            )
+            for l in self._exigir("metricas_contas", lambda: supabase.ler_metricas_das_contas(inicio, fim))
         }
 
     def _sincronizar_contas(self, abas_conta: list[Aba], hoje: date) -> bool:
@@ -362,13 +357,11 @@ class WorkerFunil(Worker):
         if not metricas_novas:
             return False
 
-        banco.upsert(
-            "metricas_contas",
+        supabase.gravar_metricas_contas(
             [
                 {**l, "atualizado_em": self.agora().isoformat()}
                 for l in sorted(metricas_novas.values(), key=lambda l: (l["id_conta"], l["data"]))
             ],
-            on_conflict="id_conta,data",
         )
         self.metricas_contas.update(metricas_novas)
         return True
@@ -388,7 +381,7 @@ class WorkerFunil(Worker):
         id_seller = resolver_usuario(abas_seller[0].pessoa, usuarios)["id"] if abas_seller else None
 
         def contas_do_canal() -> dict[str, dict]:
-            return {l["nome"]: l for l in self._consultar("contas_funil", {"canal": f"eq.{self.canal}"}, "id,canal,nome,id_seller")}
+            return {l["nome"]: l for l in self._exigir("contas_funil", lambda: supabase.ler_contas_do_canal(self.canal))}
 
         existentes = contas_do_canal()
         novas = [
@@ -398,7 +391,7 @@ class WorkerFunil(Worker):
         ]
         if novas:
             carimbo = self.agora().isoformat()
-            banco.upsert("contas_funil", [{**l, "atualizado_em": carimbo} for l in novas], on_conflict="canal,nome")
+            supabase.gravar_contas_funil([{**l, "atualizado_em": carimbo} for l in novas])
             existentes = contas_do_canal()
             gravou = True
         self.contas = {nome: l["id"] for nome, l in existentes.items()}

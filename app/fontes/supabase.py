@@ -138,3 +138,11 @@ def apagar_meta_funil_sdr(metrica: str, periodo: str, id_user: int | None) -> No
         "metas_funil_sdr",
         {"metrica": f"eq.{metrica}", "periodo": f"eq.{periodo}", "id_user": "is.null" if id_user is None else f"eq.{id_user}"},
     )
+
+
+def gravar_metricas_contas(linhas: list[dict]) -> None:
+    banco.upsert("metricas_contas", linhas, on_conflict="id_conta,data")
+
+
+def gravar_contas_funil(linhas: list[dict]) -> None:
+    banco.upsert("contas_funil", linhas, on_conflict="canal,nome")

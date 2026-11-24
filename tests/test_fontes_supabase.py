@@ -181,6 +181,26 @@ def test_leituras_dos_funis_mandam_a_requisicao_de_hoje(monkeypatch, chamada, ta
 
 
 @pytest.mark.parametrize(
+    "chamada, tabela, params_esperados",
+    [
+        (lambda: supabase.gravar_metricas_contas([{"a": 1}]), "metricas_contas", {"on_conflict": "id_conta,data"}),
+        (lambda: supabase.gravar_contas_funil([{"a": 1}]), "contas_funil", {"on_conflict": "canal,nome"}),
+    ],
+)
+def test_escritas_dos_funis_mandam_a_requisicao_de_hoje(monkeypatch, chamada, tabela, params_esperados):
+    registros = _capturar(monkeypatch)
+
+    chamada()
+
+    assert len(registros) == 1
+    requisicao = registros[0]
+    assert requisicao["metodo"] == "POST"
+    assert requisicao["url"] == f"https://sb.test/rest/v1/{tabela}"
+    assert _sem_paginacao(requisicao["params"]) == params_esperados
+    assert requisicao["json"] == [{"a": 1}]
+
+
+@pytest.mark.parametrize(
     "chamada, metodo, tabela, params_esperados, json_esperado",
     [
         (lambda: supabase.ler_usuarios(), "GET", "users", {"select": "id,nome"}, None),
