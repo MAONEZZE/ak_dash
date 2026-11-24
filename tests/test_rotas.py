@@ -25,6 +25,7 @@ from app.dominios.funil.pipedrive import DadosPipedrive, Fato
 from app.dominios.geral import banco as geral_banco_mod
 from app.dominios.geral import rotas as geral_rotas_mod
 from app.dominios.pessoas import banco as pessoas_banco_mod
+from app.fontes import banco as fontes_banco_mod
 from app.fontes import pipedrive as fonte_pipedrive_mod
 from app.main import app
 
@@ -74,7 +75,7 @@ def _fake_query(tabela, filtros=None, schema="dash", colunas="*", **kwargs):
 
 
 def _sobrescrever_query(monkeypatch) -> None:
-    for mod in (pessoas_banco_mod, comercial_banco_mod, geral_banco_mod, financeiro_banco_mod, funil_banco_mod, funil_sdr_mod, metas_mod):
+    for mod in (fontes_banco_mod, pessoas_banco_mod, comercial_banco_mod, geral_banco_mod, financeiro_banco_mod, funil_banco_mod, funil_sdr_mod, metas_mod):
         monkeypatch.setattr(mod, "query", _fake_query)
 
 
@@ -223,7 +224,7 @@ def test_geral_em_dia_busca_faturamento_do_dia_e_do_mes_corrente(monkeypatch):
             intervalos.append((filtros or {})["and"])
         return _fake_query(tabela, filtros, schema, colunas, **kwargs)
 
-    for mod in (pessoas_banco_mod, comercial_banco_mod, geral_banco_mod, financeiro_banco_mod, metas_mod):
+    for mod in (fontes_banco_mod, pessoas_banco_mod, comercial_banco_mod, geral_banco_mod, financeiro_banco_mod, metas_mod):
         monkeypatch.setattr(mod, "query", query_espiã)
     cache.invalidar()
     app.dependency_overrides[exigir_usuario] = lambda: {"sub": "dev"}
