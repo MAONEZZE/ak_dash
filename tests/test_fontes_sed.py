@@ -110,3 +110,58 @@ def test_ler_evento_por_id_filtra_pelo_id(monkeypatch):
     assert len(registros) == 1
     assert registros[0]["select"] == "id,title,event_date,capacity"
     assert registros[0]["filtros"] == {"and": '(id.eq."e1")', "order": "event_date.asc"}
+
+
+@pytest.mark.parametrize(
+    "chamar, select, filtros",
+    [
+        pytest.param(
+            lambda: sed.ler_inscricoes_dos_eventos(["e1", "e2"]),
+            "event_id,status",
+            {"event_id": 'in.("e1","e2")'},
+            id="ler_inscricoes_dos_eventos",
+        ),
+        pytest.param(
+            lambda: sed.ler_inscricoes_no_periodo(
+                "e1", datetime(2026, 11, 1, tzinfo=TZ_SP), datetime(2026, 12, 1, tzinfo=TZ_SP)
+            ),
+            "id",
+            {
+                "event_id": "eq.e1",
+                "status": "in.(approved,pending)",
+                "and": '(created_at.gte."2026-11-01T03:00:00Z",created_at.lt."2026-12-01T03:00:00Z")',
+            },
+            id="ler_inscricoes_no_periodo",
+        ),
+        pytest.param(
+            lambda: sed.ler_comparecimentos("e1"),
+            "id",
+            {"event_id": "eq.e1", "attended": "is.true"},
+            id="ler_comparecimentos",
+        ),
+    ],
+)
+def test_funcoes_de_inscricoes_consultam_registrations_com_os_filtros_de_hoje(monkeypatch, chamar, select, filtros):
+    registros = _capturar(monkeypatch)
+
+    chamar()
+
+    assert len(registros) == 1
+    registro = registros[0]
+    assert registro["url"] == "https://sed.test/rest/v1/registrations"
+    assert registro["select"] == select
+    assert registro["filtros"] == filtros
+    assert registro["headers"]["Accept-Profile"] == "SED"
+
+
+def test_falha_no_sed_degrada_para_vazio_com_aviso_da_tabela(monkeypatch):
+    _capturar(monkeypatch)
+    monkeypatch.setattr(
+        banco.httpx,
+        "get",
+        lambda url, params, headers, timeout: httpx.Response(500, json={}, request=httpx.Request("GET", "https://sed.test")),
+    )
+    banco.iniciar_registro_de_falhas()
+
+    assert sed.ler_comparecimentos("e1") == []
+    assert banco.tabelas_com_falha() == ["registrations"]

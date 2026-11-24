@@ -74,3 +74,31 @@ def ler_imersoes(titulo_contem: str, limite: int) -> list[dict]:
         },
         "id,title,event_date",
     )
+
+
+def ler_inscricoes_dos_eventos(ids: list[str]) -> list[dict]:
+    return _query(
+        "registrations",
+        {"event_id": "in.(" + ",".join(f'"{i}"' for i in ids) + ")"},
+        "event_id,status",
+    )
+
+
+def ler_inscricoes_no_periodo(id_evento: str, de: datetime, ate: datetime) -> list[dict]:
+    return _query(
+        "registrations",
+        {
+            "event_id": f"eq.{id_evento}",
+            "status": "in.(approved,pending)",
+            "and": f'(created_at.gte."{_instante_utc(de)}",created_at.lt."{_instante_utc(ate)}")',
+        },
+        "id",
+    )
+
+
+def ler_comparecimentos(id_evento: str) -> list[dict]:
+    return _query(
+        "registrations",
+        {"event_id": f"eq.{id_evento}", "attended": "is.true"},
+        "id",
+    )
