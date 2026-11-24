@@ -215,18 +215,13 @@ class WorkerSdr(Worker):
         super()._carregar_estado(ano, mes)
         inicio = date(ano, mes, 1)
         fim = date(ano, mes, monthrange(ano, mes)[1])
-        colunas = COLUNAS_POR_TABELA["metricas_funil_sdr"]
         self.funil = {
             (l["id_user"], l["data"]): l
-            for l in self._consultar(
-                "metricas_funil_sdr",
-                {"and": f"(data.gte.{inicio},data.lte.{fim})"},
-                "id_user,data," + ",".join(colunas),
-            )
+            for l in self._exigir("metricas_funil_sdr", lambda: supabase.ler_metricas_funil_sdr(inicio, fim))
         }
         self.metas_funil = {
             (l["metrica"], l["periodo"], l["id_user"]): l["valor"]
-            for l in self._consultar("metas_funil_sdr", {}, "metrica,periodo,id_user,valor")
+            for l in self._exigir("metas_funil_sdr", supabase.ler_metas_funil_sdr)
         }
 
     def _sincronizar_funil(self, abas: list[Aba], usuarios: list[dict], com_cargo: set[int], hoje: date) -> bool:
@@ -249,10 +244,8 @@ class WorkerSdr(Worker):
             novas.update({k: l for k, l in desejadas.items() if self.funil.get(k) != l})
         if not novas:
             return False
-        banco.upsert(
-            "metricas_funil_sdr",
+        supabase.gravar_metricas_funil_sdr(
             [{**l, "atualizado_em": self.agora().isoformat()} for _, l in sorted(novas.items())],
-            on_conflict="id_user,data",
         )
         self.funil.update(novas)
         return True
@@ -278,20 +271,15 @@ class WorkerSdr(Worker):
         apagadas = [k for k in self.metas_funil if k not in desejadas]
         carimbo = self.agora().isoformat()
         if novas:
-            banco.upsert(
-                "metas_funil_sdr",
+            supabase.gravar_metas_funil_sdr(
                 [
                     {"metrica": m, "periodo": p, "id_user": i, "valor": v, "atualizado_em": carimbo}
                     for (m, p, i), v in sorted(novas.items(), key=lambda kv: (kv[0][0], kv[0][1], kv[0][2] or 0))
                 ],
-                on_conflict="metrica,periodo,id_user",
             )
             self.metas_funil.update(novas)
         for m, p, i in apagadas:
-            banco.apagar(
-                "metas_funil_sdr",
-                {"metrica": f"eq.{m}", "periodo": f"eq.{p}", "id_user": "is.null" if i is None else f"eq.{i}"},
-            )
+            supabase.apagar_meta_funil_sdr(m, p, i)
             self.metas_funil.pop((m, p, i))
         return bool(novas or apagadas)
 

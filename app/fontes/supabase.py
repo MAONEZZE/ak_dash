@@ -123,3 +123,18 @@ def gravar_metas(linhas: list[dict]) -> None:
 
 def apagar_meta(id_user: int, cargo: str, metrica: str) -> None:
     banco.apagar("metas", {"id_user": f"eq.{id_user}", "cargo": f"eq.{cargo}", "metrica": f"eq.{metrica}"})
+
+
+def gravar_metricas_funil_sdr(linhas: list[dict]) -> None:
+    banco.upsert("metricas_funil_sdr", linhas, on_conflict="id_user,data")
+
+
+def gravar_metas_funil_sdr(linhas: list[dict]) -> None:
+    banco.upsert("metas_funil_sdr", linhas, on_conflict="metrica,periodo,id_user")
+
+
+def apagar_meta_funil_sdr(metrica: str, periodo: str, id_user: int | None) -> None:
+    banco.apagar(
+        "metas_funil_sdr",
+        {"metrica": f"eq.{metrica}", "periodo": f"eq.{periodo}", "id_user": "is.null" if id_user is None else f"eq.{id_user}"},
+    )

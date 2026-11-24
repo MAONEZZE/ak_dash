@@ -209,3 +209,25 @@ def test_funcoes_do_worker_base_mandam_a_requisicao_de_hoje(monkeypatch, chamada
     assert requisicao["url"] == f"https://sb.test/rest/v1/{tabela}"
     assert _sem_paginacao(requisicao["params"]) == params_esperados
     assert requisicao["json"] == json_esperado
+
+
+@pytest.mark.parametrize(
+    "chamada, metodo, tabela, params_esperados, json_esperado",
+    [
+        (lambda: supabase.gravar_metricas_funil_sdr([{"a": 1}]), "POST", "metricas_funil_sdr", {"on_conflict": "id_user,data"}, [{"a": 1}]),
+        (lambda: supabase.gravar_metas_funil_sdr([{"a": 1}]), "POST", "metas_funil_sdr", {"on_conflict": "metrica,periodo,id_user"}, [{"a": 1}]),
+        (lambda: supabase.apagar_meta_funil_sdr("abordagens", "dia", 9), "DELETE", "metas_funil_sdr", {"metrica": "eq.abordagens", "periodo": "eq.dia", "id_user": "eq.9"}, None),
+        (lambda: supabase.apagar_meta_funil_sdr("abordagens", "semana", None), "DELETE", "metas_funil_sdr", {"metrica": "eq.abordagens", "periodo": "eq.semana", "id_user": "is.null"}, None),
+    ],
+)
+def test_escritas_do_funil_sdr_mandam_a_requisicao_de_hoje(monkeypatch, chamada, metodo, tabela, params_esperados, json_esperado):
+    registros = _capturar(monkeypatch)
+
+    chamada()
+
+    assert len(registros) == 1
+    requisicao = registros[0]
+    assert requisicao["metodo"] == metodo
+    assert requisicao["url"] == f"https://sb.test/rest/v1/{tabela}"
+    assert _sem_paginacao(requisicao["params"]) == params_esperados
+    assert requisicao["json"] == json_esperado
