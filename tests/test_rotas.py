@@ -14,7 +14,6 @@ from fastapi.testclient import TestClient
 from app import cache
 from app import workers
 from app.auth import exigir_usuario
-from app.dominios.funil import banco as funil_banco_mod
 from app.dominios.funil import evento as funil_evento_mod
 from app.dominios.funil import pipedrive as funil_pipedrive_mod
 from app.dominios.funil import sdr as funil_sdr_mod
@@ -71,7 +70,7 @@ def _fake_query(tabela, filtros=None, schema="dash", colunas="*", **kwargs):
 
 
 def _sobrescrever_query(monkeypatch) -> None:
-    for mod in (fontes_banco_mod, funil_banco_mod, funil_sdr_mod):
+    for mod in (fontes_banco_mod, funil_sdr_mod):
         monkeypatch.setattr(mod, "query", _fake_query)
 
 
