@@ -146,3 +146,43 @@ def gravar_metricas_contas(linhas: list[dict]) -> None:
 
 def gravar_contas_funil(linhas: list[dict]) -> None:
     banco.upsert("contas_funil", linhas, on_conflict="canal,nome")
+
+
+def ler_vendas_com_id_planilha(colunas: str) -> list[dict]:
+    return banco.query("metricas_faturamento", {"id_planilha": "not.is.null"}, colunas=colunas)
+
+
+def ler_todos_recebimentos() -> list[dict]:
+    return banco.query("recebimentos_faturamento", {}, colunas="id_planilha_venda,mes,pago,liquido")
+
+
+def ler_clientes() -> list[dict]:
+    return banco.query("cliente_faturamento", {}, colunas="id,nome,telefone")
+
+
+def gravar_clientes_por_telefone(linhas: list[dict]) -> None:
+    banco.upsert("cliente_faturamento", linhas, on_conflict="telefone")
+
+
+def gravar_clientes_por_id(linhas: list[dict]) -> None:
+    banco.upsert("cliente_faturamento", linhas, on_conflict="id")
+
+
+def gravar_vendas(linhas: list[dict]) -> None:
+    banco.upsert("metricas_faturamento", linhas, on_conflict="id_planilha")
+
+
+def gravar_recebimentos(linhas: list[dict]) -> None:
+    banco.upsert("recebimentos_faturamento", linhas, on_conflict="id_planilha_venda,mes")
+
+
+def apagar_vendas_sem_id_planilha() -> None:
+    banco.apagar("metricas_faturamento", {"id_planilha": "is.null"})
+
+
+def apagar_recebimento(id_planilha_venda: int, mes: str) -> None:
+    banco.apagar("recebimentos_faturamento", {"id_planilha_venda": f"eq.{id_planilha_venda}", "mes": f"eq.{mes}"})
+
+
+def apagar_vendas(ids: list[int]) -> None:
+    banco.apagar("metricas_faturamento", {"id_planilha": f"in.({','.join(map(str, ids))})"})

@@ -427,20 +427,19 @@ class WorkerFinanceiro(Worker):
     def _carregar_estado(self) -> None:
         self.vendas = {
             l["id_planilha"]: l
-            for l in self._consultar(
+            for l in self._exigir(
                 "metricas_faturamento",
-                {"id_planilha": "not.is.null"},
-                "id_planilha,id_cliente," + ",".join(c for c in COLUNAS_VENDA if c != "id_planilha"),
+                lambda: supabase.ler_vendas_com_id_planilha("id_planilha,id_cliente," + ",".join(c for c in COLUNAS_VENDA if c != "id_planilha")),
             )
         }
         self.recebimentos = {
             (l["id_planilha_venda"], l["mes"]): l
-            for l in self._consultar("recebimentos_faturamento", {}, "id_planilha_venda,mes,pago,liquido")
+            for l in self._exigir("recebimentos_faturamento", supabase.ler_todos_recebimentos)
         }
 
     def _resolver_clientes(self, lidas: list) -> dict[int, int | None]:
         def casar() -> dict[int, int | None]:
-            clientes = self._consultar("cliente_faturamento", {}, "id,nome,telefone")
+            clientes = self._exigir("cliente_faturamento", supabase.ler_clientes)
             por_telefone = {c["telefone"]: c["id"] for c in clientes if c["telefone"]}
             por_nome = {normalizar(c["nome"]): c["id"] for c in clientes}
             resolvidos: dict[int, int | None] = {}
@@ -462,8 +461,8 @@ class WorkerFinanceiro(Worker):
             elif v.cliente_nome:
                 sem_telefone.setdefault(normalizar(v.cliente_nome), {"nome": v.cliente_nome})
         if com_telefone or sem_telefone:
-            banco.upsert("cliente_faturamento", list(com_telefone.values()), on_conflict="telefone")
-            banco.upsert("cliente_faturamento", list(sem_telefone.values()), on_conflict="id")
+            supabase.gravar_clientes_por_telefone(list(com_telefone.values()))
+            supabase.gravar_clientes_por_id(list(sem_telefone.values()))
             resolvidos = casar()
         return resolvidos
 
@@ -500,38 +499,30 @@ class WorkerFinanceiro(Worker):
         gravou = False
 
         if vendas_novas:
-            banco.upsert(
-                self.planilha.tabela,
-                [{**l, "atualizado_em": carimbo} for l in vendas_novas.values()],
-                on_conflict="id_planilha",
-            )
+            supabase.gravar_vendas([{**l, "atualizado_em": carimbo} for l in vendas_novas.values()])
             self.vendas.update(vendas_novas)
             gravou = True
 
         if receb_novos:
-            banco.upsert(
-                "recebimentos_faturamento",
-                [{**l, "atualizado_em": carimbo} for l in receb_novos.values()],
-                on_conflict="id_planilha_venda,mes",
-            )
+            supabase.gravar_recebimentos([{**l, "atualizado_em": carimbo} for l in receb_novos.values()])
             self.recebimentos.update(receb_novos)
             gravou = True
 
         # só depois de ler e gravar a planilha: uma leitura que falha não pode esvaziar o faturamento
         if self._apagar_legado and desejadas:
-            banco.apagar("metricas_faturamento", {"id_planilha": "is.null"})
+            supabase.apagar_vendas_sem_id_planilha()
             self._apagar_legado = False
             gravou = True
 
         meses_apagados = [k for k in sorted(self.recebimentos) if k not in receb_desejados and k[0] in desejadas]
         for i, mes in meses_apagados:
-            banco.apagar("recebimentos_faturamento", {"id_planilha_venda": f"eq.{i}", "mes": f"eq.{mes}"})
+            supabase.apagar_recebimento(i, mes)
             self.recebimentos.pop((i, mes))
             gravou = True
 
         removidas = sorted(set(self.vendas) - set(desejadas))
         if removidas:
-            banco.apagar("metricas_faturamento", {"id_planilha": f"in.({','.join(map(str, removidas))})"})
+            supabase.apagar_vendas(removidas)
             for i in removidas:
                 self.vendas.pop(i, None)
             for k in [k for k in self.recebimentos if k[0] in removidas]:

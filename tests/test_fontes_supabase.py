@@ -232,6 +232,33 @@ def test_funcoes_do_worker_base_mandam_a_requisicao_de_hoje(monkeypatch, chamada
 
 
 @pytest.mark.parametrize(
+    "chamada, metodo, tabela, params_esperados",
+    [
+        (lambda: supabase.ler_vendas_com_id_planilha("id_planilha,id_cliente,valor"), "GET", "metricas_faturamento", {"select": "id_planilha,id_cliente,valor", "id_planilha": "not.is.null"}),
+        (lambda: supabase.ler_todos_recebimentos(), "GET", "recebimentos_faturamento", {"select": "id_planilha_venda,mes,pago,liquido"}),
+        (lambda: supabase.ler_clientes(), "GET", "cliente_faturamento", {"select": "id,nome,telefone"}),
+        (lambda: supabase.gravar_clientes_por_telefone([{"a": 1}]), "POST", "cliente_faturamento", {"on_conflict": "telefone"}),
+        (lambda: supabase.gravar_clientes_por_id([{"a": 1}]), "POST", "cliente_faturamento", {"on_conflict": "id"}),
+        (lambda: supabase.gravar_vendas([{"a": 1}]), "POST", "metricas_faturamento", {"on_conflict": "id_planilha"}),
+        (lambda: supabase.gravar_recebimentos([{"a": 1}]), "POST", "recebimentos_faturamento", {"on_conflict": "id_planilha_venda,mes"}),
+        (lambda: supabase.apagar_vendas_sem_id_planilha(), "DELETE", "metricas_faturamento", {"id_planilha": "is.null"}),
+        (lambda: supabase.apagar_recebimento(5, "2026-08-01"), "DELETE", "recebimentos_faturamento", {"id_planilha_venda": "eq.5", "mes": "eq.2026-08-01"}),
+        (lambda: supabase.apagar_vendas([5, 7]), "DELETE", "metricas_faturamento", {"id_planilha": "in.(5,7)"}),
+    ],
+)
+def test_funcoes_do_financeiro_mandam_a_requisicao_de_hoje(monkeypatch, chamada, metodo, tabela, params_esperados):
+    registros = _capturar(monkeypatch)
+
+    chamada()
+
+    assert len(registros) == 1
+    requisicao = registros[0]
+    assert requisicao["metodo"] == metodo
+    assert requisicao["url"] == f"https://sb.test/rest/v1/{tabela}"
+    assert _sem_paginacao(requisicao["params"]) == params_esperados
+
+
+@pytest.mark.parametrize(
     "chamada, metodo, tabela, params_esperados, json_esperado",
     [
         (lambda: supabase.gravar_metricas_funil_sdr([{"a": 1}]), "POST", "metricas_funil_sdr", {"on_conflict": "id_user,data"}, [{"a": 1}]),
