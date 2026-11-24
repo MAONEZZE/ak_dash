@@ -16,7 +16,6 @@ from app import workers
 from app.auth import exigir_usuario
 from app.dominios.funil import evento as funil_evento_mod
 from app.dominios.funil import pipedrive as funil_pipedrive_mod
-from app.dominios.funil import sdr as funil_sdr_mod
 from app.dominios.funil.pipedrive import DadosPipedrive, Fato
 from app.dominios.geral import rotas as geral_rotas_mod
 from app.fontes import banco as fontes_banco_mod
@@ -70,8 +69,7 @@ def _fake_query(tabela, filtros=None, schema="dash", colunas="*", **kwargs):
 
 
 def _sobrescrever_query(monkeypatch) -> None:
-    for mod in (fontes_banco_mod, funil_sdr_mod):
-        monkeypatch.setattr(mod, "query", _fake_query)
+    monkeypatch.setattr(fontes_banco_mod, "query", _fake_query)
 
 
 def _client(monkeypatch) -> TestClient:
@@ -648,7 +646,7 @@ def test_funil_sdr_no_filtro_de_dia_busca_a_semana_ate_o_dia_para_o_grafico(monk
             filtros_sdr.append(filtros)
         return _fake_query(tabela, filtros, *a, **kw)
 
-    monkeypatch.setattr(funil_sdr_mod, "query", query_espia)
+    monkeypatch.setattr(fontes_banco_mod, "query", query_espia)
     resposta = client.get("/funil-sdr", params={"granularidade": "dia", "periodo": "2026-11-16"})
     assert resposta.status_code == 200
     assert filtros_sdr == [{"and": "(data.gte.2026-11-10,data.lte.2026-11-16)"}]

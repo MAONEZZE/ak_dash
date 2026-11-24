@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 
-from app.fontes.banco import query
+from app.fontes import supabase
 from app.indicadores import calcular_indicadores
 from app.metricas import nome_exibicao
 from app.periodo import Periodo, dias_uteis_meta, dias_uteis_totais
@@ -77,7 +77,7 @@ def buscar_metas_funil_sdr() -> MetasFunilSdr:
     diarias: dict[tuple[int, str], int] = {}
     semanais: dict[str, int] = {}
     mensais: dict[str, int] = {}
-    for l in query("metas_funil_sdr", colunas="metrica,periodo,id_user,valor"):
+    for l in supabase.ler_metas_funil_sdr():
         if l["periodo"] == "dia" and l["id_user"] is not None:
             diarias[(int(l["id_user"]), l["metrica"])] = int(l["valor"])
         elif l["periodo"] == "semana":
@@ -88,11 +88,7 @@ def buscar_metas_funil_sdr() -> MetasFunilSdr:
 
 
 def buscar_metricas_funil_sdr(inicio: date, fim: date) -> list[dict]:
-    return query(
-        "metricas_funil_sdr",
-        {"and": f"(data.gte.{inicio.isoformat()},data.lte.{fim.isoformat()})"},
-        colunas="id_user,data," + ",".join(METRICAS),
-    )
+    return supabase.ler_metricas_funil_sdr(inicio, fim)
 
 
 def montar_resposta(

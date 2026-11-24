@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import date, datetime, time
 
 from app.dominios.funil import sdr
+from app.fontes import supabase
 from app.periodo import TZ_SP, resolver_periodo
 
 METAS = sdr.MetasFunilSdr(
@@ -129,3 +130,32 @@ def test_meta_do_velocimetro_de_inscricoes_por_filtro():
     for g in ("mes", "ano", "custom"):
         assert sdr.meta_velocimetro_inscricoes(g, 80, 47, longe, hoje) == 80
         assert sdr.meta_velocimetro_inscricoes(g, None, 47, longe, hoje) is None
+
+
+def test_buscar_metricas_funil_sdr_le_o_intervalo_pela_fonte(monkeypatch):
+    chamadas: list[tuple] = []
+
+    def ler_metricas(inicio, fim):
+        chamadas.append((inicio, fim))
+        return [{"id_user": 9, "data": "2026-11-03"}]
+
+    monkeypatch.setattr(supabase, "ler_metricas_funil_sdr", ler_metricas)
+    linhas = sdr.buscar_metricas_funil_sdr(date(2026, 11, 10), date(2026, 11, 16))
+    assert linhas == [{"id_user": 9, "data": "2026-11-03"}]
+    assert chamadas == [(date(2026, 11, 10), date(2026, 11, 16))]
+
+
+def test_buscar_metas_funil_sdr_separa_dia_semana_e_mes(monkeypatch):
+    monkeypatch.setattr(
+        supabase,
+        "ler_metas_funil_sdr",
+        lambda: [
+            {"metrica": "abordagens", "periodo": "dia", "id_user": 9, "valor": 10},
+            {"metrica": "abordagens", "periodo": "semana", "id_user": None, "valor": 50},
+            {"metrica": "inscricoes_realizadas", "periodo": "mes", "id_user": None, "valor": 88},
+        ],
+    )
+    metas = sdr.buscar_metas_funil_sdr()
+    assert metas.diarias == {(9, "abordagens"): 10}
+    assert metas.semanais == {"abordagens": 50}
+    assert metas.mensais == {"inscricoes_realizadas": 88}
