@@ -5,6 +5,7 @@ import httpx
 import pytest
 
 from app.fontes import banco, supabase
+from app.planilhas import COLUNAS_POR_TABELA
 
 
 def _capturar(monkeypatch, resposta=None):
@@ -124,6 +125,51 @@ def test_ler_metricas_do_cargo_filtra_a_view_por_cargo_pessoas_e_datas(monkeypat
     ],
 )
 def test_leituras_de_faturamento_e_logs_mandam_a_requisicao_de_hoje(monkeypatch, chamada, tabela, params_esperados):
+    registros = _capturar(monkeypatch)
+
+    chamada()
+
+    assert len(registros) == 1
+    requisicao = registros[0]
+    assert requisicao["url"] == f"https://sb.test/rest/v1/{tabela}"
+    assert _sem_paginacao(requisicao["params"]) == params_esperados
+
+
+cols_contas = ",".join(COLUNAS_POR_TABELA["metricas_contas"])
+cols_sdr = ",".join(COLUNAS_POR_TABELA["metricas_funil_sdr"])
+
+
+@pytest.mark.parametrize(
+    "chamada, tabela, params_esperados",
+    [
+        (
+            lambda: supabase.ler_contas_do_canal("linkedin"),
+            "contas_funil",
+            {"select": "id,canal,nome,id_seller", "canal": "eq.linkedin"},
+        ),
+        (
+            lambda: supabase.ler_metricas_das_contas(date(2026, 11, 1), date(2026, 11, 30), ids=[1, 2]),
+            "metricas_contas",
+            {"select": "id_conta,data," + cols_contas, "id_conta": "in.(1,2)", "and": "(data.gte.2026-11-01,data.lte.2026-11-30)"},
+        ),
+        (
+            lambda: supabase.ler_metricas_das_contas(date(2026, 11, 1), date(2026, 11, 30)),
+            "metricas_contas",
+            {"select": "id_conta,data," + cols_contas, "and": "(data.gte.2026-11-01,data.lte.2026-11-30)"},
+        ),
+        (
+            lambda: supabase.ler_metricas_funil_sdr(date(2026, 11, 10), date(2026, 11, 16)),
+            "metricas_funil_sdr",
+            {"select": "id_user,data," + cols_sdr, "and": "(data.gte.2026-11-10,data.lte.2026-11-16)"},
+        ),
+        (
+            lambda: supabase.ler_metas_funil_sdr(),
+            "metas_funil_sdr",
+            {"select": "metrica,periodo,id_user,valor"},
+        ),
+    ],
+)
+def test_leituras_dos_funis_mandam_a_requisicao_de_hoje(monkeypatch, chamada, tabela, params_esperados):
     registros = _capturar(monkeypatch)
 
     chamada()

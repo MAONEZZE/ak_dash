@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from app.fontes import banco
+from app.planilhas import COLUNAS_POR_TABELA
 
 
 def ler_usuarios_ativos() -> list[dict]:
@@ -66,3 +67,27 @@ def ler_logs_do_periodo(inicio: date, fim: date) -> list[dict]:
         {"and": f"(data.gte.{inicio.isoformat()},data.lte.{fim.isoformat()})"},
         colunas="data,hora,usuario_acao,atividade,cliente_nome",
     )
+
+
+def ler_contas_do_canal(canal: str) -> list[dict]:
+    return banco.query("contas_funil", {"canal": f"eq.{canal}"}, colunas="id,canal,nome,id_seller")
+
+
+def ler_metricas_das_contas(inicio: date, fim: date, ids: list[int] | None = None) -> list[dict]:
+    filtros = {}
+    if ids is not None:
+        filtros["id_conta"] = f"in.({','.join(str(i) for i in ids)})"
+    filtros["and"] = f"(data.gte.{inicio.isoformat()},data.lte.{fim.isoformat()})"
+    return banco.query("metricas_contas", filtros, colunas="id_conta,data," + ",".join(COLUNAS_POR_TABELA["metricas_contas"]))
+
+
+def ler_metricas_funil_sdr(inicio: date, fim: date) -> list[dict]:
+    return banco.query(
+        "metricas_funil_sdr",
+        {"and": f"(data.gte.{inicio.isoformat()},data.lte.{fim.isoformat()})"},
+        colunas="id_user,data," + ",".join(COLUNAS_POR_TABELA["metricas_funil_sdr"]),
+    )
+
+
+def ler_metas_funil_sdr() -> list[dict]:
+    return banco.query("metas_funil_sdr", {}, colunas="metrica,periodo,id_user,valor")
