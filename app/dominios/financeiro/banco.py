@@ -10,16 +10,15 @@ memória em outro domínio.
 """
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date
 
-from app.fontes.banco import query
+from app.fontes import supabase
 
 
 def buscar_clientes(ids: list[int]) -> dict[int, str]:
     if not ids:
         return {}
-    ids_str = ",".join(str(i) for i in ids)
-    linhas = query("cliente_faturamento", {"id": f"in.({ids_str})"})
+    linhas = supabase.ler_clientes_por_id(ids)
     return {int(r["id"]): r["nome"] for r in linhas if r.get("nome")}
 
 
@@ -32,22 +31,13 @@ def buscar_closers(ids: list[int]) -> dict[int, str]:
     """
     if not ids:
         return {}
-    ids_str = ",".join(str(i) for i in ids)
-    linhas = query("users", {"id": f"in.({ids_str})"})
+    linhas = supabase.ler_usuarios_por_id(ids)
     return {int(r["id"]): r["nome"] for r in linhas if r.get("nome")}
 
 
 def buscar_vendas_detalhadas(inicio: date, fim: date) -> list[dict]:
-    fim_exclusivo = fim + timedelta(days=1)
-    vendas = query(
-        "metricas_faturamento",
-        {"and": f"(data_venda.gte.{inicio.isoformat()},data_venda.lt.{fim_exclusivo.isoformat()})"},
-    )
-
-    receb = query(
-        "recebimentos_faturamento",
-        {"and": f"(mes.gte.{inicio.replace(day=1).isoformat()},mes.lte.{fim.isoformat()})"},
-    )
+    vendas = supabase.ler_vendas_do_periodo(inicio, fim)
+    receb = supabase.ler_recebimentos_do_periodo(inicio, fim)
 
     # Venda fechada antes do período, mas com recebimento nele, precisa aparecer.
     faltando = sorted(
@@ -55,7 +45,7 @@ def buscar_vendas_detalhadas(inicio: date, fim: date) -> list[dict]:
         - {int(v["id_planilha"]) for v in vendas if v.get("id_planilha") is not None}
     )
     if faltando:
-        vendas = vendas + query("metricas_faturamento", {"id_planilha": f"in.({','.join(map(str, faltando))})"})
+        vendas = vendas + supabase.ler_vendas_por_id_planilha(faltando)
 
     ids_clientes = [int(v["id_cliente"]) for v in vendas if v.get("id_cliente") is not None]
     clientes = buscar_clientes(ids_clientes)

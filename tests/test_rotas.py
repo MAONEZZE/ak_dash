@@ -14,7 +14,6 @@ from fastapi.testclient import TestClient
 from app import cache
 from app import workers
 from app.auth import exigir_usuario
-from app.dominios.financeiro import banco as financeiro_banco_mod
 from app.dominios.funil import banco as funil_banco_mod
 from app.dominios.funil import evento as funil_evento_mod
 from app.dominios.funil import pipedrive as funil_pipedrive_mod
@@ -72,7 +71,7 @@ def _fake_query(tabela, filtros=None, schema="dash", colunas="*", **kwargs):
 
 
 def _sobrescrever_query(monkeypatch) -> None:
-    for mod in (fontes_banco_mod, financeiro_banco_mod, funil_banco_mod, funil_sdr_mod):
+    for mod in (fontes_banco_mod, funil_banco_mod, funil_sdr_mod):
         monkeypatch.setattr(mod, "query", _fake_query)
 
 
@@ -221,8 +220,7 @@ def test_geral_em_dia_busca_faturamento_do_dia_e_do_mes_corrente(monkeypatch):
             intervalos.append((filtros or {})["and"])
         return _fake_query(tabela, filtros, schema, colunas, **kwargs)
 
-    for mod in (fontes_banco_mod, financeiro_banco_mod):
-        monkeypatch.setattr(mod, "query", query_espiã)
+    monkeypatch.setattr(fontes_banco_mod, "query", query_espiã)
     cache.invalidar()
     app.dependency_overrides[exigir_usuario] = lambda: {"sub": "dev"}
 
