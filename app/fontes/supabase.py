@@ -16,3 +16,15 @@ def ler_cargos_dos_usuarios() -> list[dict]:
 
 def ler_metas() -> list[dict]:
     return banco.query("metas", colunas="id_user,cargo,metrica,valor_diario")
+
+
+def ler_metricas_do_cargo(cargo: str, ids: list[int], inicio: date, fim: date) -> list[dict]:
+    return banco.query(
+        "vw_metricas",
+        {
+            "id_user": f"in.({','.join(str(i) for i in ids)})",
+            "and": f"(data.gte.{inicio.isoformat()},data.lte.{fim.isoformat()})",
+            "cargo": f"eq.{cargo}",
+        },
+        colunas="data,id_user,metrica,valor,conta",
+    )

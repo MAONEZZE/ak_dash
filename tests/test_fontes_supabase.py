@@ -1,4 +1,5 @@
 import dataclasses
+from datetime import date
 
 import httpx
 import pytest
@@ -64,3 +65,19 @@ def test_leitura_devolve_as_linhas_do_banco(monkeypatch):
     _capturar(monkeypatch, [{"id": 1}])
 
     assert supabase.ler_usuarios_ativos() == [{"id": 1}]
+
+
+def test_ler_metricas_do_cargo_filtra_a_view_por_cargo_pessoas_e_datas(monkeypatch):
+    registros = _capturar(monkeypatch)
+
+    supabase.ler_metricas_do_cargo("sdr", [9, 14], date(2026, 11, 1), date(2026, 11, 30))
+
+    assert len(registros) == 1
+    requisicao = registros[0]
+    assert requisicao["url"] == "https://sb.test/rest/v1/vw_metricas"
+    assert _sem_paginacao(requisicao["params"]) == {
+        "select": "data,id_user,metrica,valor,conta",
+        "id_user": "in.(9,14)",
+        "and": "(data.gte.2026-11-01,data.lte.2026-11-30)",
+        "cargo": "eq.sdr",
+    }
