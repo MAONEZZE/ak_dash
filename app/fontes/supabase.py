@@ -186,3 +186,15 @@ def apagar_recebimento(id_planilha_venda: int, mes: str) -> None:
 
 def apagar_vendas(ids: list[int]) -> None:
     banco.apagar("metricas_faturamento", {"id_planilha": f"in.({','.join(map(str, ids))})"})
+
+
+def ler_logs(colunas: str) -> list[dict]:
+    return banco.query("logs_pipedrive", {}, colunas=colunas)
+
+
+def gravar_logs(linhas: list[dict]) -> None:
+    banco.upsert("logs_pipedrive", linhas, on_conflict="chave")
+
+
+def apagar_logs(chaves: list[str]) -> None:
+    banco.apagar("logs_pipedrive", {"chave": f"in.({','.join(chaves)})"})

@@ -64,13 +64,6 @@ class Worker:
         self.status = {"ultima_leitura_ok": None, "ultimo_erro": None}
         self._puladas: set[str] = set()
 
-    def _consultar(self, tabela: str, filtros: dict[str, str], colunas: str) -> list[dict]:
-        antes = banco.falhas_na_thread()
-        linhas = banco.query(tabela, filtros, colunas=colunas)
-        if banco.falhas_na_thread() != antes:
-            raise RuntimeError(f"consulta a {tabela} falhou")
-        return linhas
-
     def _exigir(self, rotulo: str, ler: Callable[[], list[dict]]) -> list[dict]:
         antes = banco.falhas_na_thread()
         linhas = ler()
@@ -553,7 +546,10 @@ class WorkerLogs(Worker):
     def _carregar_estado(self) -> None:
         self.logs = {
             l["chave"]: l
-            for l in self._consultar("logs_pipedrive", {}, "chave,ocorrencias,id_user," + ",".join(COLUNAS_LOG))
+            for l in self._exigir(
+                "logs_pipedrive",
+                lambda: supabase.ler_logs("chave,ocorrencias,id_user," + ",".join(COLUNAS_LOG)),
+            )
         }
 
     def ciclo(self) -> None:
@@ -589,16 +585,12 @@ class WorkerLogs(Worker):
             if {c: self.logs.get(k, {}).get(c) for c in d} != d
         }
         if novos:
-            banco.upsert(
-                "logs_pipedrive",
-                [{**l, "atualizado_em": self.agora().isoformat()} for l in novos.values()],
-                on_conflict="chave",
-            )
+            supabase.gravar_logs([{**l, "atualizado_em": self.agora().isoformat()} for l in novos.values()])
             self.logs.update(novos)
 
         removidas = sorted(set(self.logs) - set(desejados))
         if removidas:
-            banco.apagar("logs_pipedrive", {"chave": f"in.({','.join(removidas)})"})
+            supabase.apagar_logs(removidas)
             for k in removidas:
                 self.logs.pop(k, None)
 

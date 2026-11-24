@@ -278,3 +278,24 @@ def test_escritas_do_funil_sdr_mandam_a_requisicao_de_hoje(monkeypatch, chamada,
     assert requisicao["url"] == f"https://sb.test/rest/v1/{tabela}"
     assert _sem_paginacao(requisicao["params"]) == params_esperados
     assert requisicao["json"] == json_esperado
+
+
+@pytest.mark.parametrize(
+    "chamada, metodo, tabela, params_esperados, json_esperado",
+    [
+        (lambda: supabase.ler_logs("chave,ocorrencias,id_user,data"), "GET", "logs_pipedrive", {"select": "chave,ocorrencias,id_user,data"}, None),
+        (lambda: supabase.gravar_logs([{"a": 1}]), "POST", "logs_pipedrive", {"on_conflict": "chave"}, [{"a": 1}]),
+        (lambda: supabase.apagar_logs(["k1", "k2"]), "DELETE", "logs_pipedrive", {"chave": "in.(k1,k2)"}, None),
+    ],
+)
+def test_funcoes_dos_logs_mandam_a_requisicao_de_hoje(monkeypatch, chamada, metodo, tabela, params_esperados, json_esperado):
+    registros = _capturar(monkeypatch)
+
+    chamada()
+
+    assert len(registros) == 1
+    requisicao = registros[0]
+    assert requisicao["metodo"] == metodo
+    assert requisicao["url"] == f"https://sb.test/rest/v1/{tabela}"
+    assert _sem_paginacao(requisicao["params"]) == params_esperados
+    assert requisicao["json"] == json_esperado
