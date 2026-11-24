@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 
 from app.fontes.banco import query
 from app.indicadores import calcular_indicadores
@@ -42,6 +42,35 @@ class MetasFunilSdr:
         if not diaria or not soma or do_time is None:
             return None
         return round(do_time * diaria / soma)
+
+
+DIAS_DE_INSCRICAO_NA_SEMANA = 6  # domingo não conta
+
+
+def meta_diaria_inscricoes(capacidade: int | None, inscritos_ate_ontem: int, data_evento: date, hoje: date) -> int | None:
+    """Meta do dia do velocímetro de inscrições: o que falta para a capacidade (inscritos até ontem, fixa no dia)
+    dividido pelos dias de hoje até a véspera do evento, sem domingos, arredondado para cima.
+    Sem capacidade ou sem dia de inscrição até o evento: `None`. Capacidade já atingida: 0."""
+    dias = sum(1 for n in range((data_evento - hoje).days) if (hoje + timedelta(days=n)).weekday() != 6)
+    if capacidade is None or dias <= 0:
+        return None
+    falta = capacidade - inscritos_ate_ontem
+    if falta <= 0:
+        return 0
+    return -(-falta // dias)
+
+
+def meta_velocimetro_inscricoes(
+    granularidade: str, capacidade: int | None, inscritos_ate_ontem: int, data_evento: date, hoje: date
+) -> int | None:
+    """Meta do velocímetro de inscrições do evento por filtro: dia = meta diária; semana = diária × 6,
+    limitada ao que falta para a capacidade; mês, ano e custom = a capacidade."""
+    if granularidade not in ("dia", "semana"):
+        return capacidade
+    diaria = meta_diaria_inscricoes(capacidade, inscritos_ate_ontem, data_evento, hoje)
+    if diaria is None or granularidade == "dia":
+        return diaria
+    return max(0, min(diaria * DIAS_DE_INSCRICAO_NA_SEMANA, capacidade - inscritos_ate_ontem))
 
 
 def buscar_metas_funil_sdr() -> MetasFunilSdr:

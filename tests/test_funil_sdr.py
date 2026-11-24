@@ -92,3 +92,40 @@ def test_montar_resposta_linhas_antes_do_periodo_so_entram_na_serie():
     assert juca["metricas"]["abordagens"] == 2
     assert corpo["funil"]["inscritos"] == 1
     assert corpo["metricas_time"][2]["realizado"] == 1  # reuniões agendadas só do dia
+
+
+def test_meta_diaria_de_inscricoes_e_o_que_falta_pela_capacidade_dividido_pelos_dias_ate_o_evento_sem_domingo():
+    evento, hoje = date(2026, 11, 26), date(2026, 11, 23)  # seg 23, ter 24, qua 25: 3 dias
+    assert sdr.meta_diaria_inscricoes(80, 68, evento, hoje) == 4
+    # Arredonda para cima: 10 em 3 dias = 4.
+    assert sdr.meta_diaria_inscricoes(80, 70, evento, hoje) == 4
+    # Véspera: tudo o que falta.
+    assert sdr.meta_diaria_inscricoes(80, 70, evento, date(2026, 11, 25)) == 10
+    # Domingo não conta: de sáb 28 até a véspera de ter 01/12 = sáb + seg = 2 dias.
+    assert sdr.meta_diaria_inscricoes(80, 70, date(2026, 12, 1), date(2026, 11, 28)) == 5
+    # Só o domingo antes do evento: sem dia de inscrição, sem meta.
+    assert sdr.meta_diaria_inscricoes(80, 70, date(2026, 11, 30), date(2026, 11, 29)) is None
+    # Capacidade já atingida: 0.
+    assert sdr.meta_diaria_inscricoes(80, 80, evento, hoje) == 0
+    assert sdr.meta_diaria_inscricoes(80, 95, evento, hoje) == 0
+    # Sem capacidade, dia do evento ou depois: sem meta.
+    assert sdr.meta_diaria_inscricoes(None, 10, evento, hoje) is None
+    assert sdr.meta_diaria_inscricoes(80, 10, evento, evento) is None
+    assert sdr.meta_diaria_inscricoes(80, 10, evento, date(2026, 11, 27)) is None
+
+
+def test_meta_do_velocimetro_de_inscricoes_por_filtro():
+    hoje, longe, perto = date(2026, 11, 23), date(2026, 12, 5), date(2026, 11, 26)
+    # Longe (11 dias sem domingo): faltam 33 → 3/dia; semana = 3 × 6.
+    assert sdr.meta_velocimetro_inscricoes("dia", 80, 47, longe, hoje) == 3
+    assert sdr.meta_velocimetro_inscricoes("semana", 80, 47, longe, hoje) == 18
+    # Evento no meio da semana: 12 em 3 dias = 4/dia, mas a semana fica no que falta (12), não 24.
+    assert sdr.meta_velocimetro_inscricoes("semana", 80, 68, perto, hoje) == 12
+    # Capacidade atingida: 0 também na semana.
+    assert sdr.meta_velocimetro_inscricoes("semana", 80, 90, perto, hoje) == 0
+    # Dia do evento em diante: sem meta.
+    assert sdr.meta_velocimetro_inscricoes("semana", 80, 10, perto, perto) is None
+    # Mês, ano e custom: a capacidade total.
+    for g in ("mes", "ano", "custom"):
+        assert sdr.meta_velocimetro_inscricoes(g, 80, 47, longe, hoje) == 80
+        assert sdr.meta_velocimetro_inscricoes(g, None, 47, longe, hoje) is None

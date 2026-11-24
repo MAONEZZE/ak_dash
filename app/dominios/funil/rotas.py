@@ -32,12 +32,16 @@ CANAIS = ("linkedin", "instagram")
 # Id de evento do SED (uuid): vai dentro do filtro do PostgREST, então só letras, dígitos e hífen.
 ID_EVENTO_VALIDO = re.compile(r"^[A-Za-z0-9-]{1,64}$")
 
-# No filtro de dia o gráfico de linhas teria um ponto só; a série traz a semana até o dia.
-DIAS_SERIE_FILTRO_DIA = 7
+# Nos filtros de dia e de semana o gráfico mostra os 7 dias até o fim do filtro (ou até
+# hoje, na semana corrente). Sem isso, o dia e a segunda-feira viram um ponto só, sem linha.
+# Volta 6 dias antes do início: cobre os 7 dias até qualquer dia da semana.
+DIAS_SERIE_CURTA = 7
 
 
 def _inicio_serie(p):
-    return p.inicio - timedelta(days=DIAS_SERIE_FILTRO_DIA - 1) if p.granularidade == "dia" else p.inicio
+    if p.granularidade in ("dia", "semana"):
+        return p.inicio - timedelta(days=DIAS_SERIE_CURTA - 1)
+    return p.inicio
 
 
 def _pipedrive(p):
@@ -201,6 +205,25 @@ def get_funil_sdr(
             lambda: contar_inscritos_no_periodo(dados_evento.id, p.inicio, p.fim),
         )
     )
+    # Meta do velocímetro: dia e semana saem do que falta para a capacidade ÷ dias até o evento
+    # (sem data do evento, sem meta); mês, ano e custom = a capacidade.
+    meta_velocimetro = None if dados_evento is None else dados_evento.capacidade
+    if p.granularidade in ("dia", "semana") and dados_evento is not None:
+        meta_velocimetro = None
+        if dados_evento.data:
+            hoje = hoje_sp()
+            inscritos_hoje = obter_ou_calcular(
+                f"evento:{dados_evento.id}:inscritos:{hoje}:{hoje}",
+                settings.cache_ttl_metricas_segundos,
+                lambda: contar_inscritos_no_periodo(dados_evento.id, hoje, hoje),
+            )
+            meta_velocimetro = sdr.meta_velocimetro_inscricoes(
+                p.granularidade,
+                dados_evento.capacidade,
+                dados_evento.aprovados + dados_evento.pendentes - inscritos_hoje,
+                funil_evento.data_do_evento_sp(dados_evento.data),
+                hoje,
+            )
     return {
         **corpo,
         "evento": None
@@ -217,6 +240,8 @@ def get_funil_sdr(
             "pendentes": dados_evento.pendentes,
             "rejeitados": dados_evento.rejeitados,
             "capacidade": dados_evento.capacidade,
+            # Meta do velocímetro no filtro atual (ver `sdr.meta_velocimetro_inscricoes`).
+            "meta_velocimetro": meta_velocimetro,
         },
         "avisos": [f"fonte_indisponivel:{t}" for t in tabelas_com_falha()],
     }

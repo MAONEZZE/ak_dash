@@ -74,3 +74,13 @@ def test_buscar_contas_serie_desde_inicio_serie_mas_soma_so_o_periodo(monkeypatc
     assert [d["data"] for d in conta.serie] == ["2026-11-10", "2026-11-16"]
     filtros_metricas = next(c["filtros"] for c in chamadas if c["tabela"] == "metricas_contas")
     assert filtros_metricas["and"] == "(data.gte.2026-11-10,data.lte.2026-11-16)"
+
+
+def test_inicio_serie_dia_e_semana_trazem_os_6_dias_anteriores_ao_inicio():
+    """No gráfico, dia e semana mostram os 7 dias até o fim do filtro (ou até hoje): na segunda-feira a semana teria um ponto só."""
+    from app.dominios.funil.rotas import _inicio_serie
+    from app.periodo import Periodo
+
+    assert _inicio_serie(Periodo("dia", date(2026, 11, 23), date(2026, 11, 23))) == date(2026, 11, 17)
+    assert _inicio_serie(Periodo("semana", date(2026, 11, 23), date(2026, 11, 29))) == date(2026, 11, 17)
+    assert _inicio_serie(Periodo("mes", date(2026, 11, 1), date(2026, 11, 30))) == date(2026, 11, 1)

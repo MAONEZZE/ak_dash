@@ -434,6 +434,7 @@ def test_funil_sdr_traz_a_proxima_confraria_para_o_velocimetro(monkeypatch):
     assert corpo["evento"] == {
         "id": "e1", "titulo": "Confraria Akeel SP", "data": "2026-11-20T22:00:00",
         "inscritos": 3, "inscritos_periodo": 2, "aprovados": 1, "pendentes": 2, "rejeitados": 1, "capacidade": 80,
+        "meta_velocimetro": 80,  # mês: a capacidade
     }
     # Inscritos do velocímetro: só approved/pending, feitos no mês (meia-noite de SP em UTC).
     assert filtros_periodo == [{
@@ -441,6 +442,55 @@ def test_funil_sdr_traz_a_proxima_confraria_para_o_velocimetro(monkeypatch):
         "status": "in.(approved,pending)",
         "and": '(created_at.gte."2026-11-01T03:00:00Z",created_at.lt."2026-12-01T03:00:00Z")',
     }]
+
+
+def test_funil_sdr_no_filtro_de_dia_meta_do_velocimetro_e_o_que_falta_dividido_pelos_dias_ate_o_evento(monkeypatch):
+    from app.dominios.funil import rotas as funil_rotas_mod
+
+    client = _client(monkeypatch)
+    monkeypatch.setattr(funil_rotas_mod, "hoje_sp", lambda: date(2026, 11, 23))
+    filtros_hoje: list[dict] = []
+
+    def query_com_evento(tabela, filtros=None, *a, **kw):
+        if tabela == "events":
+            # 26/11 às 19h de SP: faltam 23, 24 e 25 = 3 dias.
+            return [{"id": "e1", "title": "Imersão", "event_date": "2026-11-26T22:00:00", "capacity": 80}]
+        if tabela == "registrations" and "created_at" in (filtros or {}).get("and", ""):
+            filtros_hoje.append(filtros)
+            return [{"id": "r1"}, {"id": "r2"}]  # 2 inscrições feitas hoje
+        if tabela == "registrations":
+            # 70 aprovados/pendentes agora; até ontem eram 68.
+            return [{"event_id": "e1", "status": "approved"}] * 70 + [{"event_id": "e1", "status": "rejected"}]
+        return _fake_query(tabela, filtros, *a, **kw)
+
+    monkeypatch.setattr(geral_banco_mod, "query", query_com_evento)
+    corpo = client.get("/funil-sdr", params={"granularidade": "dia", "periodo": "2026-11-23"}).json()
+    # Faltam 80 − 68 = 12 em 3 dias (seg 23 a qua 25): 4 por dia (fixa no dia, as 2 de hoje não abatem).
+    assert corpo["evento"]["meta_velocimetro"] == 4
+    assert corpo["evento"]["inscritos_periodo"] == 2
+    assert all('"2026-11-23T03:00:00Z"' in f["and"] for f in filtros_hoje)
+
+
+def test_funil_sdr_na_semana_meta_do_velocimetro_e_a_diaria_vezes_6_limitada_ao_que_falta(monkeypatch):
+    from app.dominios.funil import rotas as funil_rotas_mod
+
+    client = _client(monkeypatch)
+    monkeypatch.setattr(funil_rotas_mod, "hoje_sp", lambda: date(2026, 11, 23))
+
+    def query_com_evento(tabela, filtros=None, *a, **kw):
+        if tabela == "events":
+            # 05/12: de seg 23/11 a sex 04/12 sem o domingo 29 = 11 dias.
+            return [{"id": "e1", "title": "Imersão", "event_date": "2026-12-05T22:00:00", "capacity": 80}]
+        if tabela == "registrations" and "created_at" in (filtros or {}).get("and", ""):
+            return []
+        if tabela == "registrations":
+            return [{"event_id": "e1", "status": "approved"}] * 47
+        return _fake_query(tabela, filtros, *a, **kw)
+
+    monkeypatch.setattr(geral_banco_mod, "query", query_com_evento)
+    corpo = client.get("/funil-sdr", params={"granularidade": "semana", "periodo": "2026-W48"}).json()
+    # Faltam 33 em 11 dias = 3/dia → semana 18.
+    assert corpo["evento"]["meta_velocimetro"] == 18
 
 
 def test_funil_sdr_com_evento_escolhido_traz_os_numeros_dele(monkeypatch):
