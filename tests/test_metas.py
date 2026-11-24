@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from app import metas as metas_mod
+from app.fontes import supabase
 from app.metas import Metas, buscar_metas
 
 # ids de dash.users (mesmos do ambiente real: 2 e 9 são SDRs, 1 é closer).
@@ -16,10 +16,7 @@ ANA, BRUNO, CLOSER = 2, 9, 1
 
 
 def _mockar_banco(monkeypatch, linhas: list[dict]) -> None:
-    def fake_query(tabela, *a, **k):
-        return linhas if tabela == "metas" else []
-
-    monkeypatch.setattr(metas_mod, "query", fake_query)
+    monkeypatch.setattr(supabase, "ler_metas", lambda: linhas)
 
 
 def test_tabela_vazia_devolve_none_e_vazio_e_true(monkeypatch):

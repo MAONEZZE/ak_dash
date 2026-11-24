@@ -12,7 +12,6 @@ from datetime import date
 from fastapi.testclient import TestClient
 
 from app import cache
-from app import metas as metas_mod
 from app import workers
 from app.auth import exigir_usuario
 from app.dominios.comercial import banco as comercial_banco_mod
@@ -26,6 +25,7 @@ from app.dominios.geral import banco as geral_banco_mod
 from app.dominios.geral import rotas as geral_rotas_mod
 from app.fontes import banco as fontes_banco_mod
 from app.fontes import pipedrive as fonte_pipedrive_mod
+from app.fontes import supabase as fontes_supabase_mod
 from app.main import app
 
 _BUSCAR_PIPEDRIVE_REAL = funil_pipedrive_mod.buscar_pipedrive
@@ -74,7 +74,7 @@ def _fake_query(tabela, filtros=None, schema="dash", colunas="*", **kwargs):
 
 
 def _sobrescrever_query(monkeypatch) -> None:
-    for mod in (fontes_banco_mod, comercial_banco_mod, geral_banco_mod, financeiro_banco_mod, funil_banco_mod, funil_sdr_mod, metas_mod):
+    for mod in (fontes_banco_mod, comercial_banco_mod, geral_banco_mod, financeiro_banco_mod, funil_banco_mod, funil_sdr_mod):
         monkeypatch.setattr(mod, "query", _fake_query)
 
 
@@ -223,7 +223,7 @@ def test_geral_em_dia_busca_faturamento_do_dia_e_do_mes_corrente(monkeypatch):
             intervalos.append((filtros or {})["and"])
         return _fake_query(tabela, filtros, schema, colunas, **kwargs)
 
-    for mod in (fontes_banco_mod, comercial_banco_mod, geral_banco_mod, financeiro_banco_mod, metas_mod):
+    for mod in (fontes_banco_mod, comercial_banco_mod, geral_banco_mod, financeiro_banco_mod):
         monkeypatch.setattr(mod, "query", query_espiã)
     cache.invalidar()
     app.dependency_overrides[exigir_usuario] = lambda: {"sub": "dev"}
@@ -317,9 +317,9 @@ def test_funil_devolve_meta_de_numeros_captados_do_seller_no_periodo(monkeypatch
     monkeypatch.setattr(f"{__name__}._CONTAS", [{"id": 1, "nome": "Jacob", "id_seller": 4}])
     cliente = _client(monkeypatch)
     monkeypatch.setattr(
-        metas_mod,
-        "query",
-        lambda tabela, *a, **kw: [{"id_user": 4, "cargo": "seller", "metrica": "numeros_captados", "valor_diario": 4}],
+        fontes_supabase_mod,
+        "ler_metas",
+        lambda: [{"id_user": 4, "cargo": "seller", "metrica": "numeros_captados", "valor_diario": 4}],
     )
 
     mes = cliente.get("/funil/linkedin", params={"granularidade": "mes", "periodo": "2026-11"}).json()
