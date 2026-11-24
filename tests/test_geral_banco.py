@@ -11,21 +11,36 @@ import pytest
 
 from app.dominios.geral import banco as banco_mod
 from app.fontes import sed as sed_mod
+from app.fontes import supabase as supabase_mod
 
 
 # --- buscar_faturamento (dash.metricas_faturamento: uma linha por venda)
 
 
-def _mockar_vendas(monkeypatch, linhas: list[dict], recebimentos: list[dict] | None = None) -> list[dict]:
-    chamadas: list[dict] = []
+def _mockar_vendas(
+    monkeypatch,
+    linhas: list[dict],
+    recebimentos: list[dict] | None = None,
+    vendas_por_id: list[dict] | None = None,
+) -> list[tuple]:
+    chamadas: list[tuple] = []
+    catalogo = linhas if vendas_por_id is None else vendas_por_id
 
-    def _fake_query(tabela, filtros=None, *a, **k):
-        chamadas.append({"tabela": tabela, "filtros": filtros or {}})
-        if tabela == "recebimentos_faturamento":
-            return recebimentos or []
+    def _ler_vendas_do_periodo(inicio, fim):
+        chamadas.append(("ler_vendas_do_periodo", (inicio, fim)))
         return linhas
 
-    monkeypatch.setattr(banco_mod, "query", _fake_query)
+    def _ler_recebimentos_do_periodo(inicio, fim):
+        chamadas.append(("ler_recebimentos_do_periodo", (inicio, fim)))
+        return recebimentos or []
+
+    def _ler_vendas_por_id_planilha(ids, colunas="*"):
+        chamadas.append(("ler_vendas_por_id_planilha", (ids, colunas)))
+        return [v for v in catalogo if v["id_planilha"] in ids]
+
+    monkeypatch.setattr(supabase_mod, "ler_vendas_do_periodo", _ler_vendas_do_periodo)
+    monkeypatch.setattr(supabase_mod, "ler_recebimentos_do_periodo", _ler_recebimentos_do_periodo)
+    monkeypatch.setattr(supabase_mod, "ler_vendas_por_id_planilha", _ler_vendas_por_id_planilha)
     return chamadas
 
 
@@ -125,10 +140,10 @@ def test_liquidado_sem_segundo_pagamento_nao_muda(monkeypatch):
     assert resultado.empresa["liquidado"] == 27000.00
 
 
-def test_filtro_usa_data_venda_com_lt_no_dia_seguinte(monkeypatch):
+def test_vendas_sao_lidas_pelo_periodo_pedido(monkeypatch):
     chamadas = _mockar_vendas(monkeypatch, [])
     banco_mod.buscar_faturamento(date(2026, 8, 1), date(2026, 8, 31), [])
-    assert chamadas[0]["filtros"]["and"] == "(data_venda.gte.2026-08-01,data_venda.lt.2026-09-01)"
+    assert chamadas[0] == ("ler_vendas_do_periodo", (date(2026, 8, 1), date(2026, 8, 31)))
 
 
 def test_liquidado_vem_do_calendario_de_recebimentos_dos_meses_do_periodo(monkeypatch):
@@ -138,25 +153,12 @@ def test_liquidado_vem_do_calendario_de_recebimentos_dos_meses_do_periodo(monkey
         {"id_planilha_venda": 1, "mes": "2026-08-01", "liquido": 4500},
         {"id_planilha_venda": 2, "mes": "2026-08-01", "liquido": 18000},
     ]
-    chamadas: list[dict] = []
-
-    def _fake_query(tabela, filtros=None, *a, **k):
-        filtros = filtros or {}
-        chamadas.append({"tabela": tabela, "filtros": filtros})
-        if tabela == "recebimentos_faturamento":
-            return recebimentos
-        if "and" in filtros:
-            return [venda_no_periodo]
-        ids = {int(i) for i in filtros["id_planilha"][len("in.("):-1].split(",")}
-        return [v for v in (venda_no_periodo, venda_fora) if v["id_planilha"] in ids]
-
-    monkeypatch.setattr(banco_mod, "query", _fake_query)
+    chamadas = _mockar_vendas(monkeypatch, [venda_no_periodo], recebimentos, vendas_por_id=[venda_no_periodo, venda_fora])
     empresa = banco_mod.buscar_faturamento(date(2026, 8, 10), date(2026, 8, 20), [1, 3]).empresa
 
     assert empresa["faturamento"] == 10000
     assert empresa["liquidado"] == 22500
-    (recebimento,) = [c for c in chamadas if c["tabela"] == "recebimentos_faturamento"]
-    assert recebimento["filtros"]["and"] == "(mes.gte.2026-08-01,mes.lte.2026-08-20)"
+    assert ("ler_recebimentos_do_periodo", (date(2026, 8, 10), date(2026, 8, 20))) in chamadas
 
 
 def test_liquidado_por_pessoa_vai_para_o_closer_da_venda_do_recebimento(monkeypatch):
@@ -168,17 +170,12 @@ def test_liquidado_por_pessoa_vai_para_o_closer_da_venda_do_recebimento(monkeypa
         {"id_planilha_venda": 2, "mes": "2026-08-01", "liquido": 18000},
         {"id_planilha_venda": 3, "mes": "2026-08-01", "liquido": 700},
     ]
-
-    def _fake_query(tabela, filtros=None, *a, **k):
-        filtros = filtros or {}
-        if tabela == "recebimentos_faturamento":
-            return recebimentos
-        if "and" in filtros:
-            return [venda_no_periodo]
-        ids = {int(i) for i in filtros["id_planilha"][len("in.("):-1].split(",")}
-        return [v for v in (venda_no_periodo, venda_fora, venda_sem_closer) if v["id_planilha"] in ids]
-
-    monkeypatch.setattr(banco_mod, "query", _fake_query)
+    _mockar_vendas(
+        monkeypatch,
+        [venda_no_periodo],
+        recebimentos,
+        vendas_por_id=[venda_no_periodo, venda_fora, venda_sem_closer],
+    )
     resultado = banco_mod.buscar_faturamento(date(2026, 8, 1), date(2026, 8, 31), [1, 3])
 
     assert resultado.por_pessoa[1]["liquidado"] == 4500
@@ -324,14 +321,14 @@ def test_proxima_imersao_filtra_titulo_e_data_a_partir_de_agora(monkeypatch):
 # --- buscar_logs (dash2.logs_pipedrive, espelho da planilha de logs)
 
 
-def _mockar_logs(monkeypatch, linhas: list[dict]) -> list[dict]:
-    chamadas: list[dict] = []
+def _mockar_logs(monkeypatch, linhas: list[dict]) -> list[tuple]:
+    chamadas: list[tuple] = []
 
-    def _fake_query(tabela, filtros=None, *a, **k):
-        chamadas.append({"tabela": tabela, "filtros": filtros or {}})
+    def _ler_logs_do_periodo(inicio, fim):
+        chamadas.append((inicio, fim))
         return list(linhas)
 
-    monkeypatch.setattr(banco_mod, "query", _fake_query)
+    monkeypatch.setattr(supabase_mod, "ler_logs_do_periodo", _ler_logs_do_periodo)
     return chamadas
 
 
@@ -342,8 +339,7 @@ def _log(data: str, hora: str | None, usuario: str | None = "Jennifer", atividad
 def test_logs_filtra_periodo_pela_coluna_data(monkeypatch):
     chamadas = _mockar_logs(monkeypatch, [])
     assert banco_mod.buscar_logs(date(2026, 10, 1), date(2026, 10, 5)) == []
-    assert chamadas[0]["tabela"] == "logs_pipedrive"
-    assert chamadas[0]["filtros"]["and"] == "(data.gte.2026-10-01,data.lte.2026-10-05)"
+    assert chamadas == [(date(2026, 10, 1), date(2026, 10, 5))]
 
 
 def test_logs_vem_do_mais_recente_pro_mais_antigo_com_usuario_atividade_e_cliente(monkeypatch):

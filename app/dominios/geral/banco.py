@@ -24,7 +24,7 @@ aqui — não existem nesta tabela, vêm do SED (ver `buscar_confrarias_do_mes`)
 Também lê o SEGUNDO Supabase (`SED.events`/`SED.registrations`, via
 `app.fontes.sed`), que
 alimenta a tabela de Confrarias da Geral — ver `buscar_confrarias_do_mes` —
-e `dash2.logs_pipedrive`, o espelho da planilha de logs — ver `buscar_logs`.
+e `logs_pipedrive`, o espelho da planilha de logs — ver `buscar_logs`.
 
 As métricas de atividade (números captados, ligações, reuniões, indicações)
 NÃO passam por aqui: a Geral lê as mesmas `buscar_totais`/`dash.vw_metricas`
@@ -38,7 +38,7 @@ from datetime import date, datetime, time, timedelta
 
 from app.periodo import TZ_SP
 from app.fontes import sed
-from app.fontes.banco import query
+from app.fontes import supabase
 
 CHAVES_FATURAMENTO = ("faturamento", "liquidado", "inscritos", "aprovados")
 
@@ -78,15 +78,8 @@ def _linha_vazia() -> dict[str, float | None]:
 
 
 def buscar_faturamento(inicio: date, fim: date, ids_pessoas: list[int]) -> Faturamento:
-    fim_exclusivo = fim + timedelta(days=1)
-    linhas = query(
-        "metricas_faturamento",
-        {"and": f"(data_venda.gte.{inicio.isoformat()},data_venda.lt.{fim_exclusivo.isoformat()})"},
-    )
-    recebimentos = query(
-        "recebimentos_faturamento",
-        {"and": f"(mes.gte.{inicio.replace(day=1).isoformat()},mes.lte.{fim.isoformat()})"},
-    )
+    linhas = supabase.ler_vendas_do_periodo(inicio, fim)
+    recebimentos = supabase.ler_recebimentos_do_periodo(inicio, fim)
 
     empresa: dict[str, float | None] = {**_linha_vazia(), "faturamento": 0.0, "liquidado": 0.0}
     por_pessoa: dict[int, dict[str, float | None]] = {}
@@ -97,11 +90,7 @@ def buscar_faturamento(inicio: date, fim: date, ids_pessoas: list[int]) -> Fatur
     ids = sorted({int(r["id_planilha_venda"]) for r in recebimentos})
     closer_por_venda: dict[int, int | None] = {}
     if ids:
-        vendas = query(
-            "metricas_faturamento",
-            {"id_planilha": f"in.({','.join(map(str, ids))})"},
-            colunas="id_planilha,user_closer",
-        )
+        vendas = supabase.ler_vendas_por_id_planilha(ids, colunas="id_planilha,user_closer")
         closer_por_venda = {int(v["id_planilha"]): v.get("user_closer") for v in vendas}
 
     for r in recebimentos:
@@ -251,14 +240,10 @@ class LogAtividade:
 
 def buscar_logs(inicio: date, fim: date) -> list[LogAtividade]:
     """Os `LIMITE_LOGS` logs mais recentes de `inicio` a `fim` em
-    `dash2.logs_pipedrive` (espelho da aba Logs da planilha `PLANILHA_LOGS_ID`,
+    `logs_pipedrive` (espelho da aba Logs da planilha `PLANILHA_LOGS_ID`,
     mantido pelo WorkerLogs), do mais novo pro mais antigo.
     """
-    linhas = query(
-        "logs_pipedrive",
-        {"and": f"(data.gte.{inicio.isoformat()},data.lte.{fim.isoformat()})"},
-        colunas="data,hora,usuario_acao,atividade,cliente_nome",
-    )
+    linhas = supabase.ler_logs_do_periodo(inicio, fim)
     linhas.sort(key=lambda r: (str(r.get("data") or ""), str(r.get("hora") or "")), reverse=True)
     return [
         LogAtividade(
