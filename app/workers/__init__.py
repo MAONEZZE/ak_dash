@@ -14,8 +14,8 @@ from app.config import Settings
 from app.fontes import banco
 from app.workers.google_sheets import LeitorSheets, criar_credenciais
 from app.periodo import TZ_SP, hoje_sp
-from app.planilha_financeiro import APELIDOS, COLUNAS_VENDA, ler_base_vendas
-from app.planilha_logs import COLUNAS_LOG, ler_logs
+from app.workers.planilha_financeiro import APELIDOS, COLUNAS_VENDA, ler_base_vendas
+from app.workers.planilha_logs import COLUNAS_LOG, ler_logs
 from app.planilhas import (
     COLUNAS_POR_TABELA,
     Aba,

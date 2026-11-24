@@ -6,10 +6,10 @@ from datetime import date, datetime
 import pytest
 
 from app import config
-from app import planilha_logs
 from app import workers
 from app.periodo import TZ_SP
-from app.planilha_financeiro import ler_base_vendas
+from app.workers import planilha_logs
+from app.workers.planilha_financeiro import ler_base_vendas
 
 
 @pytest.fixture(autouse=True)
