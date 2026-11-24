@@ -4,7 +4,7 @@ from datetime import datetime
 import httpx
 import pytest
 
-from app.fontes import pipedrive
+from app.fontes import banco, pipedrive
 from app.periodo import TZ_SP
 
 
@@ -162,3 +162,28 @@ def test_sem_configuracao_ou_com_erro_sobe_pipedrive_indisponivel(monkeypatch):
 
     with pytest.raises(pipedrive.PipedriveIndisponivel):
         pipedrive.negocios_no_estagio(11, datetime(2026, 11, 1, tzinfo=TZ_SP))
+
+
+def test_ou_vazio_devolve_o_vazio_e_registra_falha_quando_o_pipedrive_cai():
+    def _fora():
+        raise pipedrive.PipedriveIndisponivel("fora")
+
+    banco.iniciar_registro_de_falhas()
+    antes = banco.falhas_na_thread()
+
+    resultado = pipedrive.ou_vazio(_fora, {"x": 0}, "Pipedrive indisponível — teste")
+
+    assert resultado == {"x": 0}
+    assert banco.tabelas_com_falha() == ["pipedrive"]
+    assert banco.falhas_na_thread() == antes + 1
+
+
+def test_ou_vazio_devolve_o_resultado_sem_registrar_falha_quando_da_certo():
+    banco.iniciar_registro_de_falhas()
+    antes = banco.falhas_na_thread()
+
+    resultado = pipedrive.ou_vazio(lambda: [1, 2], [], "msg")
+
+    assert resultado == [1, 2]
+    assert banco.tabelas_com_falha() == []
+    assert banco.falhas_na_thread() == antes

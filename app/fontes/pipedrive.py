@@ -1,11 +1,18 @@
 """Cliente mínimo da API v2 do Pipedrive, só leitura. Erro de rede/HTTP ou falta de configuração sobem como PipedriveIndisponivel; quem chama decide como degradar."""
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
+from typing import Callable, TypeVar
 
 import httpx
 
 from app.config import settings
+from app.fontes import banco
+
+logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
 
 TAMANHO_PAGINA = 500
 LOTE_PESSOAS = 100
@@ -101,3 +108,13 @@ def etiquetas_das_pessoas(ids: list[int]) -> dict[int, tuple[int, ...]]:
             for p in pagina:
                 resultado[p["id"]] = tuple(p.get("label_ids") or [])
     return resultado
+
+
+def ou_vazio(calcular: Callable[[], T], vazio: T, mensagem: str) -> T:
+    """Roda `calcular`; Pipedrive fora do ar ou sem configuração → loga `mensagem`, registra a falha 'pipedrive' (aviso na tela, sem cache) e devolve `vazio`."""
+    try:
+        return calcular()
+    except PipedriveIndisponivel:
+        logger.warning(mensagem, exc_info=True)
+        banco.registrar_falha("pipedrive")
+        return vazio
