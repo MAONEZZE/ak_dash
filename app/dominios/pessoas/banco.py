@@ -1,4 +1,4 @@
-"""Leitura de `dash2.users` + `dash2.user_cargos`: uma linha por (pessoa, cargo).
+"""Leitura de `users` + `user_cargos` (via app.fontes.supabase): uma linha por (pessoa, cargo).
 
 Pessoa com vários cargos vira várias `Pessoa`, uma por cargo. Pessoa sem
 nenhum cargo não gera linha.
@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.fontes.banco import query
+from app.fontes import supabase
 
 
 @dataclass(frozen=True)
@@ -20,8 +20,8 @@ class Pessoa:
 
 
 def listar_ativas() -> list[Pessoa]:
-    usuarios = query("users", {"active": "eq.true"})
-    vinculos = query("user_cargos", colunas="id_user,cargo")
+    usuarios = supabase.ler_usuarios_ativos()
+    vinculos = supabase.ler_cargos_dos_usuarios()
     cargos_por_user: dict[int, list[str]] = {}
     for v in vinculos:
         cargos_por_user.setdefault(v["id_user"], []).append(v["cargo"])
