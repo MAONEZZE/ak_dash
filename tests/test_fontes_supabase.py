@@ -178,3 +178,34 @@ def test_leituras_dos_funis_mandam_a_requisicao_de_hoje(monkeypatch, chamada, ta
     requisicao = registros[0]
     assert requisicao["url"] == f"https://sb.test/rest/v1/{tabela}"
     assert _sem_paginacao(requisicao["params"]) == params_esperados
+
+
+@pytest.mark.parametrize(
+    "chamada, metodo, tabela, params_esperados, json_esperado",
+    [
+        (lambda: supabase.ler_usuarios(), "GET", "users", {"select": "id,nome"}, None),
+        (lambda: supabase.ler_ids_com_cargo("sdr"), "GET", "user_cargos", {"select": "id_user", "cargo": "eq.sdr"}, None),
+        (lambda: supabase.ler_metas_do_cargo("seller"), "GET", "metas", {"select": "id_user,metrica,valor_diario", "cargo": "eq.seller"}, None),
+        (
+            lambda: supabase.ler_metricas_planilha("metricas_sellers", date(2026, 10, 1), date(2026, 10, 31), ["fups", "numeros_captados"]),
+            "GET",
+            "metricas_sellers",
+            {"select": "id_user,data,key_data_ref_user,fups,numeros_captados", "and": "(data.gte.2026-10-01,data.lte.2026-10-31)"},
+            None,
+        ),
+        (lambda: supabase.gravar_metricas_planilha("metricas_sdrs", [{"a": 1}]), "POST", "metricas_sdrs", {"on_conflict": "key_data_ref_user"}, [{"a": 1}]),
+        (lambda: supabase.gravar_metas([{"a": 1}]), "POST", "metas", {"on_conflict": "id_user,cargo,metrica"}, [{"a": 1}]),
+        (lambda: supabase.apagar_meta(9, "sdr", "abordagens"), "DELETE", "metas", {"id_user": "eq.9", "cargo": "eq.sdr", "metrica": "eq.abordagens"}, None),
+    ],
+)
+def test_funcoes_do_worker_base_mandam_a_requisicao_de_hoje(monkeypatch, chamada, metodo, tabela, params_esperados, json_esperado):
+    registros = _capturar(monkeypatch)
+
+    chamada()
+
+    assert len(registros) == 1
+    requisicao = registros[0]
+    assert requisicao["metodo"] == metodo
+    assert requisicao["url"] == f"https://sb.test/rest/v1/{tabela}"
+    assert _sem_paginacao(requisicao["params"]) == params_esperados
+    assert requisicao["json"] == json_esperado

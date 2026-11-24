@@ -12,6 +12,7 @@ from typing import Callable
 from app import cache
 from app.config import Settings
 from app.fontes import banco
+from app.fontes import supabase
 from app.workers.google_sheets import LeitorSheets, criar_credenciais
 from app.periodo import TZ_SP, hoje_sp
 from app.workers.planilha_financeiro import APELIDOS, COLUNAS_VENDA, ler_base_vendas
@@ -70,21 +71,27 @@ class Worker:
             raise RuntimeError(f"consulta a {tabela} falhou")
         return linhas
 
+    def _exigir(self, rotulo: str, ler: Callable[[], list[dict]]) -> list[dict]:
+        antes = banco.falhas_na_thread()
+        linhas = ler()
+        if banco.falhas_na_thread() != antes:
+            raise RuntimeError(f"consulta a {rotulo} falhou")
+        return linhas
+
     def _carregar_estado(self, ano: int, mes: int) -> None:
         inicio = date(ano, mes, 1)
         fim = date(ano, mes, monthrange(ano, mes)[1])
         colunas = COLUNAS_POR_TABELA[self.planilha.tabela]
         self.metricas = {
             l["key_data_ref_user"]: l
-            for l in self._consultar(
+            for l in self._exigir(
                 self.planilha.tabela,
-                {"and": f"(data.gte.{inicio},data.lte.{fim})"},
-                "id_user,data,key_data_ref_user," + ",".join(colunas),
+                lambda: supabase.ler_metricas_planilha(self.planilha.tabela, inicio, fim, colunas),
             )
         }
         self.metas = {
             (l["id_user"], l["metrica"]): l["valor_diario"]
-            for l in self._consultar("metas", {"cargo": f"eq.{self.planilha.cargo}"}, "id_user,metrica,valor_diario")
+            for l in self._exigir("metas", lambda: supabase.ler_metas_do_cargo(self.planilha.cargo))
         }
 
     def ciclo(self) -> None:
@@ -92,8 +99,8 @@ class Worker:
         self._carregar_estado(hoje.year, hoje.month)  # estado sempre do banco: cada ciclo é um job independente
 
         abas = [a for titulo, linhas in self.ler_abas(self.planilha_id) if (a := ler_linhas(titulo, linhas)) is not None]
-        usuarios = self._consultar("users", {}, "id,nome")
-        com_cargo = {l["id_user"] for l in self._consultar("user_cargos", {"cargo": f"eq.{self.planilha.cargo}"}, "id_user")}
+        usuarios = self._exigir("users", supabase.ler_usuarios)
+        com_cargo = {l["id_user"] for l in self._exigir("user_cargos", lambda: supabase.ler_ids_com_cargo(self.planilha.cargo))}
 
         if self._sincronizar(abas, usuarios, com_cargo, hoje):
             cache.invalidar()
@@ -144,31 +151,25 @@ class Worker:
         gravou = False
 
         if metricas_novas:
-            banco.upsert(
+            supabase.gravar_metricas_planilha(
                 self.planilha.tabela,
                 [{**l, "atualizado_em": carimbo} for l in sorted(metricas_novas.values(), key=lambda l: (l["id_user"], l["data"]))],
-                on_conflict="key_data_ref_user",
             )
             self.metricas.update(metricas_novas)
             gravou = True
 
         if metas_novas:
-            banco.upsert(
-                "metas",
+            supabase.gravar_metas(
                 [
                     {"id_user": i, "cargo": self.planilha.cargo, "metrica": m, "valor_diario": v, "atualizado_em": carimbo}
                     for (i, m), v in sorted(metas_novas.items())
                 ],
-                on_conflict="id_user,cargo,metrica",
             )
             self.metas.update(metas_novas)
             gravou = True
 
         for i, m in sorted(metas_apagadas):
-            banco.apagar(
-                "metas",
-                {"id_user": f"eq.{i}", "cargo": f"eq.{self.planilha.cargo}", "metrica": f"eq.{m}"},
-            )
+            supabase.apagar_meta(i, self.planilha.cargo, m)
             self.metas.pop((i, m), None)
             gravou = True
 
@@ -300,8 +301,8 @@ class WorkerSdr(Worker):
 
         brutas = self.ler_abas(self.planilha_id)
         abas = [a for titulo, linhas in brutas if (a := ler_linhas(titulo, linhas)) is not None]
-        usuarios = self._consultar("users", {}, "id,nome")
-        com_cargo = {l["id_user"] for l in self._consultar("user_cargos", {"cargo": f"eq.{self.planilha.cargo}"}, "id_user")}
+        usuarios = self._exigir("users", supabase.ler_usuarios)
+        com_cargo = {l["id_user"] for l in self._exigir("user_cargos", lambda: supabase.ler_ids_com_cargo(self.planilha.cargo))}
 
         gravou = self._sincronizar(abas, usuarios, com_cargo, hoje)
         if self._sincronizar_funil(abas, usuarios, com_cargo, hoje):
@@ -389,8 +390,8 @@ class WorkerFunil(Worker):
         self._carregar_estado(hoje.year, hoje.month)  # estado sempre do banco: cada ciclo é um job independente
 
         abas = [a for titulo, linhas in self.ler_abas(self.planilha_id) if (a := ler_linhas(titulo, linhas)) is not None]
-        usuarios = self._consultar("users", {}, "id,nome")
-        com_cargo = {l["id_user"] for l in self._consultar("user_cargos", {"cargo": f"eq.{self.planilha.cargo}"}, "id_user")}
+        usuarios = self._exigir("users", supabase.ler_usuarios)
+        com_cargo = {l["id_user"] for l in self._exigir("user_cargos", lambda: supabase.ler_ids_com_cargo(self.planilha.cargo))}
 
         abas_seller = [a for a in abas if (u := resolver_usuario(a.pessoa, usuarios)) is not None and u["id"] in com_cargo]
         gravou = self._sincronizar(abas_seller, usuarios, com_cargo, hoje)
@@ -598,7 +599,7 @@ class WorkerLogs(Worker):
         if not leitura.eventos:
             # leitura vazia não pode esvaziar a tabela (mesmo cuidado do financeiro)
             raise RuntimeError("aba Logs sem nenhum evento válido; nada foi apagado")
-        usuarios = self._consultar("users", {}, "id,nome")
+        usuarios = self._exigir("users", supabase.ler_usuarios)
 
         desejados: dict[str, dict] = {}
         for e in leitura.eventos:

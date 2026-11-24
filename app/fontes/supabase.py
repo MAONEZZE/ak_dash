@@ -91,3 +91,35 @@ def ler_metricas_funil_sdr(inicio: date, fim: date) -> list[dict]:
 
 def ler_metas_funil_sdr() -> list[dict]:
     return banco.query("metas_funil_sdr", {}, colunas="metrica,periodo,id_user,valor")
+
+
+def ler_usuarios() -> list[dict]:
+    return banco.query("users", {}, colunas="id,nome")
+
+
+def ler_ids_com_cargo(cargo: str) -> list[dict]:
+    return banco.query("user_cargos", {"cargo": f"eq.{cargo}"}, colunas="id_user")
+
+
+def ler_metas_do_cargo(cargo: str) -> list[dict]:
+    return banco.query("metas", {"cargo": f"eq.{cargo}"}, colunas="id_user,metrica,valor_diario")
+
+
+def ler_metricas_planilha(tabela: str, inicio: date, fim: date, colunas: list[str]) -> list[dict]:
+    return banco.query(
+        tabela,
+        {"and": f"(data.gte.{inicio.isoformat()},data.lte.{fim.isoformat()})"},
+        colunas="id_user,data,key_data_ref_user," + ",".join(colunas),
+    )
+
+
+def gravar_metricas_planilha(tabela: str, linhas: list[dict]) -> None:
+    banco.upsert(tabela, linhas, on_conflict="key_data_ref_user")
+
+
+def gravar_metas(linhas: list[dict]) -> None:
+    banco.upsert("metas", linhas, on_conflict="id_user,cargo,metrica")
+
+
+def apagar_meta(id_user: int, cargo: str, metrica: str) -> None:
+    banco.apagar("metas", {"id_user": f"eq.{id_user}", "cargo": f"eq.{cargo}", "metrica": f"eq.{metrica}"})
