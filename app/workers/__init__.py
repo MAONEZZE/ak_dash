@@ -12,7 +12,7 @@ from typing import Callable
 from app import cache
 from app.config import Settings
 from app.fontes import banco
-from app.fontes.google_sheets import LeitorSheets, criar_credenciais
+from app.workers.google_sheets import LeitorSheets, criar_credenciais
 from app.periodo import TZ_SP, hoje_sp
 from app.planilha_financeiro import APELIDOS, COLUNAS_VENDA, ler_base_vendas
 from app.planilha_logs import COLUNAS_LOG, ler_logs
