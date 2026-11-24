@@ -430,7 +430,7 @@ def test_funil_sdr_traz_a_proxima_confraria_para_o_velocimetro(monkeypatch):
             return [{"event_id": "e1", "status": s} for s in ("pending", "pending", "approved", "rejected")]
         return _fake_query(tabela, filtros, *a, **kw)
 
-    monkeypatch.setattr(geral_banco_mod, "query", query_com_evento)
+    monkeypatch.setattr(fontes_banco_mod, "query", query_com_evento)
     corpo = client.get("/funil-sdr", params={"granularidade": "mes", "periodo": "2026-11"}).json()
     assert corpo["evento"] == {
         "id": "e1", "titulo": "Confraria Akeel SP", "data": "2026-11-20T22:00:00",
@@ -464,7 +464,7 @@ def test_funil_sdr_no_filtro_de_dia_meta_do_velocimetro_e_o_que_falta_dividido_p
             return [{"event_id": "e1", "status": "approved"}] * 70 + [{"event_id": "e1", "status": "rejected"}]
         return _fake_query(tabela, filtros, *a, **kw)
 
-    monkeypatch.setattr(geral_banco_mod, "query", query_com_evento)
+    monkeypatch.setattr(fontes_banco_mod, "query", query_com_evento)
     corpo = client.get("/funil-sdr", params={"granularidade": "dia", "periodo": "2026-11-23"}).json()
     # Faltam 80 − 68 = 12 em 3 dias (seg 23 a qua 25): 4 por dia (fixa no dia, as 2 de hoje não abatem).
     assert corpo["evento"]["meta_velocimetro"] == 4
@@ -488,7 +488,7 @@ def test_funil_sdr_na_semana_meta_do_velocimetro_e_a_diaria_vezes_6_limitada_ao_
             return [{"event_id": "e1", "status": "approved"}] * 47
         return _fake_query(tabela, filtros, *a, **kw)
 
-    monkeypatch.setattr(geral_banco_mod, "query", query_com_evento)
+    monkeypatch.setattr(fontes_banco_mod, "query", query_com_evento)
     corpo = client.get("/funil-sdr", params={"granularidade": "semana", "periodo": "2026-W48"}).json()
     # Faltam 33 em 11 dias = 3/dia → semana 18.
     assert corpo["evento"]["meta_velocimetro"] == 18
@@ -506,7 +506,7 @@ def test_funil_sdr_com_evento_escolhido_traz_os_numeros_dele(monkeypatch):
             return [{"event_id": "e-antigo", "status": s} for s in ("approved", "approved", "rejected")]
         return _fake_query(tabela, filtros, *a, **kw)
 
-    monkeypatch.setattr(geral_banco_mod, "query", query_com_evento)
+    monkeypatch.setattr(fontes_banco_mod, "query", query_com_evento)
     corpo = client.get("/funil-sdr", params={"granularidade": "mes", "periodo": "2026-11", "evento": "e-antigo"}).json()
     assert filtros_eventos[0]["and"] == '(id.eq."e-antigo")'
     assert (corpo["evento"]["id"], corpo["evento"]["aprovados"], corpo["evento"]["rejeitados"]) == ("e-antigo", 2, 1)
@@ -527,7 +527,7 @@ def test_funil_sdr_eventos_lista_os_proximos_eventos(monkeypatch):
             return [{"id": "e1", "title": "Imersão Alta Cadência", "event_date": "2026-11-18T22:00:00"}]
         return _fake_query(tabela, filtros, *a, **kw)
 
-    monkeypatch.setattr(geral_banco_mod, "query", query_eventos)
+    monkeypatch.setattr(fontes_banco_mod, "query", query_eventos)
     corpo = client.get("/funil-sdr/eventos").json()
     assert corpo["eventos"] == [{"id": "e1", "titulo": "Imersão Alta Cadência", "data": "2026-11-18T22:00:00"}]
 
@@ -542,7 +542,7 @@ def test_funil_evento_eventos_lista_as_imersoes(monkeypatch):
             return [{"id": "i2", "title": "Imersão Alta Cadência", "event_date": "2026-12-02T16:00:00+00:00"}]
         return _fake_query(tabela, filtros, *a, **kw)
 
-    monkeypatch.setattr(geral_banco_mod, "query", query_imersoes)
+    monkeypatch.setattr(fontes_banco_mod, "query", query_imersoes)
     resposta = client.get("/funil-evento/eventos")
     assert resposta.status_code == 200
     corpo = resposta.json()
@@ -571,7 +571,7 @@ def test_funil_evento_sem_escolha_traz_a_proxima_imersao_com_o_funil(monkeypatch
         return _fake_query(tabela, filtros, *a, **kw)
 
     monkeypatch.setattr(funil_evento_mod, "buscar_pipedrive_evento", fake_pipedrive)
-    monkeypatch.setattr(geral_banco_mod, "query", query_imersao)
+    monkeypatch.setattr(fontes_banco_mod, "query", query_imersao)
     resposta = client.get("/funil-evento", params={"granularidade": "mes", "periodo": "2026-11"})
     assert resposta.status_code == 200
     corpo = resposta.json()
@@ -606,7 +606,7 @@ def test_funil_evento_com_evento_escolhido_usa_a_data_dele(monkeypatch):
         return _fake_query(tabela, filtros, *a, **kw)
 
     monkeypatch.setattr(funil_evento_mod, "buscar_pipedrive_evento", fake_pipedrive)
-    monkeypatch.setattr(geral_banco_mod, "query", query_com_evento)
+    monkeypatch.setattr(fontes_banco_mod, "query", query_com_evento)
     resposta = client.get("/funil-evento", params={"granularidade": "semana", "periodo": "2026-W47", "evento": "e-antigo"})
     assert resposta.status_code == 200
     corpo = resposta.json()
@@ -631,7 +631,7 @@ def test_funil_evento_sem_imersao_zera_o_funil(monkeypatch):
         return _fake_query(tabela, filtros, *a, **kw)
 
     monkeypatch.setattr(funil_evento_mod, "buscar_pipedrive_evento", fake_pipedrive)
-    monkeypatch.setattr(geral_banco_mod, "query", query_sem_imersao)
+    monkeypatch.setattr(fontes_banco_mod, "query", query_sem_imersao)
     resposta = client.get("/funil-evento", params={"granularidade": "mes", "periodo": "2026-11"})
     assert resposta.status_code == 200
     corpo = resposta.json()

@@ -10,6 +10,7 @@ from datetime import date, datetime
 import pytest
 
 from app.dominios.geral import banco as banco_mod
+from app.fontes import sed as sed_mod
 
 
 # --- buscar_faturamento (dash.metricas_faturamento: uma linha por venda)
@@ -186,18 +187,27 @@ def test_liquidado_por_pessoa_vai_para_o_closer_da_venda_do_recebimento(monkeypa
     assert None not in resultado.por_pessoa
 
 
-# --- buscar_confrarias_do_mes (segundo Supabase: SED.events/SED.registrations)
+# --- buscar_confrarias_do_mes (segundo Supabase, lido por `app.fontes.sed`)
 
 
-def _mockar_duas_queries(monkeypatch, eventos: list[dict], inscricoes: list[dict]) -> list[dict]:
-    """Devolve a lista de chamadas feitas, pra conferir filtros enviados ao PostgREST."""
-    chamadas: list[dict] = []
+def _mockar_sed(monkeypatch, eventos: list[dict], inscricoes: list[dict]) -> list[tuple]:
+    """Devolve as chamadas feitas em `app.fontes.sed`, como `(nome, args, kwargs)`, pra conferir filtros."""
+    chamadas: list[tuple] = []
 
-    def _fake_query(tabela, filtros=None, *a, **k):
-        chamadas.append({"tabela": tabela, "filtros": filtros or {}})
-        return eventos if tabela == "events" else inscricoes
+    def _registra_eventos(nome: str):
+        def _fake(*args, **kwargs):
+            chamadas.append((nome, args, kwargs))
+            return eventos
 
-    monkeypatch.setattr(banco_mod, "query", _fake_query)
+        return _fake
+
+    def _fake_inscricoes(*args, **kwargs):
+        chamadas.append(("ler_inscricoes_dos_eventos", args, kwargs))
+        return inscricoes
+
+    for nome in ("ler_eventos_entre", "ler_eventos_a_partir_de", "ler_evento_por_id", "ler_imersoes"):
+        monkeypatch.setattr(sed_mod, nome, _registra_eventos(nome))
+    monkeypatch.setattr(sed_mod, "ler_inscricoes_dos_eventos", _fake_inscricoes)
     return chamadas
 
 
@@ -207,7 +217,7 @@ def test_inscritos_conta_toda_inscricao_inclusive_recusada(monkeypatch):
     Regressão do caso real da Imersão Alta Cadência (17/09/2026): 70 linhas no
     banco, 5 delas `rejected`, e a tela mostrava 65.
     """
-    _mockar_duas_queries(
+    _mockar_sed(
         monkeypatch,
         [{"id": "e1", "title": "Imersão", "event_date": "2026-09-20T19:00:00", "capacity": 50}],
         [
@@ -226,7 +236,7 @@ def test_inscritos_conta_toda_inscricao_inclusive_recusada(monkeypatch):
 
 
 def test_evento_sem_inscricao_sai_com_zero_nao_com_erro(monkeypatch):
-    _mockar_duas_queries(
+    _mockar_sed(
         monkeypatch,
         [{"id": "e1", "title": "Imersão", "event_date": "2026-09-20T19:00:00", "capacity": None}],
         [{"event_id": "outro", "status": "approved"}],
@@ -236,24 +246,23 @@ def test_evento_sem_inscricao_sai_com_zero_nao_com_erro(monkeypatch):
 
 
 def test_filtra_confraria_do_mes_inteiro_e_nao_filtra_status(monkeypatch):
-    chamadas = _mockar_duas_queries(
+    chamadas = _mockar_sed(
         monkeypatch,
         [{"id": "e1", "title": "x", "event_date": "2026-09-20T19:00:00", "capacity": None}],
         [],
     )
     banco_mod.buscar_confrarias_do_mes(date(2026, 9, 1), date(2026, 9, 30))
-    # Meia-noite de São Paulo em UTC (+3h), com o fim exclusivo no dia seguinte.
-    assert chamadas[0]["filtros"]["and"] == '(event_date.gte."2026-09-01T03:00:00Z",event_date.lt."2026-10-01T03:00:00Z")'
-    assert chamadas[0]["filtros"]["title"] == "ilike.*confraria akeel*"
-    assert chamadas[0]["filtros"]["order"] == "event_date.asc"
-    # Sem filtro de status: toda inscrição do evento conta como inscrito.
-    assert "status" not in chamadas[1]["filtros"]
-    assert chamadas[1]["filtros"]["event_id"] == 'in.("e1")'
+    assert chamadas[0] == (
+        "ler_eventos_entre",
+        (datetime(2026, 9, 1, tzinfo=banco_mod.TZ_SP), datetime(2026, 10, 1, tzinfo=banco_mod.TZ_SP), "confraria akeel", banco_mod.LIMITE_EVENTOS),
+        {},
+    )
+    assert chamadas[1] == ("ler_inscricoes_dos_eventos", (["e1"],), {})
 
 
 def test_no_maximo_limite_eventos_e_na_ordem_do_banco(monkeypatch):
     limite = banco_mod.LIMITE_EVENTOS
-    _mockar_duas_queries(
+    _mockar_sed(
         monkeypatch,
         [
             {"id": f"e{i}", "title": f"Confraria Akeel {i}", "event_date": "2026-09-20T19:00:00", "capacity": None}
@@ -266,13 +275,13 @@ def test_no_maximo_limite_eventos_e_na_ordem_do_banco(monkeypatch):
 
 
 def test_sem_confraria_no_mes_nao_consulta_inscricoes(monkeypatch):
-    chamadas = _mockar_duas_queries(monkeypatch, [], [])
+    chamadas = _mockar_sed(monkeypatch, [], [])
     assert banco_mod.buscar_confrarias_do_mes(date(2026, 9, 1), date(2026, 9, 30)) == []
-    assert [c["tabela"] for c in chamadas] == ["events"]
+    assert [c[0] for c in chamadas] == ["ler_eventos_entre"]
 
 
 def test_evento_sem_titulo_ganha_rotulo_neutro(monkeypatch):
-    _mockar_duas_queries(
+    _mockar_sed(
         monkeypatch,
         [{"id": "e1", "title": None, "event_date": "2026-09-20T19:00:00", "capacity": None}],
         [],
@@ -281,51 +290,35 @@ def test_evento_sem_titulo_ganha_rotulo_neutro(monkeypatch):
     assert evento.titulo == "Sem título"
 
 
-# Os limites viajam em UTC com `Z`: mandar o relógio de parede de São Paulo
-# deslocaria o mês em 3h contra a coluna (que o Prisma grava em UTC), e `+00:00`
-# dependeria de percent-encoding correto pra não virar espaço na querystring.
-def test_limites_do_mes_nunca_usam_offset_numerico(monkeypatch):
-    chamadas = _mockar_duas_queries(monkeypatch, [], [])
-
-    banco_mod.buscar_confrarias_do_mes(date(2026, 12, 1), date(2026, 12, 31))
-
-    valor = chamadas[0]["filtros"]["and"]
-    assert '"2027-01-01T03:00:00Z"' in valor
-    assert "+" not in valor
-
-
 def test_proximo_evento_busca_a_partir_de_agora_so_um_de_qualquer_titulo_com_inscricoes(monkeypatch):
-    chamadas = _mockar_duas_queries(
+    agora = datetime(2026, 11, 17, 10, 30, tzinfo=banco_mod.TZ_SP)
+    chamadas = _mockar_sed(
         monkeypatch,
         [{"id": "e1", "title": "Confraria Akeel SP", "event_date": "2026-11-20T22:00:00", "capacity": 80}],
         [{"event_id": "e1", "status": "approved"}, {"event_id": "e1", "status": "rejected"}],
     )
-    evento = banco_mod.buscar_proximo_evento(datetime(2026, 11, 17, 10, 30, tzinfo=banco_mod.TZ_SP))
+    evento = banco_mod.buscar_proximo_evento(agora)
     assert (evento.titulo, evento.data, evento.inscritos, evento.capacidade) == (
         "Confraria Akeel SP", "2026-11-20T22:00:00", 2, 80,
     )
-    assert chamadas[0]["filtros"]["and"] == '(event_date.gte."2026-11-17T13:30:00Z")'
-    assert "title" not in chamadas[0]["filtros"]
-    assert chamadas[0]["filtros"]["order"] == "event_date.asc"
-    assert chamadas[0]["filtros"]["limit"] == "1"
+    assert chamadas[0] == ("ler_eventos_a_partir_de", (agora, 1), {})
 
 
 def test_sem_proximo_evento_devolve_none(monkeypatch):
-    _mockar_duas_queries(monkeypatch, [], [])
+    _mockar_sed(monkeypatch, [], [])
     assert banco_mod.buscar_proximo_evento(datetime(2026, 11, 17, tzinfo=banco_mod.TZ_SP)) is None
 
 
 def test_proxima_imersao_filtra_titulo_e_data_a_partir_de_agora(monkeypatch):
-    chamadas = _mockar_duas_queries(
+    agora = datetime(2026, 11, 17, 10, 30, tzinfo=banco_mod.TZ_SP)
+    chamadas = _mockar_sed(
         monkeypatch,
         [{"id": "i2", "title": "Imersão Alta Cadência", "event_date": "2026-12-02T16:00:00+00:00", "capacity": 60}],
         [{"event_id": "i2", "status": "approved"}, {"event_id": "i2", "status": "pending"}, {"event_id": "i2", "status": "rejected"}],
     )
-    evento = banco_mod.buscar_proxima_imersao(datetime(2026, 11, 17, 10, 30, tzinfo=banco_mod.TZ_SP))
+    evento = banco_mod.buscar_proxima_imersao(agora)
     assert (evento.id, evento.inscritos, evento.aprovados, evento.pendentes, evento.rejeitados) == ("i2", 3, 1, 1, 1)
-    assert chamadas[0]["filtros"]["title"] == "ilike.*imers*"
-    assert chamadas[0]["filtros"]["and"] == '(event_date.gte."2026-11-17T13:30:00Z")'
-    assert chamadas[0]["filtros"]["limit"] == "1"
+    assert chamadas[0] == ("ler_eventos_a_partir_de", (agora, 1), {"titulo_contem": "imers"})
 
 
 # --- buscar_logs (dash2.logs_pipedrive, espelho da planilha de logs)
@@ -379,7 +372,8 @@ def test_logs_limita_aos_mais_recentes(monkeypatch):
 
 
 def test_lista_os_proximos_eventos_de_qualquer_titulo_do_mais_proximo(monkeypatch):
-    chamadas = _mockar_duas_queries(
+    agora = datetime(2026, 11, 17, 10, 30, tzinfo=banco_mod.TZ_SP)
+    chamadas = _mockar_sed(
         monkeypatch,
         [
             {"id": "e1", "title": "Imersão Alta Cadência", "event_date": "2026-11-18T22:00:00"},
@@ -387,18 +381,16 @@ def test_lista_os_proximos_eventos_de_qualquer_titulo_do_mais_proximo(monkeypatc
         ],
         [],
     )
-    eventos = banco_mod.listar_proximos_eventos(datetime(2026, 11, 17, 10, 30, tzinfo=banco_mod.TZ_SP))
+    eventos = banco_mod.listar_proximos_eventos(agora)
     assert eventos == [
         {"id": "e1", "titulo": "Imersão Alta Cadência", "data": "2026-11-18T22:00:00"},
         {"id": "e2", "titulo": "Sem título", "data": "2026-11-20T22:00:00"},
     ]
-    assert chamadas[0]["filtros"]["and"] == '(event_date.gte."2026-11-17T13:30:00Z")'
-    assert chamadas[0]["filtros"]["order"] == "event_date.asc"
-    assert "title" not in chamadas[0]["filtros"]
+    assert chamadas == [("ler_eventos_a_partir_de", (agora, banco_mod.LIMITE_EVENTOS), {"colunas": "id,title,event_date"})]
 
 
 def test_lista_imersoes_passadas_e_futuras_da_mais_recente(monkeypatch):
-    chamadas = _mockar_duas_queries(
+    chamadas = _mockar_sed(
         monkeypatch,
         [
             {"id": "i2", "title": "Imersão Alta Cadência", "event_date": "2026-12-02T16:00:00+00:00"},
@@ -411,27 +403,27 @@ def test_lista_imersoes_passadas_e_futuras_da_mais_recente(monkeypatch):
         {"id": "i2", "titulo": "Imersão Alta Cadência", "data": "2026-12-02T16:00:00+00:00"},
         {"id": "i1", "titulo": "Sem título", "data": "2026-11-17T12:00:00+00:00"},
     ]
-    assert chamadas[0]["tabela"] == "events"
-    assert chamadas[0]["filtros"]["title"] == "ilike.*imers*"
-    assert chamadas[0]["filtros"]["event_date"] == "not.is.null"
-    assert chamadas[0]["filtros"]["order"] == "event_date.desc"
-    assert chamadas[0]["filtros"]["limit"] == "50"
+    assert chamadas == [("ler_imersoes", ("imers", banco_mod.LIMITE_EVENTOS), {})]
 
 
 def test_evento_escolhido_e_buscado_pelo_id_sem_filtro_de_titulo(monkeypatch):
-    chamadas = _mockar_duas_queries(
+    chamadas = _mockar_sed(
         monkeypatch,
         [{"id": "e1", "title": "Imersão", "event_date": "2026-11-18T22:00:00", "capacity": None}],
         [{"event_id": "e1", "status": "pending"}],
     )
     evento = banco_mod.buscar_evento("e1")
     assert (evento.id, evento.pendentes) == ("e1", 1)
-    assert chamadas[0]["filtros"]["and"] == '(id.eq."e1")'
-    assert "title" not in chamadas[0]["filtros"]
+    assert chamadas[0] == ("ler_evento_por_id", ("e1",), {})
 
 
 def test_comparecimento_conta_checkins_do_evento_de_qualquer_status(monkeypatch):
-    chamadas = _mockar_duas_queries(monkeypatch, [], [{"id": "r1"}, {"id": "r2"}, {"id": "r3"}])
+    chamadas: list[tuple] = []
+
+    def _fake_comparecimentos(*args, **kwargs):
+        chamadas.append((args, kwargs))
+        return [{"id": "r1"}, {"id": "r2"}, {"id": "r3"}]
+
+    monkeypatch.setattr(sed_mod, "ler_comparecimentos", _fake_comparecimentos)
     assert banco_mod.contar_comparecimento("i2") == 3
-    assert chamadas[0]["tabela"] == "registrations"
-    assert chamadas[0]["filtros"] == {"event_id": "eq.i2", "attended": "is.true"}
+    assert chamadas == [(("i2",), {})]
