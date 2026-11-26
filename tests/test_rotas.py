@@ -552,6 +552,16 @@ def test_sdr_200_com_ranking_previsao_e_serie_do_evento(monkeypatch):
         return _fake_query(tabela, filtros, *a, **kw)
 
     monkeypatch.setattr(fontes_banco_mod, "query", query_pagina_sdr)
+    pedidos = []
+
+    def negocios_falso(inicio, fim, id_dash_por_dono):
+        pedidos.append((inicio, fim))
+        return {9: 40}
+
+    monkeypatch.setattr(rotas_funil_mod.sdr, "buscar_negocios_sdr", negocios_falso)
+    monkeypatch.setattr(
+        rotas_funil_mod.sdr, "buscar_inscricoes_pipedrive", lambda inicio, fim, donos, hoje: {9: {"mes": 5, "hoje": 1}}
+    )
     resposta = client.get("/sdr", params={"granularidade": "mes", "periodo": "2026-11"})
     assert resposta.status_code == 200
     corpo = resposta.json()
@@ -564,6 +574,12 @@ def test_sdr_200_com_ranking_previsao_e_serie_do_evento(monkeypatch):
     assert sdr["pontuacao"] == 62
     assert sdr["posicao"] == 1
     assert len(sdr["serie_evento"]) == 10  # 20/11 a 01/12 sem os domingos 22 e 29
+    assert sdr["ranking_mes"]["negocios"] == 40
+    assert sdr["ranking_mes"]["inscricoes"] == 5
+    assert sdr["ranking_mes"]["inscricoes_hoje"] == 1
+    assert corpo["mes_ranking"] == {"inicio": "2026-11-01", "fim": "2026-11-30"}
+    assert corpo["inscritos_sed_mes"] == 0  # o fake do SED não devolve inscrição no período
+    assert pedidos == [(date(2026, 11, 1), date(2026, 11, 30))]
 
 
 def test_sdr_evento_com_caractere_invalido_400(monkeypatch):

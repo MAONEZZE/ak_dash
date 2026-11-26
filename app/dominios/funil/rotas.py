@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.auth import exigir_usuario
 from app.cache import obter_ou_calcular
-from app.config import etiqueta_pessoa, settings
+from app.config import donos_sdr, etiqueta_pessoa, settings
 from app.dominios.funil import evento as funil_evento, pipedrive, sdr
 from app.dominios.funil.banco import buscar_contas
 from app.dominios.geral.banco import (
@@ -178,7 +178,7 @@ def get_funil_sdr(
     # Abordagens, respondidos e indicações dos SDRs vêm do Pipedrive, não da planilha.
     id_dash_por_dono = {
         dono: int(pessoa.id)
-        for dono, nome in pipedrive.DONOS_SDR.items()
+        for dono, nome in donos_sdr().items()
         for pessoa in pessoas
         if pessoa.cargo == "sdr" and normalizar(pessoa.nome) == nome
     }
@@ -316,9 +316,40 @@ def get_pagina_sdr(
         if dados_evento is None
         else {"id": dados_evento.id, "titulo": dados_evento.titulo, "data": dados_evento.data, "capacidade": dados_evento.capacidade}
     )
+    # Card "Ranking SDR" (mês do fim do filtro): negócios de que cada SDR é dono e entradas no estágio Inscrito,
+    # do Pipedrive (donos nas envs PIPE_ID_USUARIO_SDR_*); o badge é o total de inscritos do evento no SED.
+    id_dash_por_dono = {
+        dono: s["id"] for dono, nome in donos_sdr().items() for s in sdrs if normalizar(s["nome"]) == nome
+    }
+    inicio_mes, fim_mes = sdr.mes_do_ranking(p)
+    hoje = hoje_sp()
+    chave_donos = sorted(id_dash_por_dono.items())
+    negocios, inscricoes_pipedrive, inscritos_sed_mes = em_paralelo(
+        lambda: obter_ou_calcular(
+            f"pagina-sdr:negocios:{inicio_mes}:{chave_donos}",
+            ttl,
+            lambda: sdr.buscar_negocios_sdr(inicio_mes, fim_mes, id_dash_por_dono),
+        ),
+        lambda: obter_ou_calcular(
+            f"pagina-sdr:inscricoes-pipedrive:{inicio_mes}:{hoje}:{chave_donos}",
+            ttl,
+            lambda: sdr.buscar_inscricoes_pipedrive(inicio_mes, fim_mes, id_dash_por_dono, hoje),
+        ),
+        lambda: None
+        if dados_evento is None
+        else obter_ou_calcular(
+            f"pagina-sdr:inscritos-sed:{dados_evento.id}:{inicio_mes}",
+            ttl,
+            lambda: contar_inscritos_no_periodo(dados_evento.id, inicio_mes, fim_mes),
+        ),
+    )
     return {
         **sdr.montar_resposta_pagina_sdr(
-            p, sdrs, linhas, linhas_janela, ligacoes, metas, evento_dict, dias, hoje=hoje_sp()
+            p, sdrs, linhas, linhas_janela, ligacoes, metas, evento_dict, dias, hoje=hoje,
+            mes_ranking=(inicio_mes, fim_mes),
+            negocios=negocios,
+            inscricoes_pipedrive=inscricoes_pipedrive,
+            inscritos_sed_mes=inscritos_sed_mes,
         ),
         "avisos": [f"fonte_indisponivel:{t}" for t in tabelas_com_falha()],
     }

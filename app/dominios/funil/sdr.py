@@ -4,11 +4,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 
+from app.config import settings
 from app.dominios.funil.evento import data_do_evento_sp
+from app.fontes import pipedrive as api
 from app.fontes import sed, supabase
 from app.indicadores import calcular_indicadores
 from app.metricas import nome_exibicao
-from app.periodo import Periodo, dias_uteis_meta, dias_uteis_totais
+from app.periodo import TZ_SP, Periodo, dias_uteis_meta, dias_uteis_totais
 from app.pontuacao import atribuir_ranking
 from app.planilhas import COLUNAS_POR_TABELA
 
@@ -158,6 +160,70 @@ def buscar_ligacoes_sdr(inicio: date, fim: date) -> dict[int, int]:
     return somas
 
 
+def contar_negocios_sdr(negocios: list[dict], id_dash_por_dono: dict[int, int]) -> dict[int, int]:
+    """Negócios por SDR (id_user do dash): os de dono em `id_dash_por_dono`, cada um uma vez."""
+    contagem = {i: 0 for i in id_dash_por_dono.values()}
+    for n in negocios:
+        id_user = id_dash_por_dono.get(n.get("owner_id"))
+        if id_user is not None:
+            contagem[id_user] += 1
+    return contagem
+
+
+def contar_inscricoes_pipedrive(
+    entradas: list[dict], id_dash_por_dono: dict[int, int], hoje: date
+) -> dict[int, dict[str, int]]:
+    """Inscrições por SDR: negócios que entraram no estágio Inscrito, cada um uma vez (na primeira entrada), pelo dono
+    atual. `mes`: todas as `entradas` (já filtradas no mês); `hoje`: as do dia `hoje` em SP."""
+    contagem = {i: {"mes": 0, "hoje": 0} for i in id_dash_por_dono.values()}
+    vistos: set[int] = set()
+    for e in sorted(entradas, key=lambda e: e["entrou_em"]):
+        id_user = id_dash_por_dono.get(e.get("id_dono"))
+        if id_user is None or e["id_deal"] in vistos:
+            continue
+        vistos.add(e["id_deal"])
+        contagem[id_user]["mes"] += 1
+        if datetime.fromisoformat(e["entrou_em"].replace("Z", "+00:00")).astimezone(TZ_SP).date() == hoje:
+            contagem[id_user]["hoje"] += 1
+    return contagem
+
+
+def mes_do_ranking(periodo: Periodo) -> tuple[date, date]:
+    """Mês do card de ranking: o que contém o fim do filtro (o run rate é sempre do mês)."""
+    inicio = periodo.fim.replace(day=1)
+    proximo = (inicio + timedelta(days=32)).replace(day=1)
+    return inicio, proximo - timedelta(days=1)
+
+
+def _limites_sp(inicio: date, fim: date) -> tuple[datetime, datetime]:
+    return datetime.combine(inicio, time.min, tzinfo=TZ_SP), datetime.combine(fim + timedelta(days=1), time.min, tzinfo=TZ_SP)
+
+
+def buscar_negocios_sdr(inicio: date, fim: date, id_dash_por_dono: dict[int, int]) -> dict[int, int]:
+    """Negócios do Pipedrive criados em [inicio, fim] (SP) de que cada SDR é dono.
+    Pipedrive fora do ar: `{}` + aviso na tela (ver `api.ou_vazio`)."""
+    desde, ate = _limites_sp(inicio, fim)
+
+    def calcular() -> dict[int, int]:
+        negocios = [
+            n for n in api.negocios_criados_desde(desde) if datetime.fromisoformat(n["add_time"].replace("Z", "+00:00")) < ate
+        ]
+        return contar_negocios_sdr(negocios, id_dash_por_dono)
+
+    return api.ou_vazio(calcular, {}, "Pipedrive indisponível — negócios dos SDRs zerados")
+
+
+def buscar_inscricoes_pipedrive(
+    inicio: date, fim: date, id_dash_por_dono: dict[int, int], hoje: date
+) -> dict[int, dict[str, int]]:
+    """Entradas no estágio Inscrito (histórico do WorkerPipedrive) em [inicio, fim], por SDR. Sem o estágio configurado: `{}`."""
+    estagio = settings.pipe_id_inscrito_pipeline_linkedin
+    if estagio is None:
+        return {}
+    desde, ate = _limites_sp(inicio, fim)
+    return contar_inscricoes_pipedrive(supabase.ler_entradas_estagio([estagio], desde, ate), id_dash_por_dono, hoje)
+
+
 def montar_resposta(
     periodo: Periodo,
     sdrs: list[dict],
@@ -252,8 +318,17 @@ def montar_resposta_pagina_sdr(
     evento: dict | None,
     dias: list[date],
     hoje: date,
+    mes_ranking: tuple[date, date] | None = None,
+    negocios: dict[int, int] | None = None,
+    inscricoes_pipedrive: dict[int, dict[str, int]] | None = None,
+    inscritos_sed_mes: int | None = None,
 ) -> dict:
-    """Cards, ranking, previsão e série do evento por SDR. `dias`: janela de inscrição do evento (vazia sem evento)."""
+    """Cards, ranking, previsão e série do evento por SDR. `dias`: janela de inscrição do evento (vazia sem evento).
+    Card "Ranking SDR" (mês `mes_ranking`): `negocios` e `inscricoes_pipedrive` por SDR (fora deles, zerado), contra a
+    meta mensal de inscrições do SDR; `inscritos_sed_mes` vai no badge."""
+    negocios = negocios or {}
+    inscricoes_pipedrive = inscricoes_pipedrive or {}
+    periodo_mes = Periodo("mes", *mes_ranking) if mes_ranking else None
     ids = [s["id"] for s in sdrs]
     inscricoes = {i: 0 for i in ids}
     for l in linhas_periodo:
@@ -295,6 +370,12 @@ def montar_resposta_pagina_sdr(
                 "meta_diaria": meta_diaria,
                 "previsao": previsao_ate_o_evento(dias, acumulado_hoje(i), hoje, meta_diaria),
                 "serie_evento": serie_do_evento(dias, por_dia[i], meta_diaria, hoje),
+                "ranking_mes": {
+                    "negocios": negocios.get(i, 0),
+                    "inscricoes": inscricoes_pipedrive.get(i, {}).get("mes", 0),
+                    "inscricoes_hoje": inscricoes_pipedrive.get(i, {}).get("hoje", 0),
+                    "meta": metas.da_pessoa(periodo_mes, ids, i, "inscricoes_realizadas") if periodo_mes else None,
+                },
             }
         )
 
@@ -302,5 +383,7 @@ def montar_resposta_pagina_sdr(
         "periodo": {"granularidade": periodo.granularidade, "inicio": periodo.inicio.isoformat(), "fim": periodo.fim.isoformat()},
         "evento": evento,
         "janela": {"inicio": dias[0].isoformat(), "fim": dias[-1].isoformat()} if dias else None,
+        "mes_ranking": {"inicio": mes_ranking[0].isoformat(), "fim": mes_ranking[1].isoformat()} if mes_ranking else None,
+        "inscritos_sed_mes": inscritos_sed_mes,
         "sdrs": cards,
     }

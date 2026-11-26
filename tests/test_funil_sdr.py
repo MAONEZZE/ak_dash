@@ -268,3 +268,49 @@ def test_montar_resposta_pagina_sdr_junta_card_ranking_previsao_e_serie_por_sdr(
     r_sem_evento = sdr.montar_resposta_pagina_sdr(periodo, sdrs, linhas_periodo, linhas_janela, ligacoes, METAS, None, [], date(2026, 11, 21))
     assert r_sem_evento["janela"] is None
     assert all(s["previsao"] is None and s["serie_evento"] == [] for s in r_sem_evento["sdrs"])
+
+
+def test_contar_negocios_sdr_so_de_donos_sdr():
+    negocios = [{"owner_id": 100}, {"owner_id": 100}, {"owner_id": 200}, {"owner_id": 999}]
+
+    assert sdr.contar_negocios_sdr(negocios, {100: 11, 200: 14, 300: 15}) == {11: 2, 14: 1, 15: 0}
+
+
+def test_inscricoes_pipedrive_contam_cada_negocio_uma_vez_e_separam_o_dia():
+    entradas = [
+        {"id_deal": 1, "id_dono": 100, "entrou_em": "2026-11-03T15:00:00+00:00"},
+        {"id_deal": 1, "id_dono": 100, "entrou_em": "2026-11-25T15:00:00+00:00"},  # reentrada: não conta de novo
+        {"id_deal": 2, "id_dono": 100, "entrou_em": "2026-11-25T14:00:00+00:00"},  # hoje em SP
+        {"id_deal": 3, "id_dono": 100, "entrou_em": "2026-11-26T02:00:00+00:00"},  # 25/11 23h em SP: hoje
+        {"id_deal": 4, "id_dono": 200, "entrou_em": "2026-11-26T12:00:00+00:00"},
+        {"id_deal": 5, "id_dono": 999, "entrou_em": "2026-11-25T12:00:00+00:00"},  # não é SDR
+    ]
+
+    contagem = sdr.contar_inscricoes_pipedrive(entradas, {100: 11, 200: 14}, date(2026, 11, 25))
+
+    assert contagem == {11: {"mes": 3, "hoje": 2}, 14: {"mes": 1, "hoje": 0}}
+
+
+def test_mes_do_ranking_e_o_mes_do_fim_do_filtro():
+    assert sdr.mes_do_ranking(resolver_periodo("dia", "2026-02-10")) == (date(2026, 2, 1), date(2026, 2, 28))
+    assert sdr.mes_do_ranking(resolver_periodo("mes", "2026-12")) == (date(2026, 12, 1), date(2026, 12, 31))
+
+
+def test_ranking_do_mes_entra_no_card_de_cada_sdr_com_a_meta_mensal_de_inscricoes():
+    p = resolver_periodo("dia", "2026-11-25")
+    sdrs = [{"id": 11, "nome": "Juca", "imagem_url": None}, {"id": 14, "nome": "Jennifer", "imagem_url": None}]
+
+    corpo = sdr.montar_resposta_pagina_sdr(
+        p, sdrs, [], [], {}, METAS, None, [], date(2026, 11, 25),
+        mes_ranking=sdr.mes_do_ranking(p),
+        negocios={11: 295},
+        inscricoes_pipedrive={11: {"mes": 10, "hoje": 2}},
+        inscritos_sed_mes=120,
+    )
+
+    por_id = {c["id_user"]: c["ranking_mes"] for c in corpo["sdrs"]}
+    # meta mensal do time (88) na proporção das diárias (7 de 13), mesmo no filtro de dia
+    assert por_id["11"] == {"negocios": 295, "inscricoes": 10, "inscricoes_hoje": 2, "meta": 47}
+    assert por_id["14"] == {"negocios": 0, "inscricoes": 0, "inscricoes_hoje": 0, "meta": 41}
+    assert corpo["mes_ranking"] == {"inicio": "2026-11-01", "fim": "2026-11-30"}
+    assert corpo["inscritos_sed_mes"] == 120

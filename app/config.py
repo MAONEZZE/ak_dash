@@ -152,3 +152,16 @@ def etiqueta_pessoa(canal: str, conta: str) -> int | None:
     )
     sufixo = re.sub(r"[^A-Z0-9]+", "_", sem_acento.upper()).strip("_")
     return _int_env(f"PIPE_ID_ETIQUETA_PESSOA_{canal.upper()}_{sufixo}")
+
+
+PREFIXO_DONO_SDR = "PIPE_ID_USUARIO_SDR_"
+
+
+def donos_sdr() -> dict[int, str]:
+    """owner_id do Pipedrive de cada SDR → nome em minúsculas, das envs PIPE_ID_USUARIO_SDR_<NOME> (ex.: _JUCA=28932026 → "juca",
+    comparado com `normalizar(users.nome)`). Lida na hora, para SDR novo não exigir restart."""
+    return {
+        int(valor): nome[len(PREFIXO_DONO_SDR):].lower()
+        for nome, valor in os.environ.items()
+        if nome.startswith(PREFIXO_DONO_SDR) and valor.strip()
+    }

@@ -18,8 +18,6 @@ from app.planilhas import COLUNAS_POR_TABELA
 METRICAS_POR_CANAL: dict[str, tuple[str, ...]] = {
     "linkedin": ("numeros_captados",),
 }
-# owner_id do Pipedrive que é SDR → normalizar(users.nome) do SDR no dash.
-DONOS_SDR: dict[int, str] = {28932026: "juca", 27369234: "jennifer"}
 # Colunas de metricas_funil_sdr que vêm do Pipedrive.
 METRICAS_SDR = ("abordagens", "respondidos", "indicacoes")
 
