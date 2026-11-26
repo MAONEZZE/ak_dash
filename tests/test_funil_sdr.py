@@ -236,3 +236,35 @@ def test_primeira_inscricao_vira_dia_em_sp_e_ligacoes_somam_por_sdr(monkeypatch)
 
     monkeypatch.setattr(sdr.sed, "ler_primeira_inscricao", lambda i: [])
     assert sdr.data_primeira_inscricao("e1") is None
+
+
+def test_montar_resposta_pagina_sdr_junta_card_ranking_previsao_e_serie_por_sdr():
+    periodo = resolver_periodo("mes", "2026-11")
+    sdrs = [{"id": 11, "nome": "Juca Silva", "imagem_url": None}, {"id": 14, "nome": "Jennifer Souza", "imagem_url": "j.png"}]
+    linhas_periodo = [{"id_user": 11, "data": "2026-11-03", "inscricoes_realizadas": 6}, {"id_user": 14, "data": "2026-11-04", "inscricoes_realizadas": 2}]
+    linhas_janela = [{"id_user": 11, "data": "2026-11-20", "inscricoes_realizadas": 2}, {"id_user": 11, "data": "2026-11-21", "inscricoes_realizadas": 3}]
+    ligacoes = {14: 5}
+    evento = {"id": "e1", "titulo": "Imersão", "data": "2026-11-26T16:00:00+00:00", "capacidade": 60}
+    dias = sdr.dias_da_janela_do_evento(date(2026, 11, 20), date(2026, 11, 26))
+
+    r = sdr.montar_resposta_pagina_sdr(periodo, sdrs, linhas_periodo, linhas_janela, ligacoes, METAS, evento, dias, date(2026, 11, 21))
+
+    assert r["periodo"] == {"granularidade": "mes", "inicio": "2026-11-01", "fim": "2026-11-30"}
+    assert r["evento"] == evento
+    assert r["janela"] == {"inicio": "2026-11-20", "fim": "2026-11-25"}
+    # Juca 6×10 = 60; Jennifer 5×8 + 2×10 = 60: empatados na posição 1.
+    assert [(s["id_user"], s["pontuacao"], s["posicao"]) for s in r["sdrs"]] == [("11", 60, 1), ("14", 60, 1)]
+    juca = r["sdrs"][0]
+    assert juca["nome"] == "Juca Silva"
+    assert juca["inscricoes"] == 6
+    assert juca["ligacoes"] == 0
+    assert juca["meta_inscricoes"] == METAS.da_pessoa(periodo, [11, 14], 11, "inscricoes_realizadas")
+    assert juca["meta_diaria"] == 7
+    # 5 em 2 dias × 5 dias da janela = 12,5 → 12; meta 7 × 5 = 35.
+    assert juca["previsao"] == {"valor": 12, "meta": 35, "pct_meta": 34.3}
+    assert len(juca["serie_evento"]) == 5
+    assert juca["serie_evento"][1] == {"data": "2026-11-21", "acumulado": 5, "ritmo": 9}
+
+    r_sem_evento = sdr.montar_resposta_pagina_sdr(periodo, sdrs, linhas_periodo, linhas_janela, ligacoes, METAS, None, [], date(2026, 11, 21))
+    assert r_sem_evento["janela"] is None
+    assert all(s["previsao"] is None and s["serie_evento"] == [] for s in r_sem_evento["sdrs"])

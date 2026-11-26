@@ -240,3 +240,67 @@ def ranquear_pagina_sdr(sdrs: list[dict]) -> list[dict]:
     ]
     atribuir_ranking(novas, "pontuacao")
     return sorted(novas, key=lambda s: (s["posicao"], s["id"]))
+
+
+def montar_resposta_pagina_sdr(
+    periodo: Periodo,
+    sdrs: list[dict],
+    linhas_periodo: list[dict],
+    linhas_janela: list[dict],
+    ligacoes: dict[int, int],
+    metas: MetasFunilSdr,
+    evento: dict | None,
+    dias: list[date],
+    hoje: date,
+) -> dict:
+    """Cards, ranking, previsão e série do evento por SDR. `dias`: janela de inscrição do evento (vazia sem evento)."""
+    ids = [s["id"] for s in sdrs]
+    inscricoes = {i: 0 for i in ids}
+    for l in linhas_periodo:
+        id_user = int(l["id_user"])
+        if id_user in inscricoes:
+            inscricoes[id_user] += l["inscricoes_realizadas"] or 0
+
+    por_dia: dict[int, dict[date, int]] = {i: {} for i in ids}
+    for l in linhas_janela:
+        id_user = int(l["id_user"])
+        if id_user in por_dia:
+            d = date.fromisoformat(l["data"])
+            por_dia[id_user][d] = por_dia[id_user].get(d, 0) + (l["inscricoes_realizadas"] or 0)
+
+    def acumulado_hoje(i: int) -> int:
+        if not dias:
+            return 0
+        ate = min(hoje, dias[-1])
+        return sum(n for d, n in por_dia[i].items() if dias[0] <= d <= ate)
+
+    ranking = ranquear_pagina_sdr(
+        [{"id": i, "ligacoes": ligacoes.get(i, 0), "inscricoes": inscricoes[i]} for i in ids]
+    )
+    por_id = {s["id"]: s for s in sdrs}
+    cards = []
+    for r in ranking:
+        i = r["id"]
+        meta_diaria = metas.diarias.get((i, "inscricoes_realizadas"))
+        cards.append(
+            {
+                "id_user": str(i),
+                "nome": por_id[i]["nome"],
+                "imagem_url": por_id[i].get("imagem_url"),
+                "inscricoes": inscricoes[i],
+                "meta_inscricoes": metas.da_pessoa(periodo, ids, i, "inscricoes_realizadas"),
+                "ligacoes": ligacoes.get(i, 0),
+                "pontuacao": r["pontuacao"],
+                "posicao": r["posicao"],
+                "meta_diaria": meta_diaria,
+                "previsao": previsao_ate_o_evento(dias, acumulado_hoje(i), hoje, meta_diaria),
+                "serie_evento": serie_do_evento(dias, por_dia[i], meta_diaria, hoje),
+            }
+        )
+
+    return {
+        "periodo": {"granularidade": periodo.granularidade, "inicio": periodo.inicio.isoformat(), "fim": periodo.fim.isoformat()},
+        "evento": evento,
+        "janela": {"inicio": dias[0].isoformat(), "fim": dias[-1].isoformat()} if dias else None,
+        "sdrs": cards,
+    }
