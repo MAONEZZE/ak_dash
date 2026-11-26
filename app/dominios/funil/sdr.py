@@ -4,7 +4,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 
-from app.fontes import supabase
+from app.dominios.funil.evento import data_do_evento_sp
+from app.fontes import sed, supabase
 from app.indicadores import calcular_indicadores
 from app.metricas import nome_exibicao
 from app.periodo import Periodo, dias_uteis_meta, dias_uteis_totais
@@ -138,6 +139,23 @@ def buscar_metas_funil_sdr() -> MetasFunilSdr:
 
 def buscar_metricas_funil_sdr(inicio: date, fim: date) -> list[dict]:
     return supabase.ler_metricas_funil_sdr(inicio, fim)
+
+
+def data_primeira_inscricao(id_evento: str) -> date | None:
+    """Dia (em SP) da 1ª inscrição approved/pending do evento. Sem inscrição: `None`."""
+    linhas = sed.ler_primeira_inscricao(id_evento)
+    if not linhas:
+        return None
+    return data_do_evento_sp(linhas[0]["created_at"])
+
+
+def buscar_ligacoes_sdr(inicio: date, fim: date) -> dict[int, int]:
+    """Ligações realizadas por SDR (id_user) no período, da planilha `metricas_sdrs`."""
+    somas: dict[int, int] = {}
+    for l in supabase.ler_metricas_planilha("metricas_sdrs", inicio, fim, ["ligacoes_realizadas"]):
+        id_user = int(l["id_user"])
+        somas[id_user] = somas.get(id_user, 0) + (l["ligacoes_realizadas"] or 0)
+    return somas
 
 
 def montar_resposta(

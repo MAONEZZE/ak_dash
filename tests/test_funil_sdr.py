@@ -214,3 +214,25 @@ def test_previsao_ate_o_evento_projeta_a_media_dos_dias_decorridos_e_compara_com
     # Janela encerrada: previsão = realizado.
     assert sdr.previsao_ate_o_evento(dias, acumulado_hoje=9, hoje=date(2026, 12, 1), meta_diaria=4) == {"valor": 9, "meta": 20, "pct_meta": 45.0}
     assert sdr.previsao_ate_o_evento([], acumulado_hoje=0, hoje=hoje, meta_diaria=4) is None
+
+
+def test_primeira_inscricao_vira_dia_em_sp_e_ligacoes_somam_por_sdr(monkeypatch):
+    monkeypatch.setattr(sdr.sed, "ler_primeira_inscricao", lambda i: [{"created_at": "2026-11-20T02:30:00+00:00"}])
+    chamadas: list[tuple] = []
+
+    def fake(tabela, inicio, fim, colunas):
+        chamadas.append((tabela, inicio, fim, colunas))
+        return [
+            {"id_user": 11, "data": "2026-11-03", "ligacoes_realizadas": 4},
+            {"id_user": 11, "data": "2026-11-04", "ligacoes_realizadas": None},
+            {"id_user": 14, "data": "2026-11-04", "ligacoes_realizadas": 6},
+            {"id_user": 11, "data": "2026-11-05", "ligacoes_realizadas": 3},
+        ]
+
+    monkeypatch.setattr(sdr.supabase, "ler_metricas_planilha", fake)
+    assert sdr.data_primeira_inscricao("e1") == date(2026, 11, 19)  # 02:30 UTC = 23:30 em SP do dia 19
+    assert sdr.buscar_ligacoes_sdr(date(2026, 11, 1), date(2026, 11, 30)) == {11: 7, 14: 6}
+    assert chamadas == [("metricas_sdrs", date(2026, 11, 1), date(2026, 11, 30), ["ligacoes_realizadas"])]
+
+    monkeypatch.setattr(sdr.sed, "ler_primeira_inscricao", lambda i: [])
+    assert sdr.data_primeira_inscricao("e1") is None
