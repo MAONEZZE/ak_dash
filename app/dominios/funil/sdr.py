@@ -71,6 +71,27 @@ def dias_da_janela_do_evento(primeira_inscricao: date | None, data_evento: date)
     return [d for d in (primeira_inscricao + timedelta(days=n) for n in range(dias)) if d.weekday() != 6]
 
 
+def serie_do_evento(dias: list[date], inscricoes_por_dia: dict[date, int], meta_diaria: int | None, hoje: date) -> list[dict]:
+    """Série do gráfico do evento por dia da janela. `acumulado`: inscrições da primeira data da janela até o dia,
+    só até hoje. `ritmo`: acumulado do dia anterior da janela + meta diária (sem meta, `None`)."""
+
+    def acumulado(d: date) -> int:
+        return sum(n for x, n in inscricoes_por_dia.items() if dias[0] <= x <= d)
+
+    pontos: list[dict] = []
+    for i, d in enumerate(dias):
+        ritmo = None
+        if meta_diaria is not None:
+            if i == 0:
+                ritmo = meta_diaria
+            elif dias[i - 1] <= hoje:
+                ritmo = acumulado(dias[i - 1]) + meta_diaria
+            else:
+                ritmo = pontos[i - 1]["ritmo"] + meta_diaria
+        pontos.append({"data": d.isoformat(), "acumulado": acumulado(d) if d <= hoje else None, "ritmo": ritmo})
+    return pontos
+
+
 def meta_velocimetro_inscricoes(
     granularidade: str, capacidade: int | None, inscritos_ate_ontem: int, data_evento: date, hoje: date
 ) -> int | None:

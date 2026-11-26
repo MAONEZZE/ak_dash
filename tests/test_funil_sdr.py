@@ -188,3 +188,19 @@ def test_ranking_da_pagina_sdr_pontua_ligacao_8_e_inscricao_10_com_empate_na_mes
     resultado = sdr.ranquear_pagina_sdr(lista)
     assert [(s["id"], s["pontuacao"], s["posicao"]) for s in resultado] == [(20, 80, 1), (11, 60, 2), (14, 60, 2), (30, 0, 3)]
     assert lista[0] == {"id": 14, "ligacoes": 5, "inscricoes": 2}
+
+
+def test_serie_do_evento_acumula_ate_hoje_e_ritmo_soma_a_meta_diaria_ao_acumulado_do_dia_anterior():
+    dias = [date(2026, 11, 20), date(2026, 11, 21), date(2026, 11, 23), date(2026, 11, 24), date(2026, 11, 25)]
+    # 22 é domingo: não está na janela, mas entra no acumulado do dia 23.
+    por_dia = {date(2026, 11, 20): 2, date(2026, 11, 21): 3, date(2026, 11, 22): 1, date(2026, 11, 23): 1}
+    hoje = date(2026, 11, 23)
+    assert sdr.serie_do_evento(dias, por_dia, meta_diaria=4, hoje=hoje) == [
+        {"data": "2026-11-20", "acumulado": 2, "ritmo": 4},
+        {"data": "2026-11-21", "acumulado": 5, "ritmo": 6},
+        {"data": "2026-11-23", "acumulado": 7, "ritmo": 9},
+        {"data": "2026-11-24", "acumulado": None, "ritmo": 11},
+        {"data": "2026-11-25", "acumulado": None, "ritmo": 15},
+    ]
+    sem_meta = sdr.serie_do_evento(dias, por_dia, meta_diaria=None, hoje=hoje)
+    assert [(p["acumulado"], p["ritmo"]) for p in sem_meta] == [(2, None), (5, None), (7, None), (None, None), (None, None)]
