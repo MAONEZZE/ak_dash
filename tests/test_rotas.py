@@ -573,7 +573,7 @@ def test_funil_evento_sem_escolha_traz_a_proxima_imersao_com_o_retrato_de_agora(
 
     def fake_pipedrive(data_evento):
         chamadas_pipedrive.append(data_evento)
-        return {"onboarding_agendado": 4, "onboarding_realizado": 3, "vendas": 1}
+        return {"inscritos": 5, "onboarding_agendado": 4, "onboarding_realizado": 3, "vendas": 1}
 
     def query_imersao(tabela, filtros=None, *a, **kw):
         if tabela == "events":
@@ -597,13 +597,13 @@ def test_funil_evento_sem_escolha_traz_a_proxima_imersao_com_o_retrato_de_agora(
         "total": 6, "aprovados": 3, "pendentes": 2, "rejeitados": 1,
     }
     assert corpo["funil"] == {
-        "pendentes": 2, "aprovados": 0, "onboarding_agendado": 4, "onboarding_realizado": 3, "comparecimento": 2, "vendas": 1,
+        "inscritos": 5, "onboarding_agendado": 4, "onboarding_realizado": 3, "comparecimento": 2, "vendas": 1,
     }
     assert chamadas_pipedrive == [date(2026, 12, 2)]
     assert filtros_eventos[0]["title"] == "ilike.*imers*"
 
 
-def test_funil_evento_cada_inscrito_fica_numa_etapa_so_e_a_soma_da_o_total(monkeypatch):
+def test_funil_evento_inscritos_vem_da_coluna_3_do_pipedrive_e_nao_do_sed(monkeypatch):
     client = _client(monkeypatch)
 
     def query_25_inscritos(tabela, filtros=None, *a, **kw):
@@ -618,14 +618,15 @@ def test_funil_evento_cada_inscrito_fica_numa_etapa_so_e_a_soma_da_o_total(monke
     monkeypatch.setattr(
         funil_evento_mod,
         "buscar_pipedrive_evento",
-        lambda _d: {"onboarding_agendado": 3, "onboarding_realizado": 2, "vendas": 0},
+        lambda _d: {"inscritos": 7, "onboarding_agendado": 3, "onboarding_realizado": 2, "vendas": 0},
     )
     monkeypatch.setattr(fontes_banco_mod, "query", query_25_inscritos)
     corpo = client.get("/funil-evento", params={"granularidade": "mes", "periodo": "2026-11"}).json()
     assert corpo["funil"] == {
-        "pendentes": 15, "aprovados": 5, "onboarding_agendado": 3, "onboarding_realizado": 2, "comparecimento": 0, "vendas": 0,
+        "inscritos": 7, "onboarding_agendado": 3, "onboarding_realizado": 2, "comparecimento": 0, "vendas": 0,
     }
-    assert sum(corpo["funil"].values()) == 25
+    assert corpo["evento"]["pendentes"] == 15
+    assert corpo["evento"]["aprovados"] == 10
 
 
 def test_funil_evento_com_evento_escolhido_usa_a_data_dele(monkeypatch):
@@ -676,7 +677,7 @@ def test_funil_evento_sem_imersao_zera_o_funil(monkeypatch):
     assert resposta.status_code == 200
     corpo = resposta.json()
     assert corpo["evento"] is None
-    assert corpo["funil"] == {"pendentes": 0, "aprovados": 0, "onboarding_agendado": 0, "onboarding_realizado": 0, "comparecimento": 0, "vendas": 0}
+    assert corpo["funil"] == {"inscritos": 0, "onboarding_agendado": 0, "onboarding_realizado": 0, "comparecimento": 0, "vendas": 0}
     assert chamadas_pipedrive == []
 
 

@@ -260,7 +260,7 @@ def get_funil_sdr(
     }
 
 
-FUNIL_EVENTO_ZERADO = {"pendentes": 0, "aprovados": 0, "onboarding_agendado": 0, "onboarding_realizado": 0, "comparecimento": 0, "vendas": 0}
+FUNIL_EVENTO_ZERADO = {"inscritos": 0, "onboarding_agendado": 0, "onboarding_realizado": 0, "comparecimento": 0, "vendas": 0}
 
 
 @router.get("/funil-evento")
@@ -295,15 +295,7 @@ def get_funil_evento(
         comparecimento = obter_ou_calcular(
             f"evento:{dados.id}:comparecimento", ttl, lambda: contar_comparecimento(dados.id)
         )
-        # Retrato de agora, cada inscrito em UMA etapa (a soma = pendentes + aprovados do SED): aprovados são só os que
-        # ainda não avançaram — os aprovados do SED menos os que já estão nas etapas seguintes (mín. 0).
-        avancaram = pipe["onboarding_agendado"] + pipe["onboarding_realizado"] + comparecimento + pipe["vendas"]
-        funil = {
-            "pendentes": dados.pendentes,
-            "aprovados": max(0, dados.aprovados - avancaram),
-            **pipe,
-            "comparecimento": comparecimento,
-        }
+        funil = {**pipe, "comparecimento": comparecimento}
     return {
         "periodo": {"granularidade": p.granularidade, "inicio": p.inicio.isoformat(), "fim": p.fim.isoformat()},
         "avisos": [f"fonte_indisponivel:{t}" for t in tabelas_com_falha()],
