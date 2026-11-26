@@ -134,6 +134,16 @@ def test_ler_evento_por_id_filtra_pelo_id(monkeypatch):
             id="ler_inscricoes_no_periodo",
         ),
         pytest.param(
+            lambda: sed.ler_primeira_inscricao("e1"),
+            "created_at",
+            {
+                "event_id": "eq.e1",
+                "status": "in.(approved,pending)",
+                "order": "created_at.asc",
+            },
+            id="ler_primeira_inscricao",
+        ),
+        pytest.param(
             lambda: sed.ler_comparecimentos("e1"),
             "id",
             {"event_id": "eq.e1", "attended": "is.true"},

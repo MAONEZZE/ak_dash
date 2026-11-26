@@ -96,6 +96,19 @@ def ler_inscricoes_no_periodo(id_evento: str, de: datetime, ate: datetime) -> li
     )
 
 
+def ler_primeira_inscricao(id_evento: str) -> list[dict]:
+    """Todas as inscrições approved/pending do evento, da mais antiga para a mais nova (o chamador usa a `[0]`)."""
+    return _query(
+        "registrations",
+        {
+            "event_id": f"eq.{id_evento}",
+            "status": "in.(approved,pending)",
+            "order": "created_at.asc",
+        },
+        "created_at",
+    )
+
+
 def ler_comparecimentos(id_evento: str) -> list[dict]:
     return _query(
         "registrations",
