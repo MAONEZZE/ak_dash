@@ -75,7 +75,7 @@ def _instalar(monkeypatch, banco):
     monkeypatch.setattr(workers.banco, "upsert", banco.upsert)
     monkeypatch.setattr(workers.banco, "apagar", banco.apagar)
     invalidacoes = []
-    monkeypatch.setattr(workers.cache, "invalidar", lambda chave=None: invalidacoes.append(chave))
+    monkeypatch.setattr(workers.cache, "invalidar_prefixos", lambda prefixos: invalidacoes.append(prefixos))
     return invalidacoes
 
 
@@ -261,6 +261,7 @@ def test_iniciar_sobe_um_worker_por_planilha_configurada(monkeypatch):
         config.settings,
         supabase_url="https://x.supabase.co",
         supabase_service_key="k",
+        pipe_token=None,
         google_service_account_json="{}",
         planilha_sdrs_id="S",
         planilha_closers_id="C",
@@ -297,6 +298,7 @@ def test_iniciar_sobe_workers_de_funil_com_os_ids_da_config(monkeypatch):
         config.settings,
         supabase_url="https://x.supabase.co",
         supabase_service_key="k",
+        pipe_token=None,
         google_service_account_json="{}",
         planilha_sdrs_id=None,
         planilha_closers_id="C",
@@ -328,6 +330,7 @@ def test_iniciar_sobe_worker_financeiro_com_id_e_ano_da_config(monkeypatch):
         config.settings,
         supabase_url="https://x.supabase.co",
         supabase_service_key="k",
+        pipe_token=None,
         google_service_account_json="{}",
         planilha_sdrs_id=None,
         planilha_closers_id="C",
@@ -368,6 +371,7 @@ def test_iniciar_sobe_worker_de_logs_com_id_da_config(monkeypatch):
         config.settings,
         supabase_url="https://x.supabase.co",
         supabase_service_key="k",
+        pipe_token=None,
         google_service_account_json="{}",
         planilha_sdrs_id=None,
         planilha_closers_id=None,
@@ -405,6 +409,7 @@ def test_iniciar_sem_credencial_loga_warning_e_guarda_motivo(monkeypatch, caplog
         workers_ativos=True,
         supabase_url="https://x.supabase.co",
         supabase_service_key="k",
+        pipe_token=None,
         google_service_account_json=None,
         planilha_sdrs_id="S",
         planilha_logs_id=None,
@@ -432,6 +437,7 @@ def test_iniciar_com_json_invalido_nao_levanta_e_guarda_motivo(caplog):
         workers_ativos=True,
         supabase_url="https://x.supabase.co",
         supabase_service_key="k",
+        pipe_token=None,
         google_service_account_json="{nao e json",
         planilha_sdrs_id="S",
         planilha_logs_id=None,

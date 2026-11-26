@@ -39,6 +39,7 @@ from datetime import date, datetime, time, timedelta
 from app.periodo import TZ_SP
 from app.fontes import sed
 from app.fontes import supabase
+from app.fontes.banco import em_paralelo
 
 CHAVES_FATURAMENTO = ("faturamento", "liquidado", "inscritos", "aprovados")
 
@@ -78,8 +79,10 @@ def _linha_vazia() -> dict[str, float | None]:
 
 
 def buscar_faturamento(inicio: date, fim: date, ids_pessoas: list[int]) -> Faturamento:
-    linhas = supabase.ler_vendas_do_periodo(inicio, fim)
-    recebimentos = supabase.ler_recebimentos_do_periodo(inicio, fim)
+    linhas, recebimentos = em_paralelo(
+        lambda: supabase.ler_vendas_do_periodo(inicio, fim),
+        lambda: supabase.ler_recebimentos_do_periodo(inicio, fim),
+    )
 
     empresa: dict[str, float | None] = {**_linha_vazia(), "faturamento": 0.0, "liquidado": 0.0}
     por_pessoa: dict[int, dict[str, float | None]] = {}

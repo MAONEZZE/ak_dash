@@ -31,7 +31,7 @@ def _capturar(monkeypatch, resposta=None):
 
         return _chamada
 
-    monkeypatch.setattr(banco.httpx, "get", _registrar("GET"))
+    monkeypatch.setattr(banco._cliente, "get", _registrar("GET"))
     monkeypatch.setattr(banco.httpx, "post", _registrar("POST"))
     monkeypatch.setattr(banco.httpx, "delete", _registrar("DELETE"))
     return registros

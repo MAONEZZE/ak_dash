@@ -42,7 +42,7 @@ def _capturar(monkeypatch, resposta=None):
         )
         return httpx.Response(200, json=resposta or [], request=httpx.Request("GET", url))
 
-    monkeypatch.setattr(banco.httpx, "get", _get)
+    monkeypatch.setattr(banco._cliente, "get", _get)
     return registros
 
 
@@ -157,7 +157,7 @@ def test_funcoes_de_inscricoes_consultam_registrations_com_os_filtros_de_hoje(mo
 def test_falha_no_sed_degrada_para_vazio_com_aviso_da_tabela(monkeypatch):
     _capturar(monkeypatch)
     monkeypatch.setattr(
-        banco.httpx,
+        banco._cliente,
         "get",
         lambda url, params, headers, timeout: httpx.Response(500, json={}, request=httpx.Request("GET", "https://sed.test")),
     )

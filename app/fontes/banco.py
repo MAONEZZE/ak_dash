@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import logging
 import threading
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Callable
 
 import httpx
 
@@ -61,16 +63,42 @@ def tabelas_com_falha() -> list[str]:
     return list(dict.fromkeys(getattr(_local, "tabelas_com_falha", [])))
 
 
+def em_paralelo(*tarefas: Callable[[], Any]) -> list[Any]:
+    """Roda as tarefas (consultas independentes) ao mesmo tempo e devolve os resultados na ordem.
+
+    As falhas registradas nas threads filhas voltam para a thread de quem chamou: sem isso, uma
+    tabela fora do ar numa consulta paralela sumia do aviso `fonte_indisponivel` da resposta.
+    Exceção numa tarefa sobe para quem chamou, como subiria rodando em sequência.
+    """
+    def rodar(tarefa: Callable[[], Any]) -> tuple[Any, int, list[str]]:
+        iniciar_registro_de_falhas()
+        antes = falhas_na_thread()
+        resultado = tarefa()
+        return resultado, falhas_na_thread() - antes, tabelas_com_falha()
+
+    with ThreadPoolExecutor(max_workers=max(1, len(tarefas))) as executor:
+        saidas = list(executor.map(rodar, tarefas))
+    for _, falhas, tabelas in saidas:
+        _local.falhas = falhas_na_thread() + falhas
+        _local.tabelas_com_falha = [*getattr(_local, "tabelas_com_falha", []), *tabelas]
+    return [resultado for resultado, _, _ in saidas]
+
+
 def registrar_falha(fonte: str) -> None:
     """Fonte externa (ex.: Pipedrive) que degradou para vazio: conta em `falhas_na_thread` (o cache não guarda) e vira aviso `fonte_indisponivel:<fonte>`."""
     _local.falhas = falhas_na_thread() + 1
     _local.tabelas_com_falha = [*getattr(_local, "tabelas_com_falha", []), fonte]
 
 
+# Um cliente para o processo todo: reaproveita a conexão TLS entre consultas (abrir uma
+# conexão nova por consulta custava ~25% do tempo). `httpx.Client` é seguro entre threads.
+_cliente = httpx.Client(limits=httpx.Limits(max_connections=32, max_keepalive_connections=16))
+
+
 def _get(url: str, params: dict[str, str], headers: dict[str, str]) -> httpx.Response:
     for tentativa in range(1, _TENTATIVAS + 1):
         try:
-            return httpx.get(url, params=params, headers=headers, timeout=10.0)
+            return _cliente.get(url, params=params, headers=headers, timeout=10.0)
         except httpx.TransportError:
             if tentativa == _TENTATIVAS:
                 raise

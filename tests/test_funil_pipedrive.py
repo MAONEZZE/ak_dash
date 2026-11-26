@@ -41,70 +41,107 @@ def test_criado_no_periodo_vira_numero_captado_do_canal():
     # depois do fim
     d = {"id": 4, "add_time": "2026-12-01T12:00:00Z", "pipeline_id": 3, "label_ids": [101], "owner_id": 1, "person_id": 503}
 
-    assert pipedrive.contar([a, b, c, d], {}, date(2026, 11, 1), date(2026, 11, 30)) == [
+    assert pipedrive.contar([a, b, c, d], date(2026, 11, 1), date(2026, 11, 30)) == [
         Fato("numeros_captados", "linkedin", 25564860, 501, "2026-11-05"),
         Fato("numeros_captados", "instagram", 28932026, 502, "2026-11-04"),
     ]
 
 
-def test_negocio_na_coluna_2_ou_3_conta_pela_data_de_entrada():
-    e = {"id": 5, "stage_id": 11, "stage_change_time": "2026-11-10T13:00:00Z", "owner_id": 28932026, "person_id": 601}
-    # entrou antes do início
-    f = {"id": 6, "stage_id": 11, "stage_change_time": "2026-10-31T13:00:00Z", "owner_id": 28932026, "person_id": 602}
-    g = {"id": 7, "stage_id": 22, "stage_change_time": "2026-11-11T13:00:00Z", "owner_id": 1, "person_id": 603}
-    # sem data de entrada
-    i = {"id": 9, "stage_id": 22, "stage_change_time": None, "owner_id": 1, "person_id": 605}
-    # estágio não configurado
-    h = {"id": 8, "stage_id": 99, "stage_change_time": "2026-11-11T13:00:00Z", "owner_id": 1, "person_id": 604}
-    por_estagio = {11: [e, f], 22: [g, i], 99: [h]}
+def test_entrada_no_estagio_conta_na_data_em_que_entrou_mesmo_se_ja_avancou():
+    entradas = [
+        {"id_deal": 5, "id_estagio": 11, "entrou_em": "2026-11-10T13:00:00+00:00", "id_dono": 28932026, "id_pessoa": 601},
+        # o mesmo negócio avançou para Respondidos: continua contando em Abordados
+        {"id_deal": 5, "id_estagio": 12, "entrou_em": "2026-11-12T13:00:00+00:00", "id_dono": 28932026, "id_pessoa": 601},
+        # 01h do dia 01/12 em UTC = 22h do dia 30/11 em SP
+        {"id_deal": 7, "id_estagio": 22, "entrou_em": "2026-12-01T01:00:00+00:00", "id_dono": 1, "id_pessoa": 603},
+        # entrou antes do início
+        {"id_deal": 6, "id_estagio": 11, "entrou_em": "2026-10-31T13:00:00+00:00", "id_dono": 28932026, "id_pessoa": 602},
+        # estágio não configurado
+        {"id_deal": 8, "id_estagio": 99, "entrou_em": "2026-11-11T13:00:00+00:00", "id_dono": 1, "id_pessoa": 604},
+    ]
 
-    assert pipedrive.contar([], por_estagio, date(2026, 11, 1), date(2026, 11, 30)) == [
+    assert pipedrive.contar_entradas(entradas, date(2026, 11, 1), date(2026, 11, 30)) == [
         Fato("abordagens", "linkedin", 28932026, 601, "2026-11-10"),
-        Fato("respondidos", "instagram", 1, 603, "2026-11-11"),
+        Fato("respondidos", "linkedin", 28932026, 601, "2026-11-12"),
+        Fato("abordagens", "instagram", 1, 603, "2026-11-30"),
+        Fato("respondidos", "instagram", 1, 603, "2026-11-30"),
+    ]
+
+
+def test_quem_entrou_em_respondido_conta_tambem_como_abordado_uma_vez(monkeypatch):
+    monkeypatch.setattr(
+        pipedrive,
+        "settings",
+        dataclasses.replace(pipedrive.settings, pipe_id_abordados_pipeline_linkedin=2, pipe_id_respondidos_pipeline_linkedin=3),
+    )
+    entradas = [
+        # negócio 10: só entrou em Respondidos
+        {"id_deal": 10, "id_estagio": 3, "entrou_em": "2026-11-05T15:00:00Z", "id_dono": 28932026, "id_pessoa": 10},
+        # negócio 11: entrou em Abordados e depois em Respondidos
+        {"id_deal": 11, "id_estagio": 2, "entrou_em": "2026-11-03T15:00:00Z", "id_dono": 28932026, "id_pessoa": 11},
+        {"id_deal": 11, "id_estagio": 3, "entrou_em": "2026-11-04T15:00:00Z", "id_dono": 28932026, "id_pessoa": 11},
+        # negócio 12: entrou em Abordados antes do período; em Respondidos dentro dele
+        {"id_deal": 12, "id_estagio": 2, "entrou_em": "2026-10-20T15:00:00Z", "id_dono": 28932026, "id_pessoa": 12},
+        {"id_deal": 12, "id_estagio": 3, "entrou_em": "2026-11-06T15:00:00Z", "id_dono": 28932026, "id_pessoa": 12},
+    ]
+
+    fatos = pipedrive.contar_entradas(entradas, date(2026, 11, 1), date(2026, 11, 30))
+
+    abordagens = [f for f in fatos if f.metrica == "abordagens"]
+    respondidos = [f for f in fatos if f.metrica == "respondidos"]
+    assert [(f.canal, f.id_pessoa, f.data) for f in abordagens] == [
+        ("linkedin", 11, "2026-11-03"),
+        ("linkedin", 10, "2026-11-05"),
+        ("linkedin", 12, "2026-11-06"),
+    ]
+    assert [(f.canal, f.id_pessoa, f.data) for f in respondidos] == [
+        ("linkedin", 11, "2026-11-04"),
+        ("linkedin", 10, "2026-11-05"),
+        ("linkedin", 12, "2026-11-06"),
     ]
 
 
 def test_etiqueta_de_indicacao_vira_indicacao_do_dono():
     j = {"id": 10, "add_time": "2026-11-12T15:00:00Z", "pipeline_id": 1, "label_ids": [102, 101], "owner_id": 27369234, "person_id": 701}
 
-    assert pipedrive.contar([j], {}, date(2026, 11, 1), date(2026, 11, 30)) == [
+    assert pipedrive.contar([j], date(2026, 11, 1), date(2026, 11, 30)) == [
         Fato("numeros_captados", "linkedin", 27369234, 701, "2026-11-12"),
         Fato("indicacoes", None, 27369234, 701, "2026-11-12"),
     ]
 
 
-def test_buscar_pipedrive_junta_dados_e_degrada_quando_cai(monkeypatch):
+def test_buscar_pipedrive_junta_criados_e_entradas_do_historico(monkeypatch):
     A = {"id": 1, "add_time": "2026-11-05T15:00:00Z", "pipeline_id": 1, "label_ids": [101], "owner_id": 25564860, "person_id": 501}
-    E = {"id": 5, "stage_id": 11, "stage_change_time": "2026-11-10T13:00:00Z", "owner_id": 28932026, "person_id": 601}
+    E = {"id_deal": 5, "id_estagio": 11, "entrou_em": "2026-11-10T13:00:00+00:00", "id_dono": 28932026, "id_pessoa": 601}
     criados = []
-    estagios_pedidos = []
+    entradas_pedidas = []
     pessoas_pedidas = []
-
-    def no_estagio(id_estagio, desde):
-        estagios_pedidos.append((id_estagio, desde))
-        return [E] if id_estagio == 11 else []
 
     def etiquetas(ids):
         pessoas_pedidas.extend(ids)
-        return {501: (55,), 601: (66,)}
+        return {501: (55,)}
 
     monkeypatch.setattr(pipedrive.api, "negocios_criados_desde", lambda inicio: criados.append(inicio) or [A])
-    monkeypatch.setattr(pipedrive.api, "negocios_no_estagio", no_estagio)
+    monkeypatch.setattr(
+        pipedrive.supabase,
+        "ler_entradas_estagio",
+        lambda ids, desde, ate: entradas_pedidas.append((sorted(ids), desde, ate)) or [E],
+    )
     monkeypatch.setattr(pipedrive.api, "etiquetas_das_pessoas", etiquetas)
 
     resultado = pipedrive.buscar_pipedrive(date(2026, 11, 1), date(2026, 11, 30))
 
     desde = datetime(2026, 11, 1, tzinfo=TZ_SP)
     assert criados == [desde]
-    assert sorted(i for i, _ in estagios_pedidos) == [11, 12, 21, 22]
-    assert all(d == desde for _, d in estagios_pedidos)
-    assert sorted(pessoas_pedidas) == [501, 601]
+    assert entradas_pedidas == [([11, 12, 21, 22], desde, datetime(2026, 12, 1, tzinfo=TZ_SP))]
+    # só os números captados precisam da etiqueta da pessoa
+    assert pessoas_pedidas == [501]
     assert resultado == pipedrive.DadosPipedrive(
         fatos=[
             Fato("numeros_captados", "linkedin", 25564860, 501, "2026-11-05"),
             Fato("abordagens", "linkedin", 28932026, 601, "2026-11-10"),
         ],
-        etiquetas_por_pessoa={501: (55,), 601: (66,)},
+        etiquetas_por_pessoa={501: (55,)},
     )
 
     def fora(inicio):

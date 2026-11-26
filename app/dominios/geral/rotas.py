@@ -10,7 +10,7 @@ from app.config import settings
 from app.dominios.comercial.banco import buscar_totais
 from app.dominios.geral.banco import buscar_confrarias_do_mes, buscar_faturamento, buscar_logs
 from app.dominios.geral.calculo import montar_resposta_geral, montar_termometro
-from app.fontes.banco import iniciar_registro_de_falhas, tabelas_com_falha
+from app.fontes.banco import em_paralelo, iniciar_registro_de_falhas, tabelas_com_falha
 from app.dominios.pessoas.banco import listar_ativas
 from app.metas import buscar_metas
 from app.periodo import Periodo, hoje_sp, resolver_periodo, semana_iso
@@ -58,28 +58,20 @@ def get_geral(
     pessoas_closer = [p for p in todas_ativas if p.cargo == "closer"]
 
     chave_periodo = f"{periodo_saida.inicio.isoformat()}:{periodo_saida.fim.isoformat()}"
-    totais_seller = obter_ou_calcular(
-        f"geral_seller:{chave_periodo}",
-        settings.cache_ttl_metricas_segundos,
-        lambda: buscar_totais("seller", [int(p.id) for p in pessoas_seller], periodo_saida.inicio, periodo_saida.fim),
-    )
-    totais_sdr = obter_ou_calcular(
-        f"geral_sdr:{chave_periodo}",
-        settings.cache_ttl_metricas_segundos,
-        lambda: buscar_totais("sdr", [int(p.id) for p in pessoas_sdr], periodo_saida.inicio, periodo_saida.fim),
-    )
-    totais_closer = obter_ou_calcular(
-        f"geral_closer:{chave_periodo}",
-        settings.cache_ttl_metricas_segundos,
-        lambda: buscar_totais("closer", [int(p.id) for p in pessoas_closer], periodo_saida.inicio, periodo_saida.fim),
-    )
-    metas = obter_ou_calcular("metas", settings.cache_ttl_metricas_segundos, buscar_metas)
+    ttl = settings.cache_ttl_metricas_segundos
     ids_closer = [int(p.id) for p in pessoas_closer]
-    faturamento = obter_ou_calcular(
-        f"faturamento:{chave_periodo}",
-        settings.cache_ttl_metricas_segundos,
-        lambda: buscar_faturamento(periodo_saida.inicio, periodo_saida.fim, ids_closer),
-    )
+
+    def totais(cargo: str, pessoas: list):
+        return lambda: obter_ou_calcular(
+            f"geral_{cargo}:{chave_periodo}",
+            ttl,
+            lambda: buscar_totais(cargo, [int(p.id) for p in pessoas], periodo_saida.inicio, periodo_saida.fim),
+        )
+
+    def faturamento_de(inicio: date, fim: date):
+        return lambda: obter_ou_calcular(
+            f"faturamento:{inicio.isoformat()}:{fim.isoformat()}", ttl, lambda: buscar_faturamento(inicio, fim, ids_closer)
+        )
 
     # Os dois cards ESCUROS (Faturamento/Liquidado) são sempre do MÊS, nunca do
     # recorte pedido: em Dia/Semana/Ano mostram o mês corrente; sob Mês, o mês
@@ -89,32 +81,44 @@ def get_geral(
     # que continua saindo de `faturamento` (período pedido).
     mes_cards = periodo_metas if granularidade == "mes" else resolver_periodo("mes", _valor_atual("mes", hoje))
     inicio_mes, fim_mes = mes_cards.inicio, min(mes_cards.fim, hoje)
-    if (inicio_mes, fim_mes) == (periodo_saida.inicio, periodo_saida.fim):
-        faturamento_mes = faturamento
-    else:
-        faturamento_mes = obter_ou_calcular(
-            f"faturamento:{inicio_mes.isoformat()}:{fim_mes.isoformat()}",
-            settings.cache_ttl_metricas_segundos,
-            lambda: buscar_faturamento(inicio_mes, fim_mes, ids_closer),
-        )
+    mesmo_mes = (inicio_mes, fim_mes) == (periodo_saida.inicio, periodo_saida.fim)
 
-    # O termômetro segue o filtro de data (liquidado do período pedido, ver
-    # `montar_termometro`). As Confrarias são sempre do mês CORRENTE, fora do
-    # filtro — mesmo sob Mês navegado pra outro mês.
-    termometro = montar_termometro(faturamento, periodo_metas)
+    # As Confrarias são sempre do mês CORRENTE, fora do filtro — mesmo sob Mês navegado pra outro mês.
     mes_corrente = resolver_periodo("mes", _valor_atual("mes", hoje))
 
-    eventos = obter_ou_calcular(
-        f"confrarias:{mes_corrente.inicio.isoformat()}",
-        settings.cache_ttl_metricas_segundos,
-        lambda: buscar_confrarias_do_mes(mes_corrente.inicio, mes_corrente.fim),
+    # Consultas independentes, todas ao mesmo tempo (em sequência eram ~4s; ver docs de app/fontes/banco.py).
+    (
+        totais_seller,
+        totais_sdr,
+        totais_closer,
+        metas,
+        faturamento,
+        faturamento_mes,
+        eventos,
+        logs,
+    ) = em_paralelo(
+        totais("seller", pessoas_seller),
+        totais("sdr", pessoas_sdr),
+        totais("closer", pessoas_closer),
+        lambda: obter_ou_calcular("metas", ttl, buscar_metas),
+        faturamento_de(periodo_saida.inicio, periodo_saida.fim),
+        # Mês dos cards = período pedido: sem segunda busca, reaproveita `faturamento` abaixo.
+        (lambda: None) if mesmo_mes else faturamento_de(inicio_mes, fim_mes),
+        lambda: obter_ou_calcular(
+            f"confrarias:{mes_corrente.inicio.isoformat()}",
+            ttl,
+            lambda: buscar_confrarias_do_mes(mes_corrente.inicio, mes_corrente.fim),
+        ),
+        lambda: obter_ou_calcular(
+            f"logs:{chave_periodo}", ttl, lambda: buscar_logs(periodo_saida.inicio, periodo_saida.fim)
+        ),
     )
 
-    logs = obter_ou_calcular(
-        f"logs:{chave_periodo}",
-        settings.cache_ttl_metricas_segundos,
-        lambda: buscar_logs(periodo_saida.inicio, periodo_saida.fim),
-    )
+    if mesmo_mes:
+        faturamento_mes = faturamento
+
+    # O termômetro segue o filtro de data (liquidado do período pedido, ver `montar_termometro`).
+    termometro = montar_termometro(faturamento, periodo_metas)
 
     resposta = montar_resposta_geral(
         periodo_metas=periodo_metas,

@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.fontes import supabase
+from app.fontes.banco import em_paralelo
 
 
 @dataclass(frozen=True)
@@ -20,8 +21,7 @@ class Pessoa:
 
 
 def listar_ativas() -> list[Pessoa]:
-    usuarios = supabase.ler_usuarios_ativos()
-    vinculos = supabase.ler_cargos_dos_usuarios()
+    usuarios, vinculos = em_paralelo(supabase.ler_usuarios_ativos, supabase.ler_cargos_dos_usuarios)
     cargos_por_user: dict[int, list[str]] = {}
     for v in vinculos:
         cargos_por_user.setdefault(v["id_user"], []).append(v["cargo"])

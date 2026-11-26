@@ -1,7 +1,7 @@
 """Leitura e escrita do Supabase principal (schema `NOME_SCHEMA`, hoje `dash_new`), uma função por dado. Leitura degrada para `[]` com aviso `fonte_indisponivel:<tabela>` (via `banco.query`); escrita levanta erro (workers)."""
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from app.fontes import banco
 from app.planilhas import COLUNAS_POR_TABELA
@@ -198,3 +198,27 @@ def gravar_logs(linhas: list[dict]) -> None:
 
 def apagar_logs(chaves: list[str]) -> None:
     banco.apagar("logs_pipedrive", {"chave": f"in.({','.join(chaves)})"})
+
+
+def ler_negocios_pipedrive() -> list[dict]:
+    return banco.query("pipedrive_negocios", {}, colunas="id_deal,id_dono,id_pessoa,stage_change_time")
+
+
+def gravar_negocios_pipedrive(linhas: list[dict]) -> None:
+    banco.upsert("pipedrive_negocios", linhas, on_conflict="id_deal")
+
+
+def gravar_entradas_estagio(linhas: list[dict]) -> None:
+    banco.upsert("pipedrive_entradas_estagio", linhas, on_conflict="id_deal,id_estagio")
+
+
+def ler_entradas_estagio(ids_estagio: list[int], desde: datetime, ate: datetime) -> list[dict]:
+    """Entradas nos estágios com `desde <= entrou_em < ate`, com o dono e a pessoa atuais do negócio."""
+    return banco.query(
+        "vw_pipedrive_entradas_estagio",
+        {
+            "id_estagio": f"in.({','.join(str(i) for i in ids_estagio)})",
+            "and": f"(entrou_em.gte.{desde.isoformat()},entrou_em.lt.{ate.isoformat()})",
+        },
+        colunas="id_deal,id_estagio,entrou_em,id_dono,id_pessoa",
+    )

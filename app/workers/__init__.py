@@ -5,13 +5,15 @@ import logging
 import threading
 import time
 from calendar import monthrange
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Callable
 
 from app import cache
 from app.config import Settings
 from app.fontes import banco
+from app.fontes import pipedrive as pipedrive_api
 from app.fontes import supabase
 from app.workers.google_sheets import LeitorSheets, criar_credenciais
 from app.periodo import TZ_SP, hoje_sp
@@ -45,6 +47,9 @@ CLOSERS = Planilha("closers", "metricas_closers", "closer")
 class Worker:
     # Já logou a primeira leitura ok? (na classe: subclasses com __init__ próprio também têm)
     _leu_ok = False
+    # Chaves do cache (app/cache.py) que dependem das tabelas que este worker grava: só elas são
+    # invalidadas quando ele grava. "metas" pega também "metas-funil-sdr".
+    PREFIXOS_CACHE: tuple[str, ...] = ("vw_metricas:", "geral_", "metas")
 
     def __init__(
         self,
@@ -96,7 +101,7 @@ class Worker:
         com_cargo = {l["id_user"] for l in self._exigir("user_cargos", lambda: supabase.ler_ids_com_cargo(self.planilha.cargo))}
 
         if self._sincronizar(abas, usuarios, com_cargo, hoje):
-            cache.invalidar()
+            cache.invalidar_prefixos(self.PREFIXOS_CACHE)
 
     def _sincronizar(self, abas: list[Aba], usuarios: list[dict], com_cargo: set[int], hoje: date) -> bool:
         colunas = COLUNAS_POR_TABELA[self.planilha.tabela]
@@ -192,6 +197,7 @@ class Worker:
 
 class WorkerSdr(Worker):
     """Planilha de SDRs: além de metricas_sdrs/metas (Geral e Time), espelha as abas por pessoa em metricas_funil_sdr e as metas da aba "Dashboard SDR" em metas_funil_sdr (página Funil SDR). Uma leitura da planilha por ciclo."""
+    PREFIXOS_CACHE = (*Worker.PREFIXOS_CACHE, "funil-sdr:")
 
     def __init__(
         self,
@@ -292,11 +298,12 @@ class WorkerSdr(Worker):
         if dashboard is not None and self._sincronizar_metas_funil(dashboard, usuarios, com_cargo):
             gravou = True
         if gravou:
-            cache.invalidar()
+            cache.invalidar_prefixos(self.PREFIXOS_CACHE)
 
 
 class WorkerFunil(Worker):
     """Espelha as abas de seller da planilha de um funil (LinkedIn/Instagram) em metricas_sellers e metas, e as abas de conta em metricas_contas."""
+    PREFIXOS_CACHE = (*Worker.PREFIXOS_CACHE, "funil:")
 
     def __init__(
         self,
@@ -392,11 +399,12 @@ class WorkerFunil(Worker):
             gravou = True
 
         if gravou:
-            cache.invalidar()
+            cache.invalidar_prefixos(self.PREFIXOS_CACHE)
 
 
 class WorkerFinanceiro(Worker):
     """Espelha a aba BASE_VENDAS da Isaac Newton2.0 em metricas_faturamento + recebimentos_faturamento."""
+    PREFIXOS_CACHE = ("faturamento:", "financeiro:")
 
     def __init__(
         self,
@@ -523,7 +531,7 @@ class WorkerFinanceiro(Worker):
             gravou = True
 
         if gravou:
-            cache.invalidar()
+            cache.invalidar_prefixos(self.PREFIXOS_CACHE)
 
 
 class WorkerLogs(Worker):
@@ -595,6 +603,104 @@ class WorkerLogs(Worker):
                 self.logs.pop(k, None)
 
 
+# Desde quando o WorkerPipedrive guarda o histórico de estágios (o filtro de ano do dash começa aqui).
+INICIO_HISTORICO_PIPEDRIVE = datetime(2026, 1, 1, tzinfo=TZ_SP)
+# O cursor volta essa margem a cada ciclo: negócio atualizado enquanto o ciclo anterior rodava não escapa.
+MARGEM_CURSOR_PIPEDRIVE = timedelta(minutes=5)
+INTERVALO_PIPEDRIVE_SEGUNDOS = 60.0
+LOTE_PIPEDRIVE = 100  # negócios gravados por vez: o preenchimento inicial salva o progresso aos poucos
+CONCORRENCIA_HISTORICO = 4  # chamadas de histórico ao mesmo tempo (limite do Pipedrive: 120 a cada 2s)
+
+
+def entradas_por_estagio(negocio: dict, mudancas: list[dict]) -> dict[int, str]:
+    """Primeira entrada (UTC, ISO) do negócio em cada estágio.
+
+    O estágio em que o negócio nasceu (o `de` da primeira mudança; sem mudança, o estágio atual)
+    entra em `add_time`; cada mudança entra no estágio `para` no momento `em`. Reentrada não conta.
+    """
+    if not negocio.get("add_time"):
+        return {}
+    inicial = mudancas[0]["de"] if mudancas and mudancas[0]["de"] is not None else negocio.get("stage_id")
+    entradas: dict[int, str] = {}
+    if inicial is not None:
+        entradas[int(inicial)] = negocio["add_time"]
+    for m in mudancas:
+        entradas.setdefault(m["para"], m["em"])
+    return entradas
+
+
+def _campos_negocio(negocio: dict) -> dict:
+    return {"id_dono": negocio.get("owner_id"), "id_pessoa": negocio.get("person_id"), "stage_change_time": negocio.get("stage_change_time")}
+
+
+class WorkerPipedrive(Worker):
+    """Espelha o histórico de estágios do Pipedrive em pipedrive_negocios + pipedrive_entradas_estagio.
+
+    A cada ciclo lista os negócios atualizados desde o ciclo anterior (no primeiro, desde
+    INICIO_HISTORICO_PIPEDRIVE) e relê o histórico (/v1/deals/{id}/flow) só de quem mudou de estágio
+    desde a última leitura (`stage_change_time` diferente do guardado). Dono/pessoa trocados sem
+    mudar de estágio só atualizam pipedrive_negocios. Ver sql/2026-11-25-pipedrive-estagios.sql.
+    """
+
+    PREFIXOS_CACHE = ("pipedrive:",)
+
+    def __init__(self, agora: Callable[[], datetime] = lambda: datetime.now(TZ_SP)):
+        self.planilha = Planilha("pipedrive", "pipedrive_entradas_estagio", "")
+        self.planilha_id = ""
+        self.agora = agora
+        self.status = {"ultima_leitura_ok": None, "ultimo_erro": None}
+        self._puladas: set[str] = set()
+        self.cursor: datetime | None = None
+        self.negocios: dict[int, dict] | None = None
+
+    def ciclo(self) -> None:
+        inicio_ciclo = self.agora()
+        if self.negocios is None:
+            self.negocios = {
+                int(l["id_deal"]): {k: l.get(k) for k in ("id_dono", "id_pessoa", "stage_change_time")}
+                for l in self._exigir("pipedrive_negocios", supabase.ler_negocios_pipedrive)
+            }
+
+        mudaram: list[tuple[dict, bool]] = []  # (negócio, precisa reler o histórico?)
+        for n in pipedrive_api.negocios_atualizados_desde(self.cursor or INICIO_HISTORICO_PIPEDRIVE):
+            campos = _campos_negocio(n)
+            guardado = self.negocios.get(n["id"])
+            if guardado != campos:
+                mudaram.append((n, guardado is None or guardado["stage_change_time"] != campos["stage_change_time"]))
+
+        for i in range(0, len(mudaram), LOTE_PIPEDRIVE):
+            self._gravar_lote(mudaram[i:i + LOTE_PIPEDRIVE])
+
+        self.cursor = inicio_ciclo - MARGEM_CURSOR_PIPEDRIVE
+        if mudaram:
+            cache.marcar_vencido(self.PREFIXOS_CACHE)
+
+    def _gravar_lote(self, lote: list[tuple[dict, bool]]) -> None:
+        reler = [n for n, precisa in lote if precisa]
+
+        def historico(n: dict) -> list[dict]:
+            # Sem stage_change_time o negócio nunca mudou de estágio: nem chama a API.
+            return pipedrive_api.mudancas_de_estagio(n["id"]) if n.get("stage_change_time") else []
+
+        with ThreadPoolExecutor(max_workers=CONCORRENCIA_HISTORICO) as executor:
+            historicos = list(executor.map(historico, reler))
+
+        carimbo = self.agora().isoformat()
+        # Negócio antes das entradas: a entrada referencia o negócio (chave estrangeira).
+        supabase.gravar_negocios_pipedrive(
+            [{"id_deal": n["id"], **_campos_negocio(n), "atualizado_em": carimbo} for n, _ in lote]
+        )
+        supabase.gravar_entradas_estagio(
+            [
+                {"id_deal": n["id"], "id_estagio": estagio, "entrou_em": em, "atualizado_em": carimbo}
+                for n, mudancas in zip(reler, historicos)
+                for estagio, em in sorted(entradas_por_estagio(n, mudancas).items())
+            ]
+        )
+        for n, _ in lote:
+            self.negocios[n["id"]] = _campos_negocio(n)
+
+
 ATIVOS: list[Worker] = []
 MOTIVO_INATIVOS: str | None = None
 
@@ -606,6 +712,11 @@ def iniciar(config: Settings) -> threading.Event:
     MOTIVO_INATIVOS = None
     if not config.workers_ativos:
         return parar
+    # O worker do Pipedrive não depende das planilhas: sobe mesmo sem a conta de serviço do Google.
+    if config.pipe_token and config.pipe_base_url_v1 and config.pipe_base_url_v2 and config.supabase_url and config.supabase_service_key:
+        pipedrive = WorkerPipedrive()
+        ATIVOS.append(pipedrive)
+        threading.Thread(target=pipedrive.rodar, args=(parar, INTERVALO_PIPEDRIVE_SEGUNDOS), name="worker-pipedrive", daemon=True).start()
     if not config.google_service_account_json:
         motivo = "GOOGLE_SERVICE_ACCOUNT_JSON ausente ou ilegível no .env"
     elif not (config.supabase_url and config.supabase_service_key):

@@ -145,17 +145,25 @@ def test_buscar_metricas_funil_sdr_le_o_intervalo_pela_fonte(monkeypatch):
     assert chamadas == [(date(2026, 11, 10), date(2026, 11, 16))]
 
 
-def test_buscar_metas_funil_sdr_separa_dia_semana_e_mes(monkeypatch):
+def test_buscar_metas_funil_sdr_diaria_vem_da_aba_do_sdr_e_semana_mes_do_dashboard(monkeypatch):
+    # Diária da tabela "Vendedor" do Dashboard SDR (7) é ignorada: vale a da aba do SDR (4).
     monkeypatch.setattr(
         supabase,
         "ler_metas_funil_sdr",
         lambda: [
-            {"metrica": "abordagens", "periodo": "dia", "id_user": 9, "valor": 10},
+            {"metrica": "inscricoes_realizadas", "periodo": "dia", "id_user": 9, "valor": 7},
             {"metrica": "abordagens", "periodo": "semana", "id_user": None, "valor": 50},
             {"metrica": "inscricoes_realizadas", "periodo": "mes", "id_user": None, "valor": 88},
         ],
     )
+    cargos = []
+    monkeypatch.setattr(
+        supabase,
+        "ler_metas_do_cargo",
+        lambda cargo: cargos.append(cargo) or [{"id_user": 9, "metrica": "inscricoes_realizadas", "valor_diario": 4}],
+    )
     metas = sdr.buscar_metas_funil_sdr()
-    assert metas.diarias == {(9, "abordagens"): 10}
+    assert cargos == ["sdr"]
+    assert metas.diarias == {(9, "inscricoes_realizadas"): 4}
     assert metas.semanais == {"abordagens": 50}
     assert metas.mensais == {"inscricoes_realizadas": 88}

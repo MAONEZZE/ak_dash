@@ -74,13 +74,17 @@ def meta_velocimetro_inscricoes(
 
 
 def buscar_metas_funil_sdr() -> MetasFunilSdr:
-    diarias: dict[tuple[int, str], int] = {}
+    """Diária: linha "Meta diária" da aba de cada SDR (tabela `metas`), a mesma das páginas Geral e Time —
+    a tabela "Vendedor" do Dashboard SDR divergia dela (inscrições 7 x 4, 25/11). Semana e mês: metas editáveis do Dashboard SDR."""
+    diarias = {
+        (int(l["id_user"]), l["metrica"]): int(l["valor_diario"])
+        for l in supabase.ler_metas_do_cargo("sdr")
+        if l.get("id_user") is not None and l.get("valor_diario") is not None
+    }
     semanais: dict[str, int] = {}
     mensais: dict[str, int] = {}
     for l in supabase.ler_metas_funil_sdr():
-        if l["periodo"] == "dia" and l["id_user"] is not None:
-            diarias[(int(l["id_user"]), l["metrica"])] = int(l["valor"])
-        elif l["periodo"] == "semana":
+        if l["periodo"] == "semana":
             semanais[l["metrica"]] = int(l["valor"])
         elif l["periodo"] == "mes":
             mensais[l["metrica"]] = int(l["valor"])

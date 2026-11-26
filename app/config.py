@@ -132,6 +132,10 @@ class Settings:
     pipe_id_onboarding_realizado_pipeline_linkedin: int | None = field(
         default_factory=lambda: _int_env("PIPE_ID_ONBOARDING_REALIZADO_PIPELINE_LINKEDIN")
     )
+    # Chave do campo customizado "Almoço" do negócio (tipo set) — card Almoços Pagos do Funil SDR.
+    pipe_id_campo_almoco: str | None = field(
+        default_factory=lambda: os.getenv("PIPE_ID_CAMPO_ALMOCO") or None
+    )
 
 
 settings = Settings()
