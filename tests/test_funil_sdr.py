@@ -167,3 +167,15 @@ def test_buscar_metas_funil_sdr_diaria_vem_da_aba_do_sdr_e_semana_mes_do_dashboa
     assert metas.diarias == {(9, "inscricoes_realizadas"): 4}
     assert metas.semanais == {"abordagens": 50}
     assert metas.mensais == {"inscricoes_realizadas": 88}
+
+
+def test_ranking_da_pagina_sdr_pontua_ligacao_8_e_inscricao_10_com_empate_na_mesma_posicao():
+    lista = [
+        {"id": 14, "ligacoes": 5, "inscricoes": 2},
+        {"id": 11, "ligacoes": 0, "inscricoes": 6},
+        {"id": 20, "ligacoes": 10, "inscricoes": 0},
+        {"id": 30, "ligacoes": 0, "inscricoes": 0},
+    ]
+    resultado = sdr.ranquear_pagina_sdr(lista)
+    assert [(s["id"], s["pontuacao"], s["posicao"]) for s in resultado] == [(20, 80, 1), (11, 60, 2), (14, 60, 2), (30, 0, 3)]
+    assert lista[0] == {"id": 14, "ligacoes": 5, "inscricoes": 2}

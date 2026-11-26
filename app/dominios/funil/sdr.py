@@ -8,11 +8,14 @@ from app.fontes import supabase
 from app.indicadores import calcular_indicadores
 from app.metricas import nome_exibicao
 from app.periodo import Periodo, dias_uteis_meta, dias_uteis_totais
+from app.pontuacao import atribuir_ranking
 from app.planilhas import COLUNAS_POR_TABELA
 
 METRICAS = COLUNAS_POR_TABELA["metricas_funil_sdr"]
 # As métricas da aba "Dashboard SDR", na ordem dela.
 METRICAS_DASHBOARD = ("inscricoes_realizadas", "indicacoes", "reunioes_agendadas")
+# Só a página SDR (decisão de 2026-11-26); Geral/Time usam app/pontuacao.py.
+PESOS_RANKING_PAGINA_SDR = {"ligacoes": 8, "inscricoes": 10}
 
 
 @dataclass(frozen=True)
@@ -167,3 +170,13 @@ def montar_resposta(
             for s in sdrs
         ],
     }
+
+
+def ranquear_pagina_sdr(sdrs: list[dict]) -> list[dict]:
+    """Pontuação e posição (dense rank) do ranking da página SDR. Não altera a lista de entrada."""
+    novas = [
+        {**s, "pontuacao": sum((s.get(m) or 0) * peso for m, peso in PESOS_RANKING_PAGINA_SDR.items())}
+        for s in sdrs
+    ]
+    atribuir_ranking(novas, "pontuacao")
+    return sorted(novas, key=lambda s: (s["posicao"], s["id"]))
