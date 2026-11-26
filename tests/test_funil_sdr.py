@@ -115,6 +115,15 @@ def test_meta_diaria_de_inscricoes_e_o_que_falta_pela_capacidade_dividido_pelos_
     assert sdr.meta_diaria_inscricoes(80, 10, evento, date(2026, 11, 27)) is None
 
 
+def test_dias_da_janela_do_evento_vao_da_primeira_inscricao_a_vespera_sem_domingo():
+    # sex 20 → evento qui 26: sáb 21 entra, dom 22 fica fora, 26 é o evento.
+    assert sdr.dias_da_janela_do_evento(date(2026, 11, 20), date(2026, 11, 26)) == [
+        date(2026, 11, 20), date(2026, 11, 21), date(2026, 11, 23), date(2026, 11, 24), date(2026, 11, 25),
+    ]
+    assert sdr.dias_da_janela_do_evento(None, date(2026, 11, 26)) == []
+    assert sdr.dias_da_janela_do_evento(date(2026, 11, 26), date(2026, 11, 26)) == []
+
+
 def test_meta_do_velocimetro_de_inscricoes_por_filtro():
     hoje, longe, perto = date(2026, 11, 23), date(2026, 12, 5), date(2026, 11, 26)
     # Longe (11 dias sem domingo): faltam 33 → 3/dia; semana = 3 × 6.

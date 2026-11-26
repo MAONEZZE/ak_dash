@@ -63,6 +63,14 @@ def meta_diaria_inscricoes(capacidade: int | None, inscritos_ate_ontem: int, dat
     return -(-falta // dias)
 
 
+def dias_da_janela_do_evento(primeira_inscricao: date | None, data_evento: date) -> list[date]:
+    """Dias de inscrição do evento: da primeira inscrição até a véspera, sem domingos. Sem primeira inscrição: `[]`."""
+    if primeira_inscricao is None:
+        return []
+    dias = (data_evento - primeira_inscricao).days
+    return [d for d in (primeira_inscricao + timedelta(days=n) for n in range(dias)) if d.weekday() != 6]
+
+
 def meta_velocimetro_inscricoes(
     granularidade: str, capacidade: int | None, inscritos_ate_ontem: int, data_evento: date, hoje: date
 ) -> int | None:
