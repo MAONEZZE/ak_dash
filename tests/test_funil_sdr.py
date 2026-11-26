@@ -204,3 +204,13 @@ def test_serie_do_evento_acumula_ate_hoje_e_ritmo_soma_a_meta_diaria_ao_acumulad
     ]
     sem_meta = sdr.serie_do_evento(dias, por_dia, meta_diaria=None, hoje=hoje)
     assert [(p["acumulado"], p["ritmo"]) for p in sem_meta] == [(2, None), (5, None), (7, None), (None, None), (None, None)]
+
+
+def test_previsao_ate_o_evento_projeta_a_media_dos_dias_decorridos_e_compara_com_meta_diaria_vezes_dias():
+    dias = [date(2026, 11, 20), date(2026, 11, 21), date(2026, 11, 23), date(2026, 11, 24), date(2026, 11, 25)]
+    hoje = date(2026, 11, 23)  # 3 dias decorridos
+    assert sdr.previsao_ate_o_evento(dias, acumulado_hoje=7, hoje=hoje, meta_diaria=4) == {"valor": 12, "meta": 20, "pct_meta": 60.0}
+    assert sdr.previsao_ate_o_evento(dias, acumulado_hoje=7, hoje=hoje, meta_diaria=None) == {"valor": 12, "meta": None, "pct_meta": None}
+    # Janela encerrada: previsão = realizado.
+    assert sdr.previsao_ate_o_evento(dias, acumulado_hoje=9, hoje=date(2026, 12, 1), meta_diaria=4) == {"valor": 9, "meta": 20, "pct_meta": 45.0}
+    assert sdr.previsao_ate_o_evento([], acumulado_hoje=0, hoje=hoje, meta_diaria=4) is None

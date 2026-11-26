@@ -92,6 +92,19 @@ def serie_do_evento(dias: list[date], inscricoes_por_dia: dict[date, int], meta_
     return pontos
 
 
+def previsao_ate_o_evento(dias: list[date], acumulado_hoje: int, hoje: date, meta_diaria: int | None) -> dict | None:
+    """Previsão do total da janela: média por dia decorrido × dias da janela. Sem dias: `None`.
+    Janela encerrada (nenhum dia decorrido): previsão = realizado. Meta = diária × dias da janela."""
+    if not dias:
+        return None
+    decorridos = sum(d <= hoje for d in dias)
+    total = len(dias)
+    valor = round(acumulado_hoje / decorridos * total) if decorridos > 0 else acumulado_hoje
+    meta = meta_diaria * total if meta_diaria else None
+    pct_meta = round(valor / meta * 100, 1) if meta else None
+    return {"valor": valor, "meta": meta, "pct_meta": pct_meta}
+
+
 def meta_velocimetro_inscricoes(
     granularidade: str, capacidade: int | None, inscritos_ate_ontem: int, data_evento: date, hoje: date
 ) -> int | None:
