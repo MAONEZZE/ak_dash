@@ -126,6 +126,10 @@ class Settings:
         default_factory=lambda: _int_env("PIPE_ID_ETIQUETA_NEGOCIO_INDICACAO")
     )
     # Colunas de onboarding do pipeline LinkedIn — página Funil Evento (docs/plans/funil-evento.md).
+    # Coluna "3. Inscrito" do pipeline akeel 2.0 — etapa Inscritos do Funil Evento.
+    pipe_id_inscrito_pipeline_linkedin: int | None = field(
+        default_factory=lambda: _int_env("PIPE_ID_INSCRITO_PIPELINE_LINKEDIN")
+    )
     pipe_id_onboarding_agendado_pipeline_linkedin: int | None = field(
         default_factory=lambda: _int_env("PIPE_ID_ONBOARDING_AGENDADO_PIPELINE_LINKEDIN")
     )

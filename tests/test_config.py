@@ -128,6 +128,18 @@ def test_settings_le_envs_do_pipedrive(monkeypatch):
     assert s.pipe_id_pipeline_instagram is None
 
 
+def test_pipe_id_inscrito_pipeline_linkedin_vem_do_env(monkeypatch):
+    monkeypatch.setenv("PIPE_ID_INSCRITO_PIPELINE_LINKEDIN", "7")
+
+    s = config.Settings()
+
+    assert s.pipe_id_inscrito_pipeline_linkedin == 7
+
+    monkeypatch.delenv("PIPE_ID_INSCRITO_PIPELINE_LINKEDIN", raising=False)
+
+    assert config.Settings().pipe_id_inscrito_pipeline_linkedin is None
+
+
 def test_schema_vem_de_nome_schema(monkeypatch):
     monkeypatch.setenv("NOME_SCHEMA", "dash_x")
     monkeypatch.setenv("SUPABASE_SCHEMA", "dash2")
