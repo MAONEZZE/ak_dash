@@ -534,6 +534,45 @@ def test_funil_sdr_evento_com_caractere_invalido_400(monkeypatch):
     assert resposta.status_code == 400
 
 
+def test_sdr_200_com_ranking_previsao_e_serie_do_evento(monkeypatch):
+    from app.dominios.funil import rotas as rotas_funil_mod
+
+    client = _client(monkeypatch)
+    monkeypatch.setattr(rotas_funil_mod, "hoje_sp", lambda: date(2026, 11, 23))
+
+    def query_pagina_sdr(tabela, filtros=None, *a, **kw):
+        if tabela == "events":
+            return [{"id": "e1", "title": "Imersão", "event_date": "2026-12-02T16:00:00+00:00", "capacity": 60}]
+        if tabela == "registrations" and "order" in (filtros or {}):
+            return [{"created_at": "2026-11-20T15:00:00+00:00"}]
+        if tabela == "registrations":
+            return []
+        if tabela == "metricas_sdrs":
+            return [{"id_user": 9, "data": "2026-11-03", "key_data_ref_user": "x", "ligacoes_realizadas": 4}]
+        return _fake_query(tabela, filtros, *a, **kw)
+
+    monkeypatch.setattr(fontes_banco_mod, "query", query_pagina_sdr)
+    resposta = client.get("/sdr", params={"granularidade": "mes", "periodo": "2026-11"})
+    assert resposta.status_code == 200
+    corpo = resposta.json()
+    assert corpo["evento"] == {"id": "e1", "titulo": "Imersão", "data": "2026-12-02T16:00:00+00:00", "capacidade": 60}
+    assert corpo["janela"] == {"inicio": "2026-11-20", "fim": "2026-12-01"}
+    sdr = corpo["sdrs"][0]
+    assert sdr["id_user"] == "9"
+    assert sdr["inscricoes"] == 3
+    assert sdr["ligacoes"] == 4
+    assert sdr["pontuacao"] == 62
+    assert sdr["posicao"] == 1
+    assert len(sdr["serie_evento"]) == 10  # 20/11 a 01/12 sem os domingos 22 e 29
+
+
+def test_sdr_evento_com_caractere_invalido_400(monkeypatch):
+    resposta = _client(monkeypatch).get(
+        "/sdr", params={"granularidade": "mes", "periodo": "2026-11", "evento": "a;b"}
+    )
+    assert resposta.status_code == 400
+
+
 def test_funil_sdr_eventos_lista_os_proximos_eventos(monkeypatch):
     client = _client(monkeypatch)
 

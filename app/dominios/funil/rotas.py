@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -79,6 +79,13 @@ def _resolver_periodo_ou_400(granularidade: str, periodo: str):
         ) from exc
 
 
+def _buscar_evento_da_pagina(evento: str | None, ttl: int):
+    """Evento escolhido no filtro ou, sem escolha, o próximo (SED, qualquer título), fora do filtro de período."""
+    if evento is None:
+        return obter_ou_calcular("evento:proximo", ttl, lambda: buscar_proximo_evento(datetime.now(TZ_SP)))
+    return obter_ou_calcular(f"evento:{evento}", ttl, lambda: buscar_evento(evento))
+
+
 @router.get("/funil/{canal}")
 def get_funil(
     canal: str,
@@ -149,13 +156,6 @@ def get_funil_sdr(
     p = _resolver_periodo_ou_400(granularidade, periodo)
     ttl = settings.cache_ttl_metricas_segundos
 
-    # Velocímetro e cards do evento: o evento escolhido no filtro ou, sem
-    # escolha, o próximo (SED, qualquer título), fora do filtro de período.
-    def buscar_dados_evento():
-        if evento is None:
-            return obter_ou_calcular("evento:proximo", ttl, lambda: buscar_proximo_evento(datetime.now(TZ_SP)))
-        return obter_ou_calcular(f"evento:{evento}", ttl, lambda: buscar_evento(evento))
-
     # Tudo que não depende de outra consulta vai ao mesmo tempo.
     linhas, metas, pessoas, dados_pipedrive, contas_canais, dados_evento = em_paralelo(
         lambda: obter_ou_calcular(
@@ -165,7 +165,7 @@ def get_funil_sdr(
         lambda: obter_ou_calcular("pessoas:ativas", settings.cache_ttl_pessoas_segundos, listar_ativas),
         lambda: _pipedrive(p),
         lambda: em_paralelo(*(lambda canal=canal: _contas_do_canal(canal, p) for canal in CANAIS)),
-        buscar_dados_evento,
+        lambda: _buscar_evento_da_pagina(evento, ttl),
     )
     sdrs = sorted(
         (
@@ -256,6 +256,70 @@ def get_funil_sdr(
             # Meta do velocímetro no filtro atual (ver `sdr.meta_velocimetro_inscricoes`).
             "meta_velocimetro": meta_velocimetro,
         },
+        "avisos": [f"fonte_indisponivel:{t}" for t in tabelas_com_falha()],
+    }
+
+
+@router.get("/sdr")
+def get_pagina_sdr(
+    granularidade: str = Query(...),
+    periodo: str = Query(...),
+    evento: str | None = Query(None),
+    _usuario: dict = Depends(exigir_usuario),
+) -> dict:
+    if evento is not None and not ID_EVENTO_VALIDO.match(evento):
+        raise HTTPException(
+            status_code=400,
+            detail={"erro": {"codigo": "parametro_invalido", "mensagem": "evento inválido"}},
+        )
+    iniciar_registro_de_falhas()
+    p = _resolver_periodo_ou_400(granularidade, periodo)
+    ttl = settings.cache_ttl_metricas_segundos
+
+    linhas, metas, pessoas, ligacoes, dados_evento = em_paralelo(
+        lambda: obter_ou_calcular(
+            f"pagina-sdr:linhas:{p.inicio}:{p.fim}", ttl, lambda: sdr.buscar_metricas_funil_sdr(p.inicio, p.fim)
+        ),
+        lambda: obter_ou_calcular("metas-funil-sdr", ttl, sdr.buscar_metas_funil_sdr),
+        lambda: obter_ou_calcular("pessoas:ativas", settings.cache_ttl_pessoas_segundos, listar_ativas),
+        lambda: obter_ou_calcular(
+            f"pagina-sdr:ligacoes:{p.inicio}:{p.fim}", ttl, lambda: sdr.buscar_ligacoes_sdr(p.inicio, p.fim)
+        ),
+        lambda: _buscar_evento_da_pagina(evento, ttl),
+    )
+
+    # Janela de inscrição do evento: da primeira inscrição até a véspera, sem domingos.
+    dias: list[date] = []
+    if dados_evento is not None and dados_evento.data:
+        primeira = obter_ou_calcular(
+            f"evento:{dados_evento.id}:primeira-inscricao", ttl, lambda: sdr.data_primeira_inscricao(dados_evento.id)
+        )
+        dias = sdr.dias_da_janela_do_evento(primeira, funil_evento.data_do_evento_sp(dados_evento.data))
+    linhas_janela = (
+        obter_ou_calcular(
+            f"pagina-sdr:linhas:{dias[0]}:{dias[-1]}", ttl, lambda: sdr.buscar_metricas_funil_sdr(dias[0], dias[-1])
+        )
+        if dias
+        else []
+    )
+
+    sdrs = sorted(
+        (
+            {"id": int(pessoa.id), "nome": pessoa.nome, "imagem_url": pessoa.imagem_url}
+            for pessoa in pessoas
+            if pessoa.cargo == "sdr"
+        ),
+        key=lambda s: s["id"],
+    )
+    evento_dict = (
+        None
+        if dados_evento is None
+        else {"id": dados_evento.id, "titulo": dados_evento.titulo, "data": dados_evento.data, "capacidade": dados_evento.capacidade}
+    )
+    return {
+        **sdr.montar_resposta_pagina_sdr(
+            p, sdrs, linhas, linhas_janela, ligacoes, metas, evento_dict, dias, hoje=hoje_sp()
+        ),
         "avisos": [f"fonte_indisponivel:{t}" for t in tabelas_com_falha()],
     }
 
