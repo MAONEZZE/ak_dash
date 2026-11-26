@@ -32,6 +32,10 @@ def test_etiqueta_do_evento_casa_sem_maiuscula_acento_e_com_ano_opcional():
 
 def test_conta_negocios_da_etiqueta_sem_olhar_data():
     ids = {130}
+    inscritos = [
+        {"label_ids": [130]},
+        {"label_ids": [999]},
+    ]
     agendados = [
         {"label_ids": [130], "stage_change_time": "2025-01-01T10:00:00Z"},
         {"label_ids": [999]},
@@ -44,7 +48,8 @@ def test_conta_negocios_da_etiqueta_sem_olhar_data():
         {"label_ids": [130], "won_time": "2024-06-01T10:00:00Z"},
         {"label_ids": [130]},
     ]
-    assert evento.contar_pipedrive_evento(ids, agendados, realizados, ganhos) == {
+    assert evento.contar_pipedrive_evento(ids, inscritos, agendados, realizados, ganhos) == {
+        "inscritos": 1,
         "onboarding_agendado": 1,
         "onboarding_realizado": 1,
         "vendas": 2,
@@ -66,12 +71,13 @@ def test_almoco_pago_conta_198_ou_199_so_com_a_etiqueta_do_evento():
     assert evento.contar_almocos_pagos(ids, realizados, chave) == 3
 
 
-def test_buscar_pipedrive_evento_conta_quem_esta_hoje_nas_colunas_e_ganhos_desde_180_dias_antes(monkeypatch):
+def test_buscar_pipedrive_evento_conta_inscritos_e_onboardings_com_a_etiqueta_e_ganhos_desde_180_dias_antes(monkeypatch):
     monkeypatch.setattr(
         evento,
         "settings",
         dataclasses.replace(
             evento.settings,
+            pipe_id_inscrito_pipeline_linkedin=7,
             pipe_id_onboarding_agendado_pipeline_linkedin=44,
             pipe_id_onboarding_realizado_pipeline_linkedin=46,
         ),
@@ -82,6 +88,8 @@ def test_buscar_pipedrive_evento_conta_quem_esta_hoje_nas_colunas_e_ganhos_desde
 
     def no_estagio_atual(id_estagio):
         estagios_pedidos.append(id_estagio)
+        if id_estagio == 7:
+            return [{"label_ids": [130]}, {"label_ids": [130, 5]}, {"label_ids": [131]}]
         if id_estagio == 44:
             return [{"label_ids": [130]}]
         return [{"label_ids": [131]}]
@@ -95,8 +103,8 @@ def test_buscar_pipedrive_evento_conta_quem_esta_hoje_nas_colunas_e_ganhos_desde
 
     resultado = evento.buscar_pipedrive_evento(date(2026, 12, 2))
 
-    assert resultado == {"onboarding_agendado": 1, "onboarding_realizado": 0, "vendas": 1}
-    assert estagios_pedidos == [44, 46]
+    assert resultado == {"inscritos": 2, "onboarding_agendado": 1, "onboarding_realizado": 0, "vendas": 1}
+    assert estagios_pedidos == [7, 44, 46]
     assert ganhos_pedidos == [datetime(2026, 6, 5, tzinfo=TZ_SP)]
 
 
@@ -135,7 +143,7 @@ def test_pipedrive_fora_do_ar_zera_e_registra_falha(monkeypatch):
 
     resultado = evento.buscar_pipedrive_evento(date(2026, 12, 2))
 
-    assert resultado == {"onboarding_agendado": 0, "onboarding_realizado": 0, "vendas": 0}
+    assert resultado == {"inscritos": 0, "onboarding_agendado": 0, "onboarding_realizado": 0, "vendas": 0}
     assert banco.tabelas_com_falha() == ["pipedrive"]
 
 

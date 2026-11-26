@@ -8,7 +8,7 @@ from app.fontes import pipedrive as api
 from app.periodo import TZ_SP
 from app.planilhas import normalizar
 
-ZERADO = {"onboarding_agendado": 0, "onboarding_realizado": 0, "vendas": 0}
+ZERADO = {"inscritos": 0, "onboarding_agendado": 0, "onboarding_realizado": 0, "vendas": 0}
 DIAS_VENDAS_ANTES_DO_EVENTO = 180
 OPCOES_ALMOCO_PAGO = frozenset({198, 199})  # 198 = Almoço Pago (2 dias), 199 = Almoço Pago (1 dia)
 
@@ -29,13 +29,18 @@ def ids_etiquetas_do_evento(etiquetas: dict[int, str], data_evento: date) -> set
 
 
 def contar_pipedrive_evento(
-    ids_etiqueta: set[int], agendados: list[dict], realizados: list[dict], ganhos: list[dict]
+    ids_etiqueta: set[int],
+    inscritos: list[dict],
+    agendados: list[dict],
+    realizados: list[dict],
+    ganhos: list[dict],
 ) -> dict[str, int]:
     """Negócios com etiqueta do evento em cada lista, sem filtro de data (retrato de agora)."""
     def conta(negocios: list[dict]) -> int:
         return sum(1 for n in negocios if ids_etiqueta & set(n.get("label_ids") or []))
 
     return {
+        "inscritos": conta(inscritos),
         "onboarding_agendado": conta(agendados),
         "onboarding_realizado": conta(realizados),
         "vendas": conta(ganhos),
@@ -56,14 +61,16 @@ def _buscar(data_evento: date) -> dict[str, int]:
     ids = ids_etiquetas_do_evento(api.etiquetas_de_negocio(), data_evento)
     if not ids:
         return dict(ZERADO)
+    inscrito = settings.pipe_id_inscrito_pipeline_linkedin
     agendado = settings.pipe_id_onboarding_agendado_pipeline_linkedin
     realizado = settings.pipe_id_onboarding_realizado_pipeline_linkedin
+    inscritos = api.negocios_atuais_no_estagio(inscrito) if inscrito is not None else []
     agendados = api.negocios_atuais_no_estagio(agendado) if agendado is not None else []
     realizados = api.negocios_atuais_no_estagio(realizado) if realizado is not None else []
     ganhos = api.negocios_ganhos_desde(
         datetime.combine(data_evento - timedelta(days=DIAS_VENDAS_ANTES_DO_EVENTO), time.min, tzinfo=TZ_SP)
     )
-    return contar_pipedrive_evento(ids, agendados, realizados, ganhos)
+    return contar_pipedrive_evento(ids, inscritos, agendados, realizados, ganhos)
 
 
 def _buscar_almocos(data_evento: date) -> int:
@@ -85,6 +92,6 @@ def buscar_almocos_pagos(data_evento: date) -> int:
 
 
 def buscar_pipedrive_evento(data_evento: date) -> dict[str, int]:
-    """Retrato de agora: Onboarding Agendado/Realizado e Vendas do evento, sem filtro de data. Pipedrive fora do ar ou sem
-    configuração: ZERADO + falha 'pipedrive' registrada (aviso na tela)."""
+    """Retrato de agora: Inscritos, Onboarding Agendado/Realizado e Vendas do evento, sem filtro de data.
+    Pipedrive fora do ar ou sem configuração: ZERADO + falha 'pipedrive' registrada (aviso na tela)."""
     return api.ou_vazio(lambda: _buscar(data_evento), dict(ZERADO), "Pipedrive indisponível — etapas do Funil Evento zeradas")
