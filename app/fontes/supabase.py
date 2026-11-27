@@ -188,6 +188,25 @@ def apagar_vendas(ids: list[int]) -> None:
     banco.apagar("metricas_faturamento", {"id_planilha": f"in.({','.join(map(str, ids))})"})
 
 
+def ler_notas_financeiro_dos_meses(meses: list[str]) -> list[dict]:
+    return banco.query("notas_financeiro", {"mes": f"in.({','.join(meses)})"})
+
+
+def ler_notas_financeiro_do_periodo(inicio: date, fim: date) -> list[dict]:
+    return banco.query(
+        "notas_financeiro",
+        {"or": f"(and(mes.gte.{inicio.replace(day=1).isoformat()},mes.lte.{fim.isoformat()}),and(data_referencia.gte.{inicio.isoformat()},data_referencia.lte.{fim.isoformat()}))"},
+    )
+
+
+def gravar_notas_financeiro(linhas: list[dict]) -> None:
+    banco.upsert("notas_financeiro", linhas, on_conflict="chave")
+
+
+def apagar_notas_financeiro(mes: str, linhas: list[int]) -> None:
+    banco.apagar("notas_financeiro", {"mes": f"eq.{mes}", "linha": f"in.({','.join(map(str, linhas))})"})
+
+
 def ler_logs(colunas: str) -> list[dict]:
     return banco.query("logs_pipedrive", {}, colunas=colunas)
 

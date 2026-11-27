@@ -259,6 +259,27 @@ def test_funcoes_do_financeiro_mandam_a_requisicao_de_hoje(monkeypatch, chamada,
 
 
 @pytest.mark.parametrize(
+    "chamada, metodo, tabela, params_esperados",
+    [
+        (lambda: supabase.ler_notas_financeiro_dos_meses(["2026-10-01", "2026-11-01"]), "GET", "notas_financeiro", {"select": "*", "mes": "in.(2026-10-01,2026-11-01)"}),
+        (lambda: supabase.ler_notas_financeiro_do_periodo(date(2026, 8, 20), date(2026, 12, 31)), "GET", "notas_financeiro", {"select": "*", "or": "(and(mes.gte.2026-08-01,mes.lte.2026-12-31),and(data_referencia.gte.2026-08-20,data_referencia.lte.2026-12-31))"}),
+        (lambda: supabase.gravar_notas_financeiro([{"a": 1}]), "POST", "notas_financeiro", {"on_conflict": "chave"}),
+        (lambda: supabase.apagar_notas_financeiro("2026-11-01", [5, 7]), "DELETE", "notas_financeiro", {"mes": "eq.2026-11-01", "linha": "in.(5,7)"}),
+    ],
+)
+def test_funcoes_de_notas_financeiro_mandam_a_requisicao_de_hoje(monkeypatch, chamada, metodo, tabela, params_esperados):
+    registros = _capturar(monkeypatch)
+
+    chamada()
+
+    assert len(registros) == 1
+    requisicao = registros[0]
+    assert requisicao["metodo"] == metodo
+    assert requisicao["url"] == f"https://sb.test/rest/v1/{tabela}"
+    assert _sem_paginacao(requisicao["params"]) == params_esperados
+
+
+@pytest.mark.parametrize(
     "chamada, metodo, tabela, params_esperados, json_esperado",
     [
         (lambda: supabase.gravar_metricas_funil_sdr([{"a": 1}]), "POST", "metricas_funil_sdr", {"on_conflict": "id_user,data"}, [{"a": 1}]),
