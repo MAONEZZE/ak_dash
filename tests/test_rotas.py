@@ -611,13 +611,6 @@ def test_sdr_200_com_ranking_previsao_e_serie_do_evento(monkeypatch):
         return _fake_query(tabela, filtros, *a, **kw)
 
     monkeypatch.setattr(fontes_banco_mod, "query", query_pagina_sdr)
-    pedidos = []
-
-    def negocios_falso(inicio, fim, id_dash_por_dono):
-        pedidos.append((inicio, fim))
-        return {9: 40}
-
-    monkeypatch.setattr(rotas_funil_mod.sdr, "buscar_negocios_sdr", negocios_falso)
     monkeypatch.setattr(
         fontes_supabase_mod, "ler_metas_do_cargo", lambda cargo: [{"id_user": 9, "metrica": "inscricoes_realizadas", "valor_diario": 4}]
     )
@@ -634,11 +627,43 @@ def test_sdr_200_com_ranking_previsao_e_serie_do_evento(monkeypatch):
     assert sdr["posicao"] == 1
     assert len(sdr["serie_evento"]) == 10  # 20/11 a 01/12 sem os domingos 22 e 29
     # 3 da planilha (metricas_funil_sdr); meta = 4 × 8 dias seg–sex de 20/11 (1ª inscrição) a 01/12 (véspera do evento).
-    assert sdr["ranking_mes"] == {"negocios": 40, "inscricoes": 3, "inscricoes_hoje": 0, "meta": 32}
+    assert sdr["ranking_mes"] == {"inscricoes": 3, "inscricoes_hoje": 0, "meta": 32}
     assert corpo["mes_ranking"] == {"inicio": "2026-11-01", "fim": "2026-11-30"}
     assert corpo["janela_meta"] == {"inicio": "2026-11-20", "fim": "2026-12-01"}
     assert corpo["inscritos_sed_mes"] == 0  # o fake do SED não devolve inscrição no período
-    assert pedidos == [(date(2026, 11, 1), date(2026, 11, 30))]
+
+
+def test_sdr_nao_consulta_o_pipedrive_e_ranking_nao_tem_negocios(monkeypatch):
+    from app.dominios.funil import rotas as rotas_funil_mod
+
+    client = _client(monkeypatch)
+    monkeypatch.setattr(rotas_funil_mod, "hoje_sp", lambda: date(2026, 11, 23))
+
+    def query_pagina_sdr(tabela, filtros=None, *a, **kw):
+        if tabela == "events":
+            return [{"id": "e1", "title": "Imersão", "event_date": "2026-12-02T16:00:00+00:00", "capacity": 60}]
+        if tabela == "registrations" and "order" in (filtros or {}):
+            return [{"created_at": "2026-11-20T15:00:00+00:00"}]
+        if tabela == "registrations":
+            return []
+        if tabela == "metricas_sdrs":
+            return [{"id_user": 9, "data": "2026-11-03", "key_data_ref_user": "x", "ligacoes_realizadas": 4}]
+        return _fake_query(tabela, filtros, *a, **kw)
+
+    monkeypatch.setattr(fontes_banco_mod, "query", query_pagina_sdr)
+
+    def pipedrive_nao_deveria_ser_chamado(*args, **kwargs):
+        raise AssertionError("Pipedrive não deveria ser chamado")
+
+    monkeypatch.setattr(fonte_pipedrive_mod, "negocios_criados_desde", pipedrive_nao_deveria_ser_chamado)
+    monkeypatch.setattr(
+        fontes_supabase_mod, "ler_metas_do_cargo", lambda cargo: [{"id_user": 9, "metrica": "inscricoes_realizadas", "valor_diario": 4}]
+    )
+    resposta = client.get("/sdr", params={"granularidade": "mes", "periodo": "2026-11"})
+    assert resposta.status_code == 200
+    corpo = resposta.json()
+    assert "negocios" not in corpo["sdrs"][0]["ranking_mes"]
+    assert "fonte_indisponivel:pipedrive" not in corpo["avisos"]
 
 
 def test_sdr_inscricoes_e_badge_do_ranking_somam_a_janela_da_meta(monkeypatch):
@@ -657,7 +682,6 @@ def test_sdr_inscricoes_e_badge_do_ranking_somam_a_janela_da_meta(monkeypatch):
         return _fake_query(tabela, filtros, *a, **kw)
 
     monkeypatch.setattr(fontes_banco_mod, "query", query_pagina_sdr)
-    monkeypatch.setattr(rotas_funil_mod.sdr, "buscar_negocios_sdr", lambda inicio, fim, id_dash_por_dono: {})
     monkeypatch.setattr(
         fontes_supabase_mod, "ler_metas_do_cargo", lambda cargo: [{"id_user": 9, "metrica": "inscricoes_realizadas", "valor_diario": 4}]
     )
@@ -710,7 +734,6 @@ def test_sdr_evento_sem_inscricao_meta_comeca_na_criacao_do_evento(monkeypatch):
         return _fake_query(tabela, filtros, *a, **kw)
 
     monkeypatch.setattr(fontes_banco_mod, "query", query_sem_inscricao)
-    monkeypatch.setattr(rotas_funil_mod.sdr, "buscar_negocios_sdr", lambda inicio, fim, id_dash_por_dono: {})
     monkeypatch.setattr(
         fontes_supabase_mod, "ler_metas_do_cargo", lambda cargo: [{"id_user": 9, "metrica": "inscricoes_realizadas", "valor_diario": 4}]
     )

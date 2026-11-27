@@ -270,12 +270,6 @@ def test_montar_resposta_pagina_sdr_junta_card_ranking_previsao_e_serie_por_sdr(
     assert all(s["previsao"] is None and s["serie_evento"] == [] for s in r_sem_evento["sdrs"])
 
 
-def test_contar_negocios_sdr_so_de_donos_sdr():
-    negocios = [{"owner_id": 100}, {"owner_id": 100}, {"owner_id": 200}, {"owner_id": 999}]
-
-    assert sdr.contar_negocios_sdr(negocios, {100: 11, 200: 14, 300: 15}) == {11: 2, 14: 1, 15: 0}
-
-
 def test_inscricoes_do_mes_somam_a_planilha_por_sdr_e_separam_o_dia_de_hoje():
     linhas = [
         {"id_user": 11, "data": "2026-11-03", "inscricoes_realizadas": 6},
@@ -309,15 +303,14 @@ def test_ranking_do_mes_usa_inscricoes_da_planilha_e_meta_diaria_vezes_dias_utei
         p, sdrs, [], [], {}, METAS, None, [], date(2026, 11, 25),
         mes_ranking=sdr.mes_do_ranking(p),
         janela_meta=(date(2026, 11, 1), date(2026, 11, 25)),
-        negocios={11: 295},
         inscricoes_mes={11: {"mes": 10, "hoje": 2}},
         inscritos_sed_mes=120,
     )
 
     por_id = {c["id_user"]: c["ranking_mes"] for c in corpo["sdrs"]}
     # diária × 18 dias seg–sex de 01 a 25/11
-    assert por_id["11"] == {"negocios": 295, "inscricoes": 10, "inscricoes_hoje": 2, "meta": 126}
-    assert por_id["14"] == {"negocios": 0, "inscricoes": 0, "inscricoes_hoje": 0, "meta": 108}
+    assert por_id["11"] == {"inscricoes": 10, "inscricoes_hoje": 2, "meta": 126}
+    assert por_id["14"] == {"inscricoes": 0, "inscricoes_hoje": 0, "meta": 108}
     assert corpo["janela_meta"] == {"inicio": "2026-11-01", "fim": "2026-11-25"}
     assert corpo["mes_ranking"] == {"inicio": "2026-11-01", "fim": "2026-11-30"}
     assert corpo["inscritos_sed_mes"] == 120

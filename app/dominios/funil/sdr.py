@@ -5,11 +5,10 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 
 from app.dominios.funil.evento import data_do_evento_sp
-from app.fontes import pipedrive as api
 from app.fontes import sed, supabase
 from app.indicadores import calcular_indicadores
 from app.metricas import nome_exibicao
-from app.periodo import TZ_SP, Periodo, dias_uteis_decorridos, dias_uteis_meta, dias_uteis_totais
+from app.periodo import Periodo, dias_uteis_decorridos, dias_uteis_meta, dias_uteis_totais
 from app.pontuacao import atribuir_ranking
 from app.planilhas import COLUNAS_POR_TABELA
 
@@ -159,16 +158,6 @@ def buscar_ligacoes_sdr(inicio: date, fim: date) -> dict[int, int]:
     return somas
 
 
-def contar_negocios_sdr(negocios: list[dict], id_dash_por_dono: dict[int, int]) -> dict[int, int]:
-    """Negócios por SDR (id_user do dash): os de dono em `id_dash_por_dono`, cada um uma vez."""
-    contagem = {i: 0 for i in id_dash_por_dono.values()}
-    for n in negocios:
-        id_user = id_dash_por_dono.get(n.get("owner_id"))
-        if id_user is not None:
-            contagem[id_user] += 1
-    return contagem
-
-
 def mes_do_ranking(periodo: Periodo) -> tuple[date, date]:
     """Mês do card de ranking: o que contém o fim do filtro (o run rate é sempre do mês)."""
     inicio = periodo.fim.replace(day=1)
@@ -198,24 +187,6 @@ def inscricoes_do_mes(linhas: list[dict], ids: list[int], hoje: date) -> dict[in
         if l["data"] == hoje.isoformat():
             contagem[id_user]["hoje"] += n
     return contagem
-
-
-def _limites_sp(inicio: date, fim: date) -> tuple[datetime, datetime]:
-    return datetime.combine(inicio, time.min, tzinfo=TZ_SP), datetime.combine(fim + timedelta(days=1), time.min, tzinfo=TZ_SP)
-
-
-def buscar_negocios_sdr(inicio: date, fim: date, id_dash_por_dono: dict[int, int]) -> dict[int, int]:
-    """Negócios do Pipedrive criados em [inicio, fim] (SP) de que cada SDR é dono.
-    Pipedrive fora do ar: `{}` + aviso na tela (ver `api.ou_vazio`)."""
-    desde, ate = _limites_sp(inicio, fim)
-
-    def calcular() -> dict[int, int]:
-        negocios = [
-            n for n in api.negocios_criados_desde(desde) if datetime.fromisoformat(n["add_time"].replace("Z", "+00:00")) < ate
-        ]
-        return contar_negocios_sdr(negocios, id_dash_por_dono)
-
-    return api.ou_vazio(calcular, {}, "Pipedrive indisponível — negócios dos SDRs zerados")
 
 
 def montar_resposta(
@@ -314,14 +285,12 @@ def montar_resposta_pagina_sdr(
     hoje: date,
     mes_ranking: tuple[date, date] | None = None,
     janela_meta: tuple[date, date] | None = None,
-    negocios: dict[int, int] | None = None,
     inscricoes_mes: dict[int, dict[str, int]] | None = None,
     inscritos_sed_mes: int | None = None,
 ) -> dict:
     """Cards, ranking, previsão e série do evento por SDR. `dias`: janela de inscrição do evento (vazia sem evento).
-    Card "Ranking SDR" (mês `mes_ranking`): `negocios` por SDR e inscrições do mês/hoje da planilha (`inscricoes_mes`)
-    (fora deles, zerado); meta = diária × dias seg–sex de `janela_meta`; `inscritos_sed_mes` vai no badge."""
-    negocios = negocios or {}
+    Card "Ranking SDR" (mês `mes_ranking`): inscrições do mês/hoje da planilha (`inscricoes_mes`)
+    (fora delas, zerado); meta = diária × dias seg–sex de `janela_meta`; `inscritos_sed_mes` vai no badge."""
     inscricoes_mes = inscricoes_mes or {}
     ids = [s["id"] for s in sdrs]
     inscricoes = {i: 0 for i in ids}
@@ -365,7 +334,6 @@ def montar_resposta_pagina_sdr(
                 "previsao": previsao_ate_o_evento(dias, acumulado_hoje(i), hoje, meta_diaria),
                 "serie_evento": serie_do_evento(dias, por_dia[i], meta_diaria, hoje),
                 "ranking_mes": {
-                    "negocios": negocios.get(i, 0),
                     "inscricoes": inscricoes_mes.get(i, {}).get("mes", 0),
                     "inscricoes_hoje": inscricoes_mes.get(i, {}).get("hoje", 0),
                     "meta": meta_diaria * dias_uteis_decorridos(janela_meta[0], janela_meta[1], hoje=janela_meta[1])
