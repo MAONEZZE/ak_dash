@@ -66,7 +66,7 @@ agora = datetime(2026, 11, 17, 10, 30, tzinfo=TZ_SP)
         ),
         pytest.param(
             lambda: sed.ler_eventos_a_partir_de(agora, 1),
-            "id,title,event_date,capacity",
+            "id,title,event_date,capacity,created_at",
             {"and": '(event_date.gte."2026-11-17T13:30:00Z")', "order": "event_date.asc"},
             id="ler_eventos_a_partir_de",
         ),
@@ -108,7 +108,7 @@ def test_ler_evento_por_id_filtra_pelo_id(monkeypatch):
     sed.ler_evento_por_id("e1")
 
     assert len(registros) == 1
-    assert registros[0]["select"] == "id,title,event_date,capacity"
+    assert registros[0]["select"] == "id,title,event_date,capacity,created_at"
     assert registros[0]["filtros"] == {"and": '(id.eq."e1")', "order": "event_date.asc"}
 
 

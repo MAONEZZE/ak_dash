@@ -268,6 +268,24 @@ def test_evento_escolhido_e_buscado_pelo_id_sem_filtro_de_titulo(monkeypatch):
     assert chamadas[0] == ("ler_evento_por_id", ("e1",), {})
 
 
+def test_evento_escolhido_traz_a_data_de_criacao_do_sed(monkeypatch):
+    _mockar_sed(
+        monkeypatch,
+        [{"id": "e1", "title": "Imersão", "event_date": "2026-12-02T12:00:00+00:00", "capacity": None, "created_at": "2026-10-14T18:11:08.593+00:00"}],
+        [],
+    )
+    evento = banco_mod.buscar_evento("e1")
+    assert evento.criado_em == "2026-10-14T18:11:08.593+00:00"
+
+    _mockar_sed(
+        monkeypatch,
+        [{"id": "e1", "title": "Imersão", "event_date": "2026-12-02T12:00:00+00:00", "capacity": None}],
+        [],
+    )
+    evento = banco_mod.buscar_proximo_evento(datetime(2026, 11, 17, tzinfo=banco_mod.TZ_SP))
+    assert evento.criado_em is None
+
+
 def test_comparecimento_conta_checkins_do_evento_de_qualquer_status(monkeypatch):
     chamadas: list[tuple] = []
 

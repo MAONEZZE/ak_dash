@@ -111,6 +111,7 @@ class EventoInscricoes:
     aprovados: int
     pendentes: int = 0
     rejeitados: int = 0
+    criado_em: str | None = None  # created_at cru do SED (quando o evento foi cadastrado)
 
 
 def buscar_confrarias_do_mes(inicio: date, fim: date) -> list[EventoInscricoes]:
@@ -208,6 +209,7 @@ def _com_inscricoes(eventos: list[dict]) -> list[EventoInscricoes]:
             aprovados=aprovados[e["id"]],
             pendentes=pendentes[e["id"]],
             rejeitados=rejeitados[e["id"]],
+            criado_em=e.get("created_at"),
         )
         for e in eventos
     ]
