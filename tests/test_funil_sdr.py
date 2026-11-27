@@ -291,6 +291,17 @@ def test_inscricoes_pipedrive_contam_cada_negocio_uma_vez_e_separam_o_dia():
     assert contagem == {11: {"mes": 3, "hoje": 2}, 14: {"mes": 1, "hoje": 0}}
 
 
+def test_inscricoes_do_mes_somam_a_planilha_por_sdr_e_separam_o_dia_de_hoje():
+    linhas = [
+        {"id_user": 11, "data": "2026-11-03", "inscricoes_realizadas": 6},
+        {"id_user": "11", "data": "2026-11-25", "inscricoes_realizadas": 2},
+        {"id_user": 14, "data": "2026-11-25", "inscricoes_realizadas": None},
+        {"id_user": 99, "data": "2026-11-25", "inscricoes_realizadas": 5},
+    ]
+
+    assert sdr.inscricoes_do_mes(linhas, [11, 14], date(2026, 11, 25)) == {11: {"mes": 8, "hoje": 2}, 14: {"mes": 0, "hoje": 0}}
+
+
 def test_mes_do_ranking_e_o_mes_do_fim_do_filtro():
     assert sdr.mes_do_ranking(resolver_periodo("dia", "2026-02-10")) == (date(2026, 2, 1), date(2026, 2, 28))
     assert sdr.mes_do_ranking(resolver_periodo("mes", "2026-12")) == (date(2026, 12, 1), date(2026, 12, 31))

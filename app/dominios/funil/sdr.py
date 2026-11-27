@@ -203,6 +203,20 @@ def janela_da_meta(mes: tuple[date, date], data_evento: date | None) -> tuple[da
     return mes[0], fim
 
 
+def inscricoes_do_mes(linhas: list[dict], ids: list[int], hoje: date) -> dict[int, dict[str, int]]:
+    """Inscrições por SDR (planilha → metricas_funil_sdr): `mes` = soma das `linhas` (já filtradas no mês); `hoje` = as da linha de `hoje`. SDR fora de `ids` é ignorado."""
+    contagem = {i: {"mes": 0, "hoje": 0} for i in ids}
+    for l in linhas:
+        id_user = int(l["id_user"])
+        if id_user not in contagem:
+            continue
+        n = l["inscricoes_realizadas"] or 0
+        contagem[id_user]["mes"] += n
+        if l["data"] == hoje.isoformat():
+            contagem[id_user]["hoje"] += n
+    return contagem
+
+
 def _limites_sp(inicio: date, fim: date) -> tuple[datetime, datetime]:
     return datetime.combine(inicio, time.min, tzinfo=TZ_SP), datetime.combine(fim + timedelta(days=1), time.min, tzinfo=TZ_SP)
 
