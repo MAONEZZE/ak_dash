@@ -26,3 +26,33 @@ def valor_monetario(valor) -> float | None:
         return float(t)
     except ValueError:
         return None
+
+
+CATEGORIAS = ("venda nova", "mensalidade cliente", "upsell")
+PRODUTOS = {"ativacao": "Ativação", "tracao": "Tração", "aceleracao": "Aceleração", "the green house": "The Green House"}
+
+
+def categoria(valor) -> str | None:
+    n = normalizar(valor) if valor else ""
+    return n if n in CATEGORIAS else None
+
+
+def produto(valor) -> str | None:
+    if valor is None or not str(valor).strip():
+        return None
+    return PRODUTOS.get(normalizar(valor), str(valor).strip())
+
+
+def forma_pagamento(valor) -> str:
+    n = normalizar(valor) if valor else ""
+    if not n:
+        return "Outros"
+    if "pix" in n and "cart" in n:
+        return "Outros"
+    if "cartao" in n or n == "link":
+        return "Cartão"
+    if n.startswith("pix"):
+        return "PIX"
+    if "boleto" in n:
+        return "Boleto"
+    return "Outros"
