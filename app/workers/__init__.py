@@ -17,7 +17,7 @@ from app.fontes import pipedrive as pipedrive_api
 from app.fontes import supabase
 from app.workers.google_sheets import LeitorSheets, criar_credenciais
 from app.periodo import TZ_SP, hoje_sp
-from app.workers.planilha_financeiro import APELIDOS, COLUNAS_VENDA, ler_base_vendas
+from app.workers.planilha_nfs import ler_aba_nfs, mes_da_aba, resolver_vendedor
 from app.workers.planilha_logs import COLUNAS_LOG, ler_logs
 from app.planilhas import (
     COLUNAS_POR_TABELA,
@@ -403,7 +403,11 @@ class WorkerFunil(Worker):
 
 
 class WorkerFinanceiro(Worker):
-    """Espelha a aba BASE_VENDAS da Isaac Newton2.0 em metricas_faturamento + recebimentos_faturamento."""
+    """Espelha as abas "NFS <mês>" da planilha do financeiro em notas_financeiro (ver sql/2026-11-27-notas-financeiro.sql).
+
+    O ciclo sincroniza só a aba do mês corrente e a do anterior; a carga de todas as abas é `carga_completa`
+    (scripts/carga_financeiro.py). Mês sem aba na planilha não apaga nada.
+    """
     PREFIXOS_CACHE = ("faturamento:", "financeiro:")
 
     def __init__(
@@ -411,127 +415,79 @@ class WorkerFinanceiro(Worker):
         planilha_id: str,
         ano: int,
         ler_abas: Callable[[str], list[tuple[str, list[list]]]],
+        hoje: Callable[[], date] = hoje_sp,
         agora: Callable[[], datetime] = lambda: datetime.now(TZ_SP),
     ):
-        self.planilha = Planilha("financeiro", "metricas_faturamento", "")
+        self.planilha = Planilha("financeiro", "notas_financeiro", "")
         self.planilha_id = planilha_id
         self.ano = ano
         self.ler_abas = ler_abas
+        self.hoje = hoje
         self.agora = agora
-        self.vendas: dict[int, dict] | None = None
-        self.recebimentos: dict[tuple[int, str], dict] = {}
         self.status = {"ultima_leitura_ok": None, "ultimo_erro": None}
         self._puladas: set[str] = set()
-        # linhas do n8n antes do worker (backup em metricas_faturamento_bkp_20261028): apagadas uma vez por processo
-        self._apagar_legado = True
 
-    def _carregar_estado(self) -> None:
-        self.vendas = {
-            l["id_planilha"]: l
-            for l in self._exigir(
-                "metricas_faturamento",
-                lambda: supabase.ler_vendas_com_id_planilha("id_planilha,id_cliente," + ",".join(c for c in COLUNAS_VENDA if c != "id_planilha")),
-            )
-        }
-        self.recebimentos = {
-            (l["id_planilha_venda"], l["mes"]): l
-            for l in self._exigir("recebimentos_faturamento", supabase.ler_todos_recebimentos)
-        }
-
-    def _resolver_clientes(self, lidas: list) -> dict[int, int | None]:
-        def casar() -> dict[int, int | None]:
-            clientes = self._exigir("cliente_faturamento", supabase.ler_clientes)
-            por_telefone = {c["telefone"]: c["id"] for c in clientes if c["telefone"]}
-            por_nome = {normalizar(c["nome"]): c["id"] for c in clientes}
-            resolvidos: dict[int, int | None] = {}
-            for v in lidas:
-                if v.cliente_telefone is not None:
-                    resolvidos[v.venda["id_planilha"]] = por_telefone.get(v.cliente_telefone)
-                else:
-                    resolvidos[v.venda["id_planilha"]] = por_nome.get(normalizar(v.cliente_nome)) if v.cliente_nome else None
-            return resolvidos
-
-        resolvidos = casar()
-        com_telefone: dict[int, dict] = {}
-        sem_telefone: dict[str, dict] = {}
-        for v in lidas:
-            if resolvidos[v.venda["id_planilha"]] is not None:
+    def sincronizar(self, abas: list[tuple[str, list[list]]], meses: list[tuple[int, int]]) -> None:
+        # toda a leitura acontece antes de qualquer escrita: aba com erro não pode gravar parte do ciclo
+        presentes: list[str] = []
+        desejadas: dict[str, dict] = {}
+        for ano, mes in meses:
+            linhas = next((l for titulo, l in abas if mes_da_aba(titulo) == mes), None)
+            if linhas is None:
                 continue
-            if v.cliente_telefone is not None:
-                com_telefone.setdefault(v.cliente_telefone, {"nome": v.cliente_nome, "telefone": v.cliente_telefone})
-            elif v.cliente_nome:
-                sem_telefone.setdefault(normalizar(v.cliente_nome), {"nome": v.cliente_nome})
-        if com_telefone or sem_telefone:
-            supabase.gravar_clientes_por_telefone(list(com_telefone.values()))
-            supabase.gravar_clientes_por_id(list(sem_telefone.values()))
-            resolvidos = casar()
-        return resolvidos
+            for nota in ler_aba_nfs(linhas, ano, mes):
+                desejadas[nota["chave"]] = nota
+            presentes.append(f"{ano:04d}-{mes:02d}-01")
+        if not presentes:
+            return
 
-    def ciclo(self) -> None:
-        self._carregar_estado()  # estado sempre do banco: cada ciclo é um job independente
+        usuarios = self._exigir("users", supabase.ler_usuarios)
+        for nota in desejadas.values():
+            nota["id_vendedor"] = resolver_vendedor(nota["vendedor"], usuarios)
+            if nota["vendedor"] and nota["id_vendedor"] is None and nota["vendedor"] not in self._puladas:
+                self._puladas.add(nota["vendedor"])
+                logger.warning("Planilha financeiro: vendedor '%s' não está em users, gravado com id_vendedor null", nota["vendedor"])
 
-        abas = dict(self.ler_abas(self.planilha_id))
-        if "BASE_VENDAS" not in abas:
-            raise RuntimeError("aba BASE_VENDAS não encontrada na planilha do financeiro")
-        lidas = ler_base_vendas(abas["BASE_VENDAS"], self.ano)
-        for v in lidas:
-            for nome in (v.sdr, v.closer):
-                if nome and normalizar(nome) not in APELIDOS and nome not in self._puladas:
-                    self._puladas.add(nome)
-                    logger.warning(
-                        "Planilha financeiro: '%s' não está nos apelidos de SDR/Closer (venda %s), gravado como null",
-                        nome,
-                        v.venda["id_planilha"],
-                    )
-        ids_cliente = self._resolver_clientes(lidas)
-
-        desejadas = {v.venda["id_planilha"]: {**v.venda, "id_cliente": ids_cliente[v.venda["id_planilha"]]} for v in lidas}
-        vendas_novas = {
-            i: d for i, d in sorted(desejadas.items())
-            if {k: self.vendas.get(i, {}).get(k) for k in d} != d
-        }
-        receb_desejados = {(r["id_planilha_venda"], r["mes"]): r for v in lidas for r in v.recebimentos}
-        receb_novos = {
-            k: r for k, r in sorted(receb_desejados.items())
-            if {c: self.recebimentos.get(k, {}).get(c) for c in r} != r
-        }
-
-        carimbo = self.agora().isoformat()
+        atuais = {l["chave"]: l for l in self._exigir("notas_financeiro", lambda: supabase.ler_notas_financeiro_dos_meses(presentes))}
+        novas = [d for c, d in sorted(desejadas.items()) if {k: atuais.get(c, {}).get(k) for k in d} != d]
         gravou = False
-
-        if vendas_novas:
-            supabase.gravar_vendas([{**l, "atualizado_em": carimbo} for l in vendas_novas.values()])
-            self.vendas.update(vendas_novas)
+        if novas:
+            supabase.gravar_notas_financeiro([{**d, "atualizado_em": self.agora().isoformat()} for d in novas])
             gravou = True
 
-        if receb_novos:
-            supabase.gravar_recebimentos([{**l, "atualizado_em": carimbo} for l in receb_novos.values()])
-            self.recebimentos.update(receb_novos)
-            gravou = True
-
-        # só depois de ler e gravar a planilha: uma leitura que falha não pode esvaziar o faturamento
-        if self._apagar_legado and desejadas:
-            supabase.apagar_vendas_sem_id_planilha()
-            self._apagar_legado = False
-            gravou = True
-
-        meses_apagados = [k for k in sorted(self.recebimentos) if k not in receb_desejados and k[0] in desejadas]
-        for i, mes in meses_apagados:
-            supabase.apagar_recebimento(i, mes)
-            self.recebimentos.pop((i, mes))
-            gravou = True
-
-        removidas = sorted(set(self.vendas) - set(desejadas))
-        if removidas:
-            supabase.apagar_vendas(removidas)
-            for i in removidas:
-                self.vendas.pop(i, None)
-            for k in [k for k in self.recebimentos if k[0] in removidas]:
-                del self.recebimentos[k]
+        removidas = sorted(c for c in atuais if c not in desejadas)
+        linhas_por_mes: dict[str, list[int]] = {}
+        for c in removidas:
+            linhas_por_mes.setdefault(atuais[c]["mes"], []).append(int(atuais[c]["linha"]))
+        for mes in sorted(linhas_por_mes):
+            supabase.apagar_notas_financeiro(mes, sorted(linhas_por_mes[mes]))
             gravou = True
 
         if gravou:
             cache.invalidar_prefixos(self.PREFIXOS_CACHE)
+
+    def ciclo(self) -> None:
+        h = self.hoje()
+        anterior = (h.year, h.month - 1) if h.month > 1 else (h.year - 1, 12)
+        self.sincronizar(self.ler_abas(self.planilha_id), [anterior, (h.year, h.month)])
+
+    def carga_completa(self) -> list[str]:
+        abas = self.ler_abas(self.planilha_id)
+        abas_validas: list[tuple[str, list[list]]] = []
+        validas: list[tuple[int, int]] = []
+        for titulo, linhas in abas:
+            m = mes_da_aba(titulo)
+            if m is None:
+                continue
+            try:
+                ler_aba_nfs(linhas, self.ano, m)
+            except ValueError as erro:
+                logger.warning("Carga financeiro: aba '%s' pulada: %s", titulo, erro)
+                continue
+            abas_validas.append((titulo, linhas))
+            validas.append((self.ano, m))
+        self.sincronizar(abas_validas, sorted(validas))
+        return [f"{a:04d}-{m:02d}" for a, m in sorted(validas)]
 
 
 class WorkerLogs(Worker):

@@ -188,7 +188,7 @@ def test_financeiro_200_periodo_atual(monkeypatch):
     resposta = _client(monkeypatch).get("/financeiro", params={"granularidade": "mes"})
     assert resposta.status_code == 200
     corpo = resposta.json()
-    assert corpo["vendas"] == []  # `metricas_faturamento` vazia no fake de query
+    assert corpo["notas"] == []  # `notas_financeiro` vazia no fake de query
 
 
 def test_financeiro_400_periodo_inteiramente_no_futuro(monkeypatch):
@@ -210,12 +210,12 @@ def test_sem_token_401(monkeypatch):
 def test_geral_em_dia_busca_faturamento_do_dia_e_do_mes_corrente(monkeypatch):
     """Cards escuros (Faturamento/Liquidado) são sempre do MÊS; o resto da
     página segue o recorte pedido — então sob `dia` a rota faz DUAS consultas a
-    `metricas_faturamento`, uma por intervalo."""
+    `notas_financeiro`, uma por intervalo."""
     intervalos: list[str] = []
 
     def query_espiã(tabela, filtros=None, schema="dash", colunas="*", **kwargs):
-        if tabela == "metricas_faturamento":
-            intervalos.append((filtros or {})["and"])
+        if tabela == "notas_financeiro":
+            intervalos.append((filtros or {})["or"])
         return _fake_query(tabela, filtros, schema, colunas, **kwargs)
 
     monkeypatch.setattr(fontes_banco_mod, "query", query_espiã)
@@ -230,8 +230,8 @@ def test_geral_em_dia_busca_faturamento_do_dia_e_do_mes_corrente(monkeypatch):
     assert resposta.status_code == 200
 
     assert len(intervalos) == 2
-    assert "data_venda.gte.2026-09-14" in intervalos[0]  # tabela/pódios: só o dia
-    assert "data_venda.gte.2026-09-01" in intervalos[1]  # cards escuros: o mês
+    assert any("data_referencia.gte.2026-09-14" in i for i in intervalos)  # tabela/pódios: só o dia
+    assert any("data_referencia.gte.2026-09-01" in i for i in intervalos)  # cards escuros: o mês
 
 
 def test_funil_linkedin_200_com_contas_do_periodo(monkeypatch):
@@ -329,6 +329,55 @@ def test_funil_sem_seller_ligado_nao_tem_meta(monkeypatch):
     assert corpo["meta_numeros_captados"] is None
 
 
+def test_seller_200_com_numeros_captados_do_mes_de_hoje_e_meta_por_seller(monkeypatch):
+    from app.dominios.funil import rotas as funil_rotas_mod
+
+    monkeypatch.setattr(
+        f"{__name__}._USERS",
+        [
+            *_USERS,
+            {"id": 4, "nome": "Duda", "email": None, "imagem_url": None, "active": True},
+            {"id": 13, "nome": "Lucas", "email": None, "imagem_url": "l.png", "active": True},
+        ],
+    )
+    monkeypatch.setattr(
+        f"{__name__}._USER_CARGOS",
+        [*_USER_CARGOS, {"id_user": 4, "cargo": "seller"}, {"id_user": 13, "cargo": "seller"}],
+    )
+    monkeypatch.setattr(f"{__name__}._CONTAS", [{"id": 1, "nome": "Jacob", "id_seller": 4}])
+    cliente = _client(monkeypatch)
+    monkeypatch.setattr(
+        fontes_supabase_mod,
+        "ler_metas",
+        lambda: [{"id_user": 13, "cargo": "seller", "metrica": "numeros_captados", "valor_diario": 3}],
+    )
+    monkeypatch.setattr(funil_rotas_mod, "hoje_sp", lambda: date(2026, 11, 2))
+    monkeypatch.setattr(
+        funil_pipedrive_mod,
+        "buscar_pipedrive",
+        lambda inicio, fim: DadosPipedrive(
+            [Fato("numeros_captados", "linkedin", 1, 501, "2026-11-02"), Fato("numeros_captados", "instagram", 1, 502, "2026-11-03")],
+            {501: (55,)},
+        ),
+    )
+    monkeypatch.setenv("PIPE_ID_ETIQUETA_PESSOA_LINKEDIN_JACOB", "55")
+
+    resposta = cliente.get("/seller", params={"granularidade": "mes", "periodo": "2026-11"})
+    assert resposta.status_code == 200
+    corpo = resposta.json()
+    assert corpo["periodo"] == {"granularidade": "mes", "inicio": "2026-11-01", "fim": "2026-11-30"}
+    assert corpo["avisos"] == []
+    assert corpo["sellers"] == [
+        {"id_user": "4", "nome": "Duda", "imagem_url": None, "numeros_captados": 2, "numeros_captados_hoje": 1, "meta": None},
+        {"id_user": "13", "nome": "Lucas", "imagem_url": "l.png", "numeros_captados": 0, "numeros_captados_hoje": 0, "meta": 66},
+    ]
+
+
+def test_seller_periodo_invalido_400(monkeypatch):
+    resposta = _client(monkeypatch).get("/seller", params={"granularidade": "mes", "periodo": "xx"})
+    assert resposta.status_code == 400
+
+
 def test_funil_com_pipedrive_fora_do_ar_avisa_e_zera(monkeypatch):
     cliente = _client(monkeypatch)
     monkeypatch.setattr(funil_pipedrive_mod, "buscar_pipedrive", _BUSCAR_PIPEDRIVE_REAL)
@@ -345,20 +394,30 @@ def test_funil_com_pipedrive_fora_do_ar_avisa_e_zera(monkeypatch):
         assert corpo["sem_conta"]["numeros_captados"] == 0
 
 
-def test_funil_instagram_vem_so_da_planilha_sem_consultar_o_pipedrive(monkeypatch):
-    # Decisão de 20/11/2026: o pipeline do Instagram no Pipedrive não é usado; a página volta para a planilha.
+def test_funil_instagram_abordagens_e_numeros_captados_vem_do_pipedrive_por_perfil(monkeypatch):
     cliente = _client(monkeypatch)
-
-    def nao_devia_chamar(inicio, fim):
-        raise AssertionError("/funil/instagram não deve consultar o Pipedrive")
-
-    monkeypatch.setattr(funil_pipedrive_mod, "buscar_pipedrive", nao_devia_chamar)
+    monkeypatch.setattr(
+        funil_pipedrive_mod,
+        "buscar_pipedrive",
+        lambda inicio, fim: DadosPipedrive(
+            [
+                Fato("abordagens", "instagram", 5, 901, "2026-11-02"),
+                Fato("abordagens", "instagram", 5, 902, "2026-11-03"),
+                Fato("numeros_captados", "instagram", 5, 901, "2026-11-02"),
+                Fato("abordagens", "linkedin", 5, 901, "2026-11-02"),
+            ],
+            {901: (71,)},
+        ),
+    )
+    monkeypatch.setenv("PIPE_ID_ETIQUETA_PESSOA_INSTAGRAM_JACOB", "71")
 
     corpo = cliente.get("/funil/instagram", params={"granularidade": "mes", "periodo": "2026-11"}).json()
 
-    assert corpo["avisos"] == []
-    assert corpo["contas"][0]["metricas"]["conexoes_enviadas"] == 43
-    assert corpo["sem_conta"] == {k: 0 for k in corpo["contas"][0]["metricas"]}
+    assert corpo["contas"][0]["metricas"]["abordagens"] == 1
+    assert corpo["contas"][0]["metricas"]["numeros_captados"] == 1
+    assert corpo["contas"][0]["metricas"]["conexoes_enviadas"] == 43  # planilha continua
+    assert corpo["sem_conta"]["abordagens"] == 1
+    assert corpo["sem_conta"]["numeros_captados"] == 0
 
 
 def test_funil_canal_invalido_404(monkeypatch):
@@ -394,10 +453,10 @@ def test_funil_sdr_200_com_sdrs_e_metricas_do_dashboard(monkeypatch):
     corpo = resposta.json()
     assert set(corpo) == {"periodo", "dias_uteis", "avisos", "metricas_time", "funil", "sdrs", "evento"}
     assert corpo["evento"] is None  # sem Confraria agendada
-    # Oportunidades = números captados LinkedIn do Pipedrive (1 na conta + 1 sem conta) + Instagram da planilha (0;
-    # o Fato do Instagram no Pipedrive é ignorado) + indicações do SDR (1).
+    # Oportunidades = números captados LinkedIn do Pipedrive (1 na conta + 1 sem conta) + Instagram do Pipedrive (1, sem perfil → sem_conta)
+    # + indicações do SDR (1).
     assert corpo["funil"] == {
-        "numeros_captados": 2, "indicacoes": 1, "oportunidades": 3, "abordados": 2, "respondidos": 1, "inscritos": 3,
+        "numeros_captados": 3, "indicacoes": 1, "oportunidades": 4, "abordados": 2, "respondidos": 1, "inscritos": 3,
     }
     assert [(s["nome"], s["metricas"]["abordagens"], s["metricas"]["respondidos"], s["metricas"]["indicacoes"], s["metricas"]["inscricoes_realizadas"]) for s in corpo["sdrs"]] == [
         ("Nathan", 0, 0, 0, 3),
@@ -560,7 +619,7 @@ def test_sdr_200_com_ranking_previsao_e_serie_do_evento(monkeypatch):
 
     monkeypatch.setattr(rotas_funil_mod.sdr, "buscar_negocios_sdr", negocios_falso)
     monkeypatch.setattr(
-        rotas_funil_mod.sdr, "buscar_inscricoes_pipedrive", lambda inicio, fim, donos, hoje: {9: {"mes": 5, "hoje": 1}}
+        fontes_supabase_mod, "ler_metas_do_cargo", lambda cargo: [{"id_user": 9, "metrica": "inscricoes_realizadas", "valor_diario": 4}]
     )
     resposta = client.get("/sdr", params={"granularidade": "mes", "periodo": "2026-11"})
     assert resposta.status_code == 200
@@ -574,10 +633,10 @@ def test_sdr_200_com_ranking_previsao_e_serie_do_evento(monkeypatch):
     assert sdr["pontuacao"] == 62
     assert sdr["posicao"] == 1
     assert len(sdr["serie_evento"]) == 10  # 20/11 a 01/12 sem os domingos 22 e 29
-    assert sdr["ranking_mes"]["negocios"] == 40
-    assert sdr["ranking_mes"]["inscricoes"] == 5
-    assert sdr["ranking_mes"]["inscricoes_hoje"] == 1
+    # 3 da planilha (metricas_funil_sdr); meta = 4 × 21 dias seg–sex de novembro (evento em 02/12).
+    assert sdr["ranking_mes"] == {"negocios": 40, "inscricoes": 3, "inscricoes_hoje": 0, "meta": 84}
     assert corpo["mes_ranking"] == {"inicio": "2026-11-01", "fim": "2026-11-30"}
+    assert corpo["janela_meta"] == {"inicio": "2026-11-01", "fim": "2026-11-30"}
     assert corpo["inscritos_sed_mes"] == 0  # o fake do SED não devolve inscrição no período
     assert pedidos == [(date(2026, 11, 1), date(2026, 11, 30))]
 

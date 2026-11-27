@@ -101,8 +101,8 @@ def test_settings_le_envs_do_pipedrive(monkeypatch):
     monkeypatch.setenv("PIPE_TOKEN", "tok")
     monkeypatch.setenv("PIPE_BASE_URL_V2", "https://x.pipedrive.com/api/v2/")
     monkeypatch.setenv("PIPE_ID_PIPELINE_INSTAGRAM", "3")
-    monkeypatch.setenv("PIPE_ID_ABORDADOS_PIPELINE_LINKEDIN", "11")
-    monkeypatch.setenv("PIPE_ID_RESPONDIDOS_PIPELINE_LINKEDIN", "12")
+    monkeypatch.setenv("PIPE_ID_ABORDADOS_PIPELINE_PRINCIPAL", "11")
+    monkeypatch.setenv("PIPE_ID_RESPONDIDOS_PIPELINE_PRINCIPAL", "12")
     monkeypatch.setenv("PIPE_ID_ABORDADOS_PIPELINE_INSTAGRAM", "21")
     monkeypatch.setenv("PIPE_ID_RESPONDIDOS_PIPELINE_INSTAGRAM", "22")
     monkeypatch.setenv("PIPE_ID_ETIQUETA_NEGOCIO_LINKEDIN", "101")
@@ -113,8 +113,8 @@ def test_settings_le_envs_do_pipedrive(monkeypatch):
     assert s.pipe_token == "tok"
     assert s.pipe_base_url_v2 == "https://x.pipedrive.com/api/v2"
     assert s.pipe_id_pipeline_instagram == 3
-    assert s.pipe_id_abordados_pipeline_linkedin == 11
-    assert s.pipe_id_respondidos_pipeline_linkedin == 12
+    assert s.pipe_id_abordados_pipeline_principal == 11
+    assert s.pipe_id_respondidos_pipeline_principal == 12
     assert s.pipe_id_abordados_pipeline_instagram == 21
     assert s.pipe_id_respondidos_pipeline_instagram == 22
     assert s.pipe_id_etiqueta_negocio_linkedin == 101
@@ -129,16 +129,26 @@ def test_settings_le_envs_do_pipedrive(monkeypatch):
     assert s.pipe_id_pipeline_instagram is None
 
 
-def test_pipe_id_inscrito_pipeline_linkedin_vem_do_env(monkeypatch):
-    monkeypatch.setenv("PIPE_ID_INSCRITO_PIPELINE_LINKEDIN", "7")
+def test_envs_do_pipeline_principal_vem_do_env(monkeypatch):
+    monkeypatch.setenv("PIPE_ID_INSCRITO_PIPELINE_PRINCIPAL", "7")
+    monkeypatch.setenv("PIPE_ID_ONBOARDING_AGENDADO_PIPELINE_PRINCIPAL", "44")
+    monkeypatch.setenv("PIPE_ID_ONBOARDING_REALIZADO_PIPELINE_PRINCIPAL", "46")
+    monkeypatch.setenv("PIPE_ID_OPORTUNIDADES_PIPELINE_PRINCIPAL", "1")
+    monkeypatch.setenv("PIPE_ID_ETIQUETA_NEGOCIO_INSTAGRAM", "127")
+    monkeypatch.setenv("PIPE_ID_INSCRITO_PIPELINE_LINKEDIN", "99")
 
     s = config.Settings()
 
-    assert s.pipe_id_inscrito_pipeline_linkedin == 7
+    assert s.pipe_id_inscrito_pipeline_principal == 7
+    assert s.pipe_id_onboarding_agendado_pipeline_principal == 44
+    assert s.pipe_id_onboarding_realizado_pipeline_principal == 46
+    assert s.pipe_id_oportunidades_pipeline_principal == 1
+    assert s.pipe_id_etiqueta_negocio_instagram == 127
+    assert not hasattr(s, "pipe_id_inscrito_pipeline_linkedin")
 
-    monkeypatch.delenv("PIPE_ID_INSCRITO_PIPELINE_LINKEDIN", raising=False)
+    monkeypatch.delenv("PIPE_ID_OPORTUNIDADES_PIPELINE_PRINCIPAL")
 
-    assert config.Settings().pipe_id_inscrito_pipeline_linkedin is None
+    assert config.Settings().pipe_id_oportunidades_pipeline_principal is None
 
 
 def test_schema_vem_de_nome_schema(monkeypatch):

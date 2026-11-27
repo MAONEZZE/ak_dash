@@ -14,9 +14,9 @@ from app.periodo import TZ_SP
 from app.planilhas import COLUNAS_POR_TABELA
 
 # Métricas que o Pipedrive sobrescreve em cada página de canal (o resto vem da planilha).
-# Instagram fica 100% na planilha: o pipeline "Prospecção Insta" não é usado (decisão de 20/11/2026).
 METRICAS_POR_CANAL: dict[str, tuple[str, ...]] = {
     "linkedin": ("numeros_captados",),
+    "instagram": ("abordagens", "numeros_captados"),
 }
 # Colunas de metricas_funil_sdr que vêm do Pipedrive.
 METRICAS_SDR = ("abordagens", "respondidos", "indicacoes")
@@ -51,7 +51,7 @@ def _no_periodo(d: str | None, inicio: date, fim: date) -> bool:
 
 
 def contar(criados: list[dict], inicio: date, fim: date) -> list[Fato]:
-    """Fatos dos negócios criados no período [inicio, fim] (datas em SP), por add_time: números captados e indicações."""
+    """Fatos dos negócios criados no período [inicio, fim] (datas em SP), por add_time: números captados do LinkedIn (etiqueta de negócio) e indicações."""
     fatos: list[Fato] = []
     for n in criados:
         d = _data_sp(n.get("add_time"))
@@ -61,8 +61,6 @@ def contar(criados: list[dict], inicio: date, fim: date) -> list[Fato]:
         dono, pessoa = n.get("owner_id"), n.get("person_id")
         if settings.pipe_id_etiqueta_negocio_linkedin is not None and settings.pipe_id_etiqueta_negocio_linkedin in etiquetas:
             fatos.append(Fato("numeros_captados", "linkedin", dono, pessoa, d))
-        if settings.pipe_id_pipeline_instagram is not None and n.get("pipeline_id") == settings.pipe_id_pipeline_instagram:
-            fatos.append(Fato("numeros_captados", "instagram", dono, pessoa, d))
         if settings.pipe_id_etiqueta_negocio_indicacao is not None and settings.pipe_id_etiqueta_negocio_indicacao in etiquetas:
             fatos.append(Fato("indicacoes", None, dono, pessoa, d))
     return fatos
@@ -71,8 +69,8 @@ def contar(criados: list[dict], inicio: date, fim: date) -> list[Fato]:
 def _estagios() -> dict[int, tuple[str, str]]:
     """Id do estágio no Pipedrive -> (métrica, canal), só dos configurados."""
     estagios = {
-        settings.pipe_id_abordados_pipeline_linkedin: ("abordagens", "linkedin"),
-        settings.pipe_id_respondidos_pipeline_linkedin: ("respondidos", "linkedin"),
+        settings.pipe_id_abordados_pipeline_principal: ("abordagens", "linkedin"),
+        settings.pipe_id_respondidos_pipeline_principal: ("respondidos", "linkedin"),
         settings.pipe_id_abordados_pipeline_instagram: ("abordagens", "instagram"),
         settings.pipe_id_respondidos_pipeline_instagram: ("respondidos", "instagram"),
     }
@@ -102,17 +100,42 @@ def contar_entradas(entradas: list[dict], inicio: date, fim: date) -> list[Fato]
     return fatos
 
 
+def contar_oportunidades_instagram(entradas: list[dict], etiquetas_dos_negocios: dict[int, tuple[int, ...]], inicio: date, fim: date) -> list[Fato]:
+    """Números captados do Instagram: negócios que entraram no período (data em SP) na Oportunidade feita do pipeline principal e têm a etiqueta de negócio PROSP_INSTA. `entradas` vem do histórico do WorkerPipedrive."""
+    estagio = settings.pipe_id_oportunidades_pipeline_principal
+    etiqueta = settings.pipe_id_etiqueta_negocio_instagram
+    if estagio is None or etiqueta is None:
+        return []
+    fatos: list[Fato] = []
+    for e in sorted(entradas, key=lambda e: (e["entrou_em"], e["id_deal"])):
+        if e["id_estagio"] != estagio:
+            continue
+        d = _data_sp(e["entrou_em"])
+        if not _no_periodo(d, inicio, fim) or etiqueta not in etiquetas_dos_negocios.get(e["id_deal"], ()):
+            continue
+        fatos.append(Fato("numeros_captados", "instagram", e.get("id_dono"), e.get("id_pessoa"), d))
+    return fatos
+
+
 def _buscar(inicio: date, fim: date) -> DadosPipedrive:
     desde = datetime.combine(inicio, time.min, tzinfo=TZ_SP)
     ate = datetime.combine(fim + timedelta(days=1), time.min, tzinfo=TZ_SP)
+    oportunidade = settings.pipe_id_oportunidades_pipeline_principal
+    estagios = sorted({*_estagios(), *([oportunidade] if oportunidade is not None else [])})
     criados, entradas = em_paralelo(
         lambda: api.negocios_criados_desde(desde),
-        lambda: supabase.ler_entradas_estagio(list(_estagios()), desde, ate) if _estagios() else [],
+        lambda: supabase.ler_entradas_estagio(estagios, desde, ate) if estagios else [],
     )
-    fatos = contar(criados, inicio, fim) + contar_entradas(entradas, inicio, fim)
-    # Só os números captados vão para a conta pela etiqueta da pessoa (`aplicar_em_contas`).
+    ids_oportunidade = [e["id_deal"] for e in entradas if e["id_estagio"] == oportunidade]
+    etiquetas_negocios = api.etiquetas_dos_negocios(ids_oportunidade) if ids_oportunidade else {}
+    fatos = (
+        contar(criados, inicio, fim)
+        + contar_entradas(entradas, inicio, fim)
+        + contar_oportunidades_instagram(entradas, etiquetas_negocios, inicio, fim)
+    )
+    # Só as métricas que vão para a conta (METRICAS_POR_CANAL) precisam da etiqueta da pessoa.
     etiquetas = api.etiquetas_das_pessoas(
-        [f.id_pessoa for f in fatos if f.metrica == "numeros_captados" and f.id_pessoa is not None]
+        [f.id_pessoa for f in fatos if f.id_pessoa is not None and f.metrica in METRICAS_POR_CANAL.get(f.canal, ())]
     )
     return DadosPipedrive(fatos, etiquetas)
 

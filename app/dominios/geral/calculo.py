@@ -26,7 +26,7 @@ _METRICAS_SDR_TABELA = (
 # Inscritos/Aprovados saíram daqui: viraram `eventos` na resposta — não são
 # mais um número do período, e sim os próximos eventos girando no card.
 #
-# Realizado dos escuros vem de `dash.metricas_faturamento` (número fechado da
+# Realizado dos escuros vem de `dash.notas_financeiro` (número fechado da
 # empresa) SEMPRE DO MÊS (`faturamento_mes`), nunca do recorte pedido — e SEM
 # meta: faturamento e liquidado nunca tiveram (faturamento) ou
 # não têm mais (liquidado) uma composição de pessoas que os carregue, então

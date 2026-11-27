@@ -22,17 +22,19 @@ def _ids(monkeypatch):
         dataclasses.replace(
             pipedrive.settings,
             pipe_id_pipeline_instagram=3,
-            pipe_id_abordados_pipeline_linkedin=11,
-            pipe_id_respondidos_pipeline_linkedin=12,
+            pipe_id_abordados_pipeline_principal=11,
+            pipe_id_respondidos_pipeline_principal=12,
             pipe_id_abordados_pipeline_instagram=21,
             pipe_id_respondidos_pipeline_instagram=22,
             pipe_id_etiqueta_negocio_linkedin=101,
             pipe_id_etiqueta_negocio_indicacao=102,
+            pipe_id_oportunidades_pipeline_principal=1,
+            pipe_id_etiqueta_negocio_instagram=127,
         ),
     )
 
 
-def test_criado_no_periodo_vira_numero_captado_do_canal():
+def test_criado_no_periodo_com_etiqueta_linkedin_vira_numero_captado_e_pipeline_instagram_nao():
     a = {"id": 1, "add_time": "2026-11-05T15:00:00Z", "pipeline_id": 1, "label_ids": [101], "owner_id": 25564860, "person_id": 501}
     # 23h do dia 04 em SP
     b = {"id": 2, "add_time": "2026-11-05T02:00:00Z", "pipeline_id": 3, "label_ids": [], "owner_id": 28932026, "person_id": 502}
@@ -43,7 +45,6 @@ def test_criado_no_periodo_vira_numero_captado_do_canal():
 
     assert pipedrive.contar([a, b, c, d], date(2026, 11, 1), date(2026, 11, 30)) == [
         Fato("numeros_captados", "linkedin", 25564860, 501, "2026-11-05"),
-        Fato("numeros_captados", "instagram", 28932026, 502, "2026-11-04"),
     ]
 
 
@@ -72,7 +73,7 @@ def test_quem_entrou_em_respondido_conta_tambem_como_abordado_uma_vez(monkeypatc
     monkeypatch.setattr(
         pipedrive,
         "settings",
-        dataclasses.replace(pipedrive.settings, pipe_id_abordados_pipeline_linkedin=2, pipe_id_respondidos_pipeline_linkedin=3),
+        dataclasses.replace(pipedrive.settings, pipe_id_abordados_pipeline_principal=2, pipe_id_respondidos_pipeline_principal=3),
     )
     entradas = [
         # negócio 10: só entrou em Respondidos
@@ -128,12 +129,13 @@ def test_buscar_pipedrive_junta_criados_e_entradas_do_historico(monkeypatch):
         lambda ids, desde, ate: entradas_pedidas.append((sorted(ids), desde, ate)) or [E],
     )
     monkeypatch.setattr(pipedrive.api, "etiquetas_das_pessoas", etiquetas)
+    monkeypatch.setattr(pipedrive.api, "etiquetas_dos_negocios", lambda ids: {})
 
     resultado = pipedrive.buscar_pipedrive(date(2026, 11, 1), date(2026, 11, 30))
 
     desde = datetime(2026, 11, 1, tzinfo=TZ_SP)
     assert criados == [desde]
-    assert entradas_pedidas == [([11, 12, 21, 22], desde, datetime(2026, 12, 1, tzinfo=TZ_SP))]
+    assert entradas_pedidas == [([1, 11, 12, 21, 22], desde, datetime(2026, 12, 1, tzinfo=TZ_SP))]
     # só os números captados precisam da etiqueta da pessoa
     assert pessoas_pedidas == [501]
     assert resultado == pipedrive.DadosPipedrive(
@@ -209,4 +211,62 @@ def test_linhas_sdr_somam_por_sdr_e_dia_so_dos_donos_sdr():
         {"id_user": 11, "data": "2026-11-10", "abordagens": 2, "respondidos": 0, "indicacoes": 0},
         {"id_user": 14, "data": "2026-11-10", "abordagens": 0, "respondidos": 0, "indicacoes": 1},
         {"id_user": 14, "data": "2026-11-11", "abordagens": 0, "respondidos": 1, "indicacoes": 0},
+    ]
+
+
+def test_entrada_na_oportunidade_feita_com_prosp_insta_vira_numero_captado_do_instagram(monkeypatch):
+    entradas = [
+        {"id_deal": 30, "id_estagio": 1, "entrou_em": "2026-11-10T13:00:00+00:00", "id_dono": 5, "id_pessoa": 801},
+        # sem a etiqueta
+        {"id_deal": 31, "id_estagio": 1, "entrou_em": "2026-11-11T13:00:00+00:00", "id_dono": 5, "id_pessoa": 802},
+        # 22h do dia 30/11 em SP
+        {"id_deal": 32, "id_estagio": 1, "entrou_em": "2026-12-01T01:00:00+00:00", "id_dono": 6, "id_pessoa": 803},
+        # entrou antes do início
+        {"id_deal": 33, "id_estagio": 1, "entrou_em": "2026-10-31T13:00:00+00:00", "id_dono": 5, "id_pessoa": 804},
+        # outro estágio
+        {"id_deal": 34, "id_estagio": 21, "entrou_em": "2026-11-12T13:00:00+00:00", "id_dono": 5, "id_pessoa": 805},
+    ]
+    etiquetas = {30: (127, 5), 31: (126,), 32: (127,), 33: (127,), 34: (127,)}
+
+    assert pipedrive.contar_oportunidades_instagram(entradas, etiquetas, date(2026, 11, 1), date(2026, 11, 30)) == [
+        Fato("numeros_captados", "instagram", 5, 801, "2026-11-10"),
+        Fato("numeros_captados", "instagram", 6, 803, "2026-11-30"),
+    ]
+
+    monkeypatch.setattr(pipedrive, "settings", dataclasses.replace(pipedrive.settings, pipe_id_etiqueta_negocio_instagram=None))
+    assert pipedrive.contar_oportunidades_instagram(entradas, etiquetas, date(2026, 11, 1), date(2026, 11, 30)) == []
+
+
+def test_buscar_pipedrive_le_a_oportunidade_feita_e_pede_etiquetas_dos_negocios_dela(monkeypatch):
+    estagios_pedidos = []
+    negocios_pedidos = []
+    pessoas_pedidas = []
+    O = {"id_deal": 30, "id_estagio": 1, "entrou_em": "2026-11-10T13:00:00+00:00", "id_dono": 5, "id_pessoa": 801}
+    I = {"id_deal": 40, "id_estagio": 21, "entrou_em": "2026-11-11T13:00:00+00:00", "id_dono": 5, "id_pessoa": 901}
+
+    def ler_entradas(ids, desde, ate):
+        estagios_pedidos.extend(sorted(ids))
+        return [O, I]
+
+    def etiquetas_negocios(ids):
+        negocios_pedidos.extend(ids)
+        return {30: (127,)}
+
+    def etiquetas_pessoas(ids):
+        pessoas_pedidas.extend(ids)
+        return {801: (190,), 901: (71,)}
+
+    monkeypatch.setattr(pipedrive.api, "negocios_criados_desde", lambda inicio: [])
+    monkeypatch.setattr(pipedrive.supabase, "ler_entradas_estagio", ler_entradas)
+    monkeypatch.setattr(pipedrive.api, "etiquetas_dos_negocios", etiquetas_negocios)
+    monkeypatch.setattr(pipedrive.api, "etiquetas_das_pessoas", etiquetas_pessoas)
+
+    resultado = pipedrive.buscar_pipedrive(date(2026, 11, 1), date(2026, 11, 30))
+
+    assert estagios_pedidos == [1, 11, 12, 21, 22]
+    assert negocios_pedidos == [30]
+    assert pessoas_pedidas == [901, 801]
+    assert resultado.fatos == [
+        Fato("abordagens", "instagram", 5, 901, "2026-11-11"),
+        Fato("numeros_captados", "instagram", 5, 801, "2026-11-10"),
     ]
