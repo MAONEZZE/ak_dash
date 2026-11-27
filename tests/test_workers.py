@@ -540,6 +540,27 @@ def test_financeiro_segundo_ciclo_so_apaga_a_linha_que_saiu_da_aba(monkeypatch):
     assert banco.apagados == [("notas_financeiro", {"mes": "eq.2026-11-01", "linha": "in.(3)"})]
 
 
+def test_financeiro_mes_sem_aba_nao_apaga_e_aba_sem_colunas_registra_erro(monkeypatch):
+    banco = _Banco({"users": [], "notas_financeiro": [{"chave": "2026-12:2", "mes": "2026-12-01", "linha": 2, "cliente": "X"}]})
+    _instalar(monkeypatch, banco)
+    fonte = {"abas": []}
+    w = workers.WorkerFinanceiro("ID_FIN", 2026, lambda _id: fonte["abas"], hoje=lambda: date(2026, 12, 1))
+
+    fonte["abas"] = [("NFS outubro", [CAB_NFS, ["Bia", "upsell", 2000, None, None, "Boleto", None]])]
+    w.executar_ciclo()
+
+    assert banco.apagados == []
+    assert banco.upserts == []
+    assert w.status["ultimo_erro"] is None
+
+    fonte["abas"] = [("NFS dezembro", [["Cliente", "Valor contábil"], ["Y", 10]])]
+    w.executar_ciclo()
+
+    assert w.status["ultimo_erro"]["mensagem"] == "ValueError: aba NFS 12/2026 sem as colunas Cliente e Valor pago"
+    assert banco.upserts == []
+    assert banco.apagados == []
+
+
 CABECALHO_LOGS = ["Data", "Hora", "Usuario da ação", "Atividade feita", "Ação evento", "Nome do Cliente", "Telefone do Cliente"]
 LOG_1 = ["05/08/2026", "18:18", "Jennifer Pamplona", "Números Captados", "adição", "Isaque Costa", "31 987130727"]
 LOG_2 = ["06/08/2026", "10:19", "Thalyson", "Reuniões Agendadas", "adição", "Katia"]
