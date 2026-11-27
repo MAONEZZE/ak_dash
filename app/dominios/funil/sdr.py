@@ -176,12 +176,14 @@ def mes_do_ranking(periodo: Periodo) -> tuple[date, date]:
     return inicio, proximo - timedelta(days=1)
 
 
-def janela_da_meta(mes: tuple[date, date], data_evento: date | None) -> tuple[date, date] | None:
-    """Janela da meta do ranking: do 1º dia do mês até a véspera do evento, no máximo até o fim do mês. Sem evento: o mês. Véspera antes do mês: `None`."""
-    fim = mes[1] if data_evento is None else min(mes[1], data_evento - timedelta(days=1))
-    if fim < mes[0]:
-        return None
-    return mes[0], fim
+def janela_da_meta(mes: tuple[date, date], data_evento: date | None, inicio_evento: date | None) -> tuple[date, date] | None:
+    """Janela da meta do ranking: de `inicio_evento` (1ª inscrição ou criação do evento no SED) até a véspera do evento,
+    atravessando o mês. Sem evento: o mês. Sem `inicio_evento`: começa no 1º dia do mês. Véspera antes do início: `None`."""
+    if data_evento is None:
+        return mes
+    inicio = inicio_evento or mes[0]
+    fim = data_evento - timedelta(days=1)
+    return None if fim < inicio else (inicio, fim)
 
 
 def inscricoes_do_mes(linhas: list[dict], ids: list[int], hoje: date) -> dict[int, dict[str, int]]:

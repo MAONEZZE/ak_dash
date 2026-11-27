@@ -290,6 +290,7 @@ def get_pagina_sdr(
 
     # Janela de inscrição do evento: da primeira inscrição até a véspera, sem domingos.
     dias: list[date] = []
+    primeira: date | None = None
     if dados_evento is not None and dados_evento.data:
         primeira = obter_ou_calcular(
             f"evento:{dados_evento.id}:primeira-inscricao", ttl, lambda: sdr.data_primeira_inscricao(dados_evento.id)
@@ -343,7 +344,8 @@ def get_pagina_sdr(
     )
     inscricoes_mes = sdr.inscricoes_do_mes(linhas_mes, [s["id"] for s in sdrs], hoje)
     data_evento = funil_evento.data_do_evento_sp(dados_evento.data) if dados_evento is not None and dados_evento.data else None
-    janela_meta = sdr.janela_da_meta((inicio_mes, fim_mes), data_evento)
+    criado_em = funil_evento.data_do_evento_sp(dados_evento.criado_em) if dados_evento is not None and dados_evento.criado_em else None
+    janela_meta = sdr.janela_da_meta((inicio_mes, fim_mes), data_evento, primeira or criado_em)
     return {
         **sdr.montar_resposta_pagina_sdr(
             p, sdrs, linhas, linhas_janela, ligacoes, metas, evento_dict, dias, hoje=hoje,

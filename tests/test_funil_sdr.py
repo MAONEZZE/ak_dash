@@ -292,13 +292,13 @@ def test_mes_do_ranking_e_o_mes_do_fim_do_filtro():
     assert sdr.mes_do_ranking(resolver_periodo("mes", "2026-12")) == (date(2026, 12, 1), date(2026, 12, 31))
 
 
-def test_janela_da_meta_vai_do_dia_1_a_vespera_do_evento_no_maximo_o_fim_do_mes():
+def test_janela_da_meta_vai_do_inicio_do_evento_a_vespera_atravessando_o_mes():
     mes = (date(2026, 11, 1), date(2026, 11, 30))
-    assert sdr.janela_da_meta(mes, date(2026, 11, 26)) == (date(2026, 11, 1), date(2026, 11, 25))
-    assert sdr.janela_da_meta(mes, date(2026, 12, 2)) == (date(2026, 11, 1), date(2026, 11, 30))
-    assert sdr.janela_da_meta(mes, None) == (date(2026, 11, 1), date(2026, 11, 30))
-    assert sdr.janela_da_meta(mes, date(2026, 11, 1)) is None
-    assert sdr.janela_da_meta(mes, date(2026, 10, 20)) is None
+    assert sdr.janela_da_meta(mes, date(2026, 12, 2), date(2026, 11, 20)) == (date(2026, 11, 20), date(2026, 12, 1))
+    assert sdr.janela_da_meta(mes, date(2026, 12, 2), None) == (date(2026, 11, 1), date(2026, 12, 1))
+    assert sdr.janela_da_meta(mes, None, None) == mes
+    assert sdr.janela_da_meta(mes, date(2026, 11, 26), date(2026, 11, 10)) == (date(2026, 11, 10), date(2026, 11, 25))
+    assert sdr.janela_da_meta(mes, date(2026, 11, 20), date(2026, 11, 20)) is None
 
 
 def test_ranking_do_mes_usa_inscricoes_da_planilha_e_meta_diaria_vezes_dias_uteis_da_janela():

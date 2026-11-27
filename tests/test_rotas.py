@@ -633,12 +633,44 @@ def test_sdr_200_com_ranking_previsao_e_serie_do_evento(monkeypatch):
     assert sdr["pontuacao"] == 62
     assert sdr["posicao"] == 1
     assert len(sdr["serie_evento"]) == 10  # 20/11 a 01/12 sem os domingos 22 e 29
-    # 3 da planilha (metricas_funil_sdr); meta = 4 × 21 dias seg–sex de novembro (evento em 02/12).
-    assert sdr["ranking_mes"] == {"negocios": 40, "inscricoes": 3, "inscricoes_hoje": 0, "meta": 84}
+    # 3 da planilha (metricas_funil_sdr); meta = 4 × 8 dias seg–sex de 20/11 (1ª inscrição) a 01/12 (véspera do evento).
+    assert sdr["ranking_mes"] == {"negocios": 40, "inscricoes": 3, "inscricoes_hoje": 0, "meta": 32}
     assert corpo["mes_ranking"] == {"inicio": "2026-11-01", "fim": "2026-11-30"}
-    assert corpo["janela_meta"] == {"inicio": "2026-11-01", "fim": "2026-11-30"}
+    assert corpo["janela_meta"] == {"inicio": "2026-11-20", "fim": "2026-12-01"}
     assert corpo["inscritos_sed_mes"] == 0  # o fake do SED não devolve inscrição no período
     assert pedidos == [(date(2026, 11, 1), date(2026, 11, 30))]
+
+
+def test_sdr_evento_sem_inscricao_meta_comeca_na_criacao_do_evento(monkeypatch):
+    from app.dominios.funil import rotas as rotas_funil_mod
+
+    client = _client(monkeypatch)
+    monkeypatch.setattr(rotas_funil_mod, "hoje_sp", lambda: date(2026, 11, 23))
+
+    def query_sem_inscricao(tabela, filtros=None, *a, **kw):
+        if tabela == "events":
+            return [
+                {
+                    "id": "e1",
+                    "title": "Imersão",
+                    "event_date": "2026-12-02T16:00:00+00:00",
+                    "capacity": 60,
+                    "created_at": "2026-11-10T14:00:00+00:00",
+                }
+            ]
+        if tabela == "registrations":
+            return []
+        return _fake_query(tabela, filtros, *a, **kw)
+
+    monkeypatch.setattr(fontes_banco_mod, "query", query_sem_inscricao)
+    monkeypatch.setattr(rotas_funil_mod.sdr, "buscar_negocios_sdr", lambda inicio, fim, id_dash_por_dono: {})
+    monkeypatch.setattr(
+        fontes_supabase_mod, "ler_metas_do_cargo", lambda cargo: [{"id_user": 9, "metrica": "inscricoes_realizadas", "valor_diario": 4}]
+    )
+    resposta = client.get("/sdr", params={"granularidade": "mes", "periodo": "2026-11"})
+    assert resposta.status_code == 200
+    corpo = resposta.json()
+    assert corpo["janela_meta"] == {"inicio": "2026-11-10", "fim": "2026-12-01"}
 
 
 def test_sdr_evento_com_caractere_invalido_400(monkeypatch):
