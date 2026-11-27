@@ -1,7 +1,7 @@
 """Leitura e escrita do Supabase principal (schema `NOME_SCHEMA`, hoje `dash_new`), uma função por dado. Leitura degrada para `[]` com aviso `fonte_indisponivel:<tabela>` (via `banco.query`); escrita levanta erro (workers)."""
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 
 from app.fontes import banco
 from app.planilhas import COLUNAS_POR_TABELA
@@ -29,36 +29,6 @@ def ler_metricas_do_cargo(cargo: str, ids: list[int], inicio: date, fim: date) -
         },
         colunas="data,id_user,metrica,valor,conta",
     )
-
-
-def ler_vendas_do_periodo(inicio: date, fim: date) -> list[dict]:
-    return banco.query(
-        "metricas_faturamento",
-        {"and": f"(data_venda.gte.{inicio.isoformat()},data_venda.lt.{(fim + timedelta(days=1)).isoformat()})"},
-    )
-
-
-def ler_recebimentos_do_periodo(inicio: date, fim: date) -> list[dict]:
-    return banco.query(
-        "recebimentos_faturamento",
-        {"and": f"(mes.gte.{inicio.replace(day=1).isoformat()},mes.lte.{fim.isoformat()})"},
-    )
-
-
-def ler_vendas_por_id_planilha(ids: list[int], colunas: str = "*") -> list[dict]:
-    return banco.query(
-        "metricas_faturamento",
-        {"id_planilha": f"in.({','.join(map(str, ids))})"},
-        colunas=colunas,
-    )
-
-
-def ler_clientes_por_id(ids: list[int]) -> list[dict]:
-    return banco.query("cliente_faturamento", {"id": f"in.({','.join(str(i) for i in ids)})"})
-
-
-def ler_usuarios_por_id(ids: list[int]) -> list[dict]:
-    return banco.query("users", {"id": f"in.({','.join(str(i) for i in ids)})"})
 
 
 def ler_logs_do_periodo(inicio: date, fim: date) -> list[dict]:
@@ -146,46 +116,6 @@ def gravar_metricas_contas(linhas: list[dict]) -> None:
 
 def gravar_contas_funil(linhas: list[dict]) -> None:
     banco.upsert("contas_funil", linhas, on_conflict="canal,nome")
-
-
-def ler_vendas_com_id_planilha(colunas: str) -> list[dict]:
-    return banco.query("metricas_faturamento", {"id_planilha": "not.is.null"}, colunas=colunas)
-
-
-def ler_todos_recebimentos() -> list[dict]:
-    return banco.query("recebimentos_faturamento", {}, colunas="id_planilha_venda,mes,pago,liquido")
-
-
-def ler_clientes() -> list[dict]:
-    return banco.query("cliente_faturamento", {}, colunas="id,nome,telefone")
-
-
-def gravar_clientes_por_telefone(linhas: list[dict]) -> None:
-    banco.upsert("cliente_faturamento", linhas, on_conflict="telefone")
-
-
-def gravar_clientes_por_id(linhas: list[dict]) -> None:
-    banco.upsert("cliente_faturamento", linhas, on_conflict="id")
-
-
-def gravar_vendas(linhas: list[dict]) -> None:
-    banco.upsert("metricas_faturamento", linhas, on_conflict="id_planilha")
-
-
-def gravar_recebimentos(linhas: list[dict]) -> None:
-    banco.upsert("recebimentos_faturamento", linhas, on_conflict="id_planilha_venda,mes")
-
-
-def apagar_vendas_sem_id_planilha() -> None:
-    banco.apagar("metricas_faturamento", {"id_planilha": "is.null"})
-
-
-def apagar_recebimento(id_planilha_venda: int, mes: str) -> None:
-    banco.apagar("recebimentos_faturamento", {"id_planilha_venda": f"eq.{id_planilha_venda}", "mes": f"eq.{mes}"})
-
-
-def apagar_vendas(ids: list[int]) -> None:
-    banco.apagar("metricas_faturamento", {"id_planilha": f"in.({','.join(map(str, ids))})"})
 
 
 def ler_notas_financeiro_dos_meses(meses: list[str]) -> list[dict]:

@@ -88,36 +88,6 @@ def test_ler_metricas_do_cargo_filtra_a_view_por_cargo_pessoas_e_datas(monkeypat
     "chamada, tabela, params_esperados",
     [
         (
-            lambda: supabase.ler_vendas_do_periodo(date(2026, 8, 1), date(2026, 8, 31)),
-            "metricas_faturamento",
-            {"select": "*", "and": "(data_venda.gte.2026-08-01,data_venda.lt.2026-09-01)"},
-        ),
-        (
-            lambda: supabase.ler_recebimentos_do_periodo(date(2026, 8, 20), date(2026, 12, 31)),
-            "recebimentos_faturamento",
-            {"select": "*", "and": "(mes.gte.2026-08-01,mes.lte.2026-12-31)"},
-        ),
-        (
-            lambda: supabase.ler_vendas_por_id_planilha([5, 7]),
-            "metricas_faturamento",
-            {"select": "*", "id_planilha": "in.(5,7)"},
-        ),
-        (
-            lambda: supabase.ler_vendas_por_id_planilha([5], colunas="id_planilha,user_closer"),
-            "metricas_faturamento",
-            {"select": "id_planilha,user_closer", "id_planilha": "in.(5)"},
-        ),
-        (
-            lambda: supabase.ler_clientes_por_id([3, 4]),
-            "cliente_faturamento",
-            {"select": "*", "id": "in.(3,4)"},
-        ),
-        (
-            lambda: supabase.ler_usuarios_por_id([1, 2]),
-            "users",
-            {"select": "*", "id": "in.(1,2)"},
-        ),
-        (
             lambda: supabase.ler_logs_do_periodo(date(2026, 11, 1), date(2026, 11, 30)),
             "logs_pipedrive",
             {"select": "data,hora,usuario_acao,atividade,cliente_nome", "and": "(data.gte.2026-11-01,data.lte.2026-11-30)"},
@@ -229,33 +199,6 @@ def test_funcoes_do_worker_base_mandam_a_requisicao_de_hoje(monkeypatch, chamada
     assert requisicao["url"] == f"https://sb.test/rest/v1/{tabela}"
     assert _sem_paginacao(requisicao["params"]) == params_esperados
     assert requisicao["json"] == json_esperado
-
-
-@pytest.mark.parametrize(
-    "chamada, metodo, tabela, params_esperados",
-    [
-        (lambda: supabase.ler_vendas_com_id_planilha("id_planilha,id_cliente,valor"), "GET", "metricas_faturamento", {"select": "id_planilha,id_cliente,valor", "id_planilha": "not.is.null"}),
-        (lambda: supabase.ler_todos_recebimentos(), "GET", "recebimentos_faturamento", {"select": "id_planilha_venda,mes,pago,liquido"}),
-        (lambda: supabase.ler_clientes(), "GET", "cliente_faturamento", {"select": "id,nome,telefone"}),
-        (lambda: supabase.gravar_clientes_por_telefone([{"a": 1}]), "POST", "cliente_faturamento", {"on_conflict": "telefone"}),
-        (lambda: supabase.gravar_clientes_por_id([{"a": 1}]), "POST", "cliente_faturamento", {"on_conflict": "id"}),
-        (lambda: supabase.gravar_vendas([{"a": 1}]), "POST", "metricas_faturamento", {"on_conflict": "id_planilha"}),
-        (lambda: supabase.gravar_recebimentos([{"a": 1}]), "POST", "recebimentos_faturamento", {"on_conflict": "id_planilha_venda,mes"}),
-        (lambda: supabase.apagar_vendas_sem_id_planilha(), "DELETE", "metricas_faturamento", {"id_planilha": "is.null"}),
-        (lambda: supabase.apagar_recebimento(5, "2026-08-01"), "DELETE", "recebimentos_faturamento", {"id_planilha_venda": "eq.5", "mes": "eq.2026-08-01"}),
-        (lambda: supabase.apagar_vendas([5, 7]), "DELETE", "metricas_faturamento", {"id_planilha": "in.(5,7)"}),
-    ],
-)
-def test_funcoes_do_financeiro_mandam_a_requisicao_de_hoje(monkeypatch, chamada, metodo, tabela, params_esperados):
-    registros = _capturar(monkeypatch)
-
-    chamada()
-
-    assert len(registros) == 1
-    requisicao = registros[0]
-    assert requisicao["metodo"] == metodo
-    assert requisicao["url"] == f"https://sb.test/rest/v1/{tabela}"
-    assert _sem_paginacao(requisicao["params"]) == params_esperados
 
 
 @pytest.mark.parametrize(
