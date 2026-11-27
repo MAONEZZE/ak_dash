@@ -7,181 +7,36 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-import pytest
-
 from app.dominios.geral import banco as banco_mod
 from app.fontes import sed as sed_mod
 from app.fontes import supabase as supabase_mod
 
 
-# --- buscar_faturamento (dash.metricas_faturamento: uma linha por venda)
+# --- buscar_faturamento (dash.notas_financeiro: uma linha por nota)
 
 
-def _mockar_vendas(
-    monkeypatch,
-    linhas: list[dict],
-    recebimentos: list[dict] | None = None,
-    vendas_por_id: list[dict] | None = None,
-) -> list[tuple]:
+def test_faturamento_e_liquidado_vem_de_notas_financeiro(monkeypatch):
     chamadas: list[tuple] = []
-    catalogo = linhas if vendas_por_id is None else vendas_por_id
 
-    def _ler_vendas_do_periodo(inicio, fim):
-        chamadas.append(("ler_vendas_do_periodo", (inicio, fim)))
-        return linhas
+    def _ler_notas_financeiro_do_periodo(inicio, fim):
+        chamadas.append((inicio, fim))
+        return [
+            {"mes": "2026-11-01", "data_referencia": "2026-11-10", "valor_venda": 30000, "valor_pago": 5000, "id_vendedor": 1},
+            {"mes": "2026-11-01", "data_referencia": "2026-09-30", "valor_venda": 10000, "valor_pago": 2000, "id_vendedor": 3},
+            {"mes": "2026-10-01", "data_referencia": "2026-11-05", "valor_venda": 7000, "valor_pago": 999, "id_vendedor": 1},
+            {"mes": "2026-11-01", "data_referencia": "2026-11-01", "valor_venda": None, "valor_pago": 1000, "id_vendedor": None},
+        ]
 
-    def _ler_recebimentos_do_periodo(inicio, fim):
-        chamadas.append(("ler_recebimentos_do_periodo", (inicio, fim)))
-        return recebimentos or []
+    monkeypatch.setattr(supabase_mod, "ler_notas_financeiro_do_periodo", _ler_notas_financeiro_do_periodo)
+    resultado = banco_mod.buscar_faturamento(date(2026, 11, 1), date(2026, 11, 27), [1, 3])
 
-    def _ler_vendas_por_id_planilha(ids, colunas="*"):
-        chamadas.append(("ler_vendas_por_id_planilha", (ids, colunas)))
-        return [v for v in catalogo if v["id_planilha"] in ids]
-
-    monkeypatch.setattr(supabase_mod, "ler_vendas_do_periodo", _ler_vendas_do_periodo)
-    monkeypatch.setattr(supabase_mod, "ler_recebimentos_do_periodo", _ler_recebimentos_do_periodo)
-    monkeypatch.setattr(supabase_mod, "ler_vendas_por_id_planilha", _ler_vendas_por_id_planilha)
-    return chamadas
-
-
-def test_soma_varias_vendas_no_card_da_empresa(monkeypatch):
-    _mockar_vendas(
-        monkeypatch,
-        [
-            {"id_planilha": 1, "user_closer": 8, "valor_bruto_contrato": 400000, "liquido_entrada": 160019.64},
-            {"id_planilha": 2, "user_closer": 1, "valor_bruto_contrato": 165000, "liquido_entrada": 21737.70},
-            {"id_planilha": 3, "user_closer": 3, "valor_bruto_contrato": 60000, "liquido_entrada": 9000.00},
-        ],
-        [{"id_planilha_venda": 1, "mes": "2026-08-01", "liquido": 190757.34}],
-    )
-    resultado = banco_mod.buscar_faturamento(date(2026, 8, 1), date(2026, 8, 31), [1, 3, 8])
-    assert resultado.empresa["faturamento"] == 625000
-    assert resultado.empresa["liquidado"] == pytest.approx(190757.34)
-    assert resultado.empresa["inscritos"] is None
-    assert resultado.empresa["aprovados"] is None
-
-
-def test_agrupa_liquidado_por_user_closer(monkeypatch):
-    _mockar_vendas(
-        monkeypatch,
-        [
-            {"id_planilha": 1, "user_closer": 8, "valor_bruto_contrato": 300000, "liquido_entrada": 100000.00},
-            {"id_planilha": 2, "user_closer": 8, "valor_bruto_contrato": 100000, "liquido_entrada": 60019.64},
-            {"id_planilha": 3, "user_closer": 1, "valor_bruto_contrato": 165000, "liquido_entrada": 21737.70},
-        ],
-        [
-            {"id_planilha_venda": 1, "mes": "2026-08-01", "liquido": 100000.00},
-            {"id_planilha_venda": 2, "mes": "2026-08-01", "liquido": 60019.64},
-            {"id_planilha_venda": 3, "mes": "2026-08-01", "liquido": 21737.70},
-        ],
-    )
-    resultado = banco_mod.buscar_faturamento(date(2026, 8, 1), date(2026, 8, 31), [1, 8])
-    assert resultado.por_pessoa[8]["liquidado"] == 160019.64
-    assert resultado.por_pessoa[1]["liquidado"] == 21737.70
-    assert resultado.por_pessoa[8]["inscritos"] is None
-    assert resultado.por_pessoa[8]["aprovados"] is None
-
-
-def test_venda_sem_user_closer_entra_na_empresa_e_em_ninguem(monkeypatch):
-    _mockar_vendas(
-        monkeypatch,
-        [
-            {"id_planilha": 1, "user_closer": None, "valor_bruto_contrato": 60000, "liquido_entrada": 15000.00},
-            {"id_planilha": 2, "user_closer": 1, "valor_bruto_contrato": 20000, "liquido_entrada": 5000.00},
-        ],
-        [
-            {"id_planilha_venda": 1, "mes": "2026-08-01", "liquido": 15000.00},
-            {"id_planilha_venda": 2, "mes": "2026-08-01", "liquido": 5000.00},
-        ],
-    )
-    resultado = banco_mod.buscar_faturamento(date(2026, 8, 1), date(2026, 8, 31), [1])
-    assert resultado.empresa["faturamento"] == 80000
-    assert resultado.empresa["liquidado"] == 20000.00
-    assert list(resultado.por_pessoa.keys()) == [1]
-
-
-def test_periodo_sem_venda_da_zero_e_nao_erro(monkeypatch):
-    _mockar_vendas(monkeypatch, [])
-    resultado = banco_mod.buscar_faturamento(date(2026, 9, 1), date(2026, 9, 30), [1, 3, 8])
-    assert resultado.empresa["faturamento"] == 0
-    assert resultado.empresa["liquidado"] == 0
-    assert resultado.por_pessoa == {}
-
-
-def test_liquidado_soma_o_segundo_pagamento_da_venda(monkeypatch):
-    # Venda parcelada em duas formas (ex.: entrada no PIX + resto no cartão) —
-    # cada pagamento com seu próprio líquido. Faltava somar o segundo: era
-    # esse o bug que subestimava o card "Liquidado" da Geral.
-    _mockar_vendas(
-        monkeypatch,
-        [
-            {
-                "id_planilha": 1,
-                "user_closer": 8,
-                "valor_bruto_contrato": 60000,
-                "liquido_entrada": 27000.00,
-                "liquido_pgto_2": 21737.70,
-            },
-        ],
-        [{"id_planilha_venda": 1, "mes": "2026-08-01", "liquido": 48737.70}],
-    )
-    resultado = banco_mod.buscar_faturamento(date(2026, 8, 1), date(2026, 8, 31), [8])
-    assert resultado.empresa["liquidado"] == pytest.approx(48737.70)
-    assert resultado.por_pessoa[8]["liquidado"] == pytest.approx(48737.70)
-
-
-def test_liquidado_sem_segundo_pagamento_nao_muda(monkeypatch):
-    _mockar_vendas(
-        monkeypatch,
-        [{"id_planilha": 1, "user_closer": 8, "valor_bruto_contrato": 60000, "liquido_entrada": 27000.00}],
-        [{"id_planilha_venda": 1, "mes": "2026-08-01", "liquido": 27000.00}],
-    )
-    resultado = banco_mod.buscar_faturamento(date(2026, 8, 1), date(2026, 8, 31), [8])
-    assert resultado.empresa["liquidado"] == 27000.00
-
-
-def test_vendas_sao_lidas_pelo_periodo_pedido(monkeypatch):
-    chamadas = _mockar_vendas(monkeypatch, [])
-    banco_mod.buscar_faturamento(date(2026, 8, 1), date(2026, 8, 31), [])
-    assert chamadas[0] == ("ler_vendas_do_periodo", (date(2026, 8, 1), date(2026, 8, 31)))
-
-
-def test_liquidado_vem_do_calendario_de_recebimentos_dos_meses_do_periodo(monkeypatch):
-    venda_no_periodo = {"id_planilha": 1, "data_venda": "2026-08-05T00:00:00", "valor_bruto_contrato": 10000, "liquido_entrada": 9999, "user_closer": 1}
-    venda_fora = {"id_planilha": 2, "data_venda": "2026-03-01T00:00:00", "valor_bruto_contrato": 60000, "user_closer": 3}
-    recebimentos = [
-        {"id_planilha_venda": 1, "mes": "2026-08-01", "liquido": 4500},
-        {"id_planilha_venda": 2, "mes": "2026-08-01", "liquido": 18000},
-    ]
-    chamadas = _mockar_vendas(monkeypatch, [venda_no_periodo], recebimentos, vendas_por_id=[venda_no_periodo, venda_fora])
-    empresa = banco_mod.buscar_faturamento(date(2026, 8, 10), date(2026, 8, 20), [1, 3]).empresa
-
-    assert empresa["faturamento"] == 10000
-    assert empresa["liquidado"] == 22500
-    assert ("ler_recebimentos_do_periodo", (date(2026, 8, 10), date(2026, 8, 20))) in chamadas
-
-
-def test_liquidado_por_pessoa_vai_para_o_closer_da_venda_do_recebimento(monkeypatch):
-    venda_no_periodo = {"id_planilha": 1, "data_venda": "2026-08-05T00:00:00", "valor_bruto_contrato": 10000, "liquido_entrada": 9999, "user_closer": 1}
-    venda_fora = {"id_planilha": 2, "data_venda": "2026-03-01T00:00:00", "valor_bruto_contrato": 60000, "user_closer": 3}
-    venda_sem_closer = {"id_planilha": 3, "data_venda": "2026-03-01T00:00:00", "valor_bruto_contrato": 5000, "user_closer": None}
-    recebimentos = [
-        {"id_planilha_venda": 1, "mes": "2026-08-01", "liquido": 4500},
-        {"id_planilha_venda": 2, "mes": "2026-08-01", "liquido": 18000},
-        {"id_planilha_venda": 3, "mes": "2026-08-01", "liquido": 700},
-    ]
-    _mockar_vendas(
-        monkeypatch,
-        [venda_no_periodo],
-        recebimentos,
-        vendas_por_id=[venda_no_periodo, venda_fora, venda_sem_closer],
-    )
-    resultado = banco_mod.buscar_faturamento(date(2026, 8, 1), date(2026, 8, 31), [1, 3])
-
-    assert resultado.por_pessoa[1]["liquidado"] == 4500
-    assert resultado.por_pessoa[3]["liquidado"] == 18000
-    assert resultado.empresa["liquidado"] == 23200
-    assert None not in resultado.por_pessoa
+    assert chamadas == [(date(2026, 11, 1), date(2026, 11, 27))]
+    assert resultado.empresa["faturamento"] == 37000
+    assert resultado.empresa["liquidado"] == 8000
+    assert resultado.por_pessoa == {
+        1: {"faturamento": None, "liquidado": 5000, "inscritos": None, "aprovados": None},
+        3: {"faturamento": None, "liquidado": 2000, "inscritos": None, "aprovados": None},
+    }
 
 
 # --- buscar_confrarias_do_mes (segundo Supabase, lido por `app.fontes.sed`)

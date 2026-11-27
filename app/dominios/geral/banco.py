@@ -1,23 +1,18 @@
-"""Leitura de `dash.metricas_faturamento` — uma linha por VENDA, não mais uma
+"""Leitura de `dash.notas_financeiro` — uma linha por nota do calendário
+financeiro da planilha.
 
-linha por pessoa/período — e de `dash.recebimentos_faturamento`, o calendário
-de recebimentos da planilha.
+`buscar_faturamento` soma `valor_venda` das notas cuja `data_referencia` cai
+dentro do período pedido (de `inicio` a `fim`, inclusive, comparando datas ISO).
 
-`buscar_faturamento` soma `valor_bruto_contrato` de toda venda com `data_venda`
-dentro do período pedido; o filtro usa `lt` no dia seguinte ao fim (nunca
-`lte`), porque `data_venda` é timestamp e `lte` na data perderia venda com hora
-≠ meia-noite.
+O liquidado da empresa NÃO vem da venda: é a soma de `valor_pago` das notas
+cujo `mes` (dia 1 do mês) cai entre o dia 1 do mês de `inicio` e `fim`. Assim o
+líquido cai no mês em que a parcela foi recebida, não no mês em que a venda foi
+fechada.
 
-O liquidado da empresa NÃO vem da venda: é a soma de
-`recebimentos_faturamento.liquido` dos meses tocados pelo período (`mes` é dia
-1 do mês; vai do dia 1 do mês de `inicio` até `fim`). Assim o líquido cai no
-mês em que a parcela foi recebida, não no mês em que a venda foi fechada.
-
-O card da empresa soma TODA venda do período, inclusive de quem já saiu do
-time (`ids_pessoas` não filtra a consulta). Por pessoa, o liquidado é o de
-cada recebimento, atribuído ao `user_closer` da VENDA a que ele pertence
-(mesmo que a venda tenha sido fechada em outro mês); recebimento de venda sem
-`user_closer` entra no total da empresa e em ninguém.
+O card da empresa soma TODA nota do período, inclusive de quem já saiu do
+time (`ids_pessoas` não filtra a consulta). Por pessoa, o liquidado é o
+`valor_pago` das notas com `id_vendedor`; nota sem vendedor entra no total da
+empresa e em ninguém.
 `inscritos`/`aprovados` continuam sempre `None`
 aqui — não existem nesta tabela, vêm do SED (ver `buscar_confrarias_do_mes`).
 
@@ -39,7 +34,6 @@ from datetime import date, datetime, time, timedelta
 from app.periodo import TZ_SP
 from app.fontes import sed
 from app.fontes import supabase
-from app.fontes.banco import em_paralelo
 
 CHAVES_FATURAMENTO = ("faturamento", "liquidado", "inscritos", "aprovados")
 
@@ -79,31 +73,22 @@ def _linha_vazia() -> dict[str, float | None]:
 
 
 def buscar_faturamento(inicio: date, fim: date, ids_pessoas: list[int]) -> Faturamento:
-    linhas, recebimentos = em_paralelo(
-        lambda: supabase.ler_vendas_do_periodo(inicio, fim),
-        lambda: supabase.ler_recebimentos_do_periodo(inicio, fim),
-    )
+    notas = supabase.ler_notas_financeiro_do_periodo(inicio, fim)
 
+    ini, f = inicio.isoformat(), fim.isoformat()
+    mes_ini = inicio.replace(day=1).isoformat()
     empresa: dict[str, float | None] = {**_linha_vazia(), "faturamento": 0.0, "liquidado": 0.0}
     por_pessoa: dict[int, dict[str, float | None]] = {}
 
-    for r in linhas:
-        empresa["faturamento"] += r.get("valor_bruto_contrato") or 0
-
-    ids = sorted({int(r["id_planilha_venda"]) for r in recebimentos})
-    closer_por_venda: dict[int, int | None] = {}
-    if ids:
-        vendas = supabase.ler_vendas_por_id_planilha(ids, colunas="id_planilha,user_closer")
-        closer_por_venda = {int(v["id_planilha"]): v.get("user_closer") for v in vendas}
-
-    for r in recebimentos:
-        liquido = r.get("liquido") or 0
-        empresa["liquidado"] += liquido
-        id_user = closer_por_venda.get(int(r["id_planilha_venda"]))
-        if id_user is None:
-            continue
-        pessoa = por_pessoa.setdefault(int(id_user), {**_linha_vazia(), "liquidado": 0.0})
-        pessoa["liquidado"] += liquido
+    for n in notas:
+        if ini <= n["data_referencia"][:10] <= f:
+            empresa["faturamento"] += n.get("valor_venda") or 0
+        if mes_ini <= n["mes"][:10] <= f:
+            pago = n.get("valor_pago") or 0
+            empresa["liquidado"] += pago
+            if n.get("id_vendedor") is not None:
+                pessoa = por_pessoa.setdefault(int(n["id_vendedor"]), {**_linha_vazia(), "liquidado": 0.0})
+                pessoa["liquidado"] += pago
 
     return Faturamento(empresa=empresa, por_pessoa=por_pessoa)
 

@@ -210,12 +210,12 @@ def test_sem_token_401(monkeypatch):
 def test_geral_em_dia_busca_faturamento_do_dia_e_do_mes_corrente(monkeypatch):
     """Cards escuros (Faturamento/Liquidado) são sempre do MÊS; o resto da
     página segue o recorte pedido — então sob `dia` a rota faz DUAS consultas a
-    `metricas_faturamento`, uma por intervalo."""
+    `notas_financeiro`, uma por intervalo."""
     intervalos: list[str] = []
 
     def query_espiã(tabela, filtros=None, schema="dash", colunas="*", **kwargs):
-        if tabela == "metricas_faturamento":
-            intervalos.append((filtros or {})["and"])
+        if tabela == "notas_financeiro":
+            intervalos.append((filtros or {})["or"])
         return _fake_query(tabela, filtros, schema, colunas, **kwargs)
 
     monkeypatch.setattr(fontes_banco_mod, "query", query_espiã)
@@ -230,8 +230,8 @@ def test_geral_em_dia_busca_faturamento_do_dia_e_do_mes_corrente(monkeypatch):
     assert resposta.status_code == 200
 
     assert len(intervalos) == 2
-    assert "data_venda.gte.2026-09-14" in intervalos[0]  # tabela/pódios: só o dia
-    assert "data_venda.gte.2026-09-01" in intervalos[1]  # cards escuros: o mês
+    assert any("data_referencia.gte.2026-09-14" in i for i in intervalos)  # tabela/pódios: só o dia
+    assert any("data_referencia.gte.2026-09-01" in i for i in intervalos)  # cards escuros: o mês
 
 
 def test_funil_linkedin_200_com_contas_do_periodo(monkeypatch):
