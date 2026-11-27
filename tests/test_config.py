@@ -1,4 +1,5 @@
 """Configuração: defaults dos workers das planilhas."""
+import os
 from datetime import time
 
 from app import config
@@ -128,6 +129,18 @@ def test_settings_le_envs_do_pipedrive(monkeypatch):
     assert s.pipe_id_pipeline_instagram is None
 
 
+def test_pipe_id_inscrito_pipeline_linkedin_vem_do_env(monkeypatch):
+    monkeypatch.setenv("PIPE_ID_INSCRITO_PIPELINE_LINKEDIN", "7")
+
+    s = config.Settings()
+
+    assert s.pipe_id_inscrito_pipeline_linkedin == 7
+
+    monkeypatch.delenv("PIPE_ID_INSCRITO_PIPELINE_LINKEDIN", raising=False)
+
+    assert config.Settings().pipe_id_inscrito_pipeline_linkedin is None
+
+
 def test_schema_vem_de_nome_schema(monkeypatch):
     monkeypatch.setenv("NOME_SCHEMA", "dash_x")
     monkeypatch.setenv("SUPABASE_SCHEMA", "dash2")
@@ -149,3 +162,15 @@ def test_etiqueta_pessoa_le_env_pelo_canal_e_nome_da_conta(monkeypatch):
     assert config.etiqueta_pessoa("linkedin", "Letícia Souza") == 55
     assert config.etiqueta_pessoa("instagram", "jacob") == 66
     assert config.etiqueta_pessoa("linkedin", "Mary") is None
+
+
+def test_donos_sdr_vem_das_envs_com_prefixo(monkeypatch):
+    from app.config import donos_sdr
+
+    for nome in [n for n in os.environ if n.startswith("PIPE_ID_USUARIO_SDR_")]:
+        monkeypatch.delenv(nome)
+    monkeypatch.setenv("PIPE_ID_USUARIO_SDR_JUCA", "28932026")
+    monkeypatch.setenv("PIPE_ID_USUARIO_SDR_JENNIFER", "27369234")
+    monkeypatch.setenv("PIPE_ID_USUARIO_CLOSER_JACOB", "1")
+
+    assert donos_sdr() == {28932026: "juca", 27369234: "jennifer"}

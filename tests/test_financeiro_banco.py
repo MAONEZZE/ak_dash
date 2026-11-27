@@ -7,16 +7,29 @@ from __future__ import annotations
 from datetime import date
 
 from app.dominios.financeiro import banco as banco_mod
+from app.fontes import supabase
 
 
-def _mockar(monkeypatch, respostas: dict[str, list[dict]]) -> list[dict]:
+def _mockar(monkeypatch, tabelas: dict[str, list[dict]]) -> list[dict]:
     chamadas: list[dict] = []
 
-    def _fake_query(tabela, filtros=None, *a, **k):
-        chamadas.append({"tabela": tabela, "filtros": filtros or {}})
-        return respostas.get(tabela, [])
+    def _substituto(funcao, devolve):
+        def _fake(*args):
+            chamadas.append({"funcao": funcao, "args": args})
+            return devolve(args)
+        return _fake
 
-    monkeypatch.setattr(banco_mod, "query", _fake_query)
+    catalogos = {
+        "ler_vendas_do_periodo": lambda args: tabelas.get("metricas_faturamento", []),
+        "ler_recebimentos_do_periodo": lambda args: tabelas.get("recebimentos_faturamento", []),
+        "ler_vendas_por_id_planilha": lambda args: [
+            v for v in tabelas.get("metricas_faturamento", []) if v.get("id_planilha") in args[0]
+        ],
+        "ler_clientes_por_id": lambda args: tabelas.get("cliente_faturamento", []),
+        "ler_usuarios_por_id": lambda args: tabelas.get("users", []),
+    }
+    for funcao, devolve in catalogos.items():
+        monkeypatch.setattr(supabase, funcao, _substituto(funcao, devolve))
     return chamadas
 
 
@@ -92,8 +105,8 @@ def test_venda_sem_id_cliente_fica_com_cliente_none_sem_consultar_a_toa(monkeypa
     )
     vendas = banco_mod.buscar_vendas_detalhadas(date(2026, 8, 1), date(2026, 8, 31))
     assert vendas[0]["cliente"] is None
-    # buscar_clientes([]) não dispara consulta — só metricas_faturamento e recebimentos.
-    assert [c["tabela"] for c in chamadas] == ["metricas_faturamento", "recebimentos_faturamento"]
+    # buscar_clientes([]) não dispara consulta — só vendas e recebimentos do período.
+    assert [c["funcao"] for c in chamadas] == ["ler_vendas_do_periodo", "ler_recebimentos_do_periodo"]
 
 
 def test_periodo_sem_venda_devolve_lista_vazia(monkeypatch):
@@ -182,7 +195,7 @@ def test_venda_sem_user_closer_fica_com_closer_none_sem_consultar_users(monkeypa
     vendas = banco_mod.buscar_vendas_detalhadas(date(2026, 8, 1), date(2026, 8, 31))
     assert vendas[0]["user_closer"] is None
     assert vendas[0]["closer"] is None
-    assert [c["tabela"] for c in chamadas] == ["metricas_faturamento", "recebimentos_faturamento"]
+    assert [c["funcao"] for c in chamadas] == ["ler_vendas_do_periodo", "ler_recebimentos_do_periodo"]
 
 
 def test_buscar_closers_com_lista_vazia_nao_consulta():
@@ -252,8 +265,7 @@ def test_venda_sem_segundo_pagamento_fica_zerada_e_forma_pgto_2_none(monkeypatch
 def test_filtro_de_data_usa_lt_no_dia_seguinte_ao_fim(monkeypatch):
     chamadas = _mockar(monkeypatch, {"metricas_faturamento": []})
     banco_mod.buscar_vendas_detalhadas(date(2026, 8, 1), date(2026, 8, 31))
-    filtros = chamadas[0]["filtros"]
-    assert filtros["and"] == "(data_venda.gte.2026-08-01,data_venda.lt.2026-09-01)"
+    assert chamadas[0] == {"funcao": "ler_vendas_do_periodo", "args": (date(2026, 8, 1), date(2026, 8, 31))}
 
 
 def test_buscar_clientes_com_lista_vazia_nao_consulta():
@@ -303,23 +315,25 @@ def test_cada_venda_traz_recebimentos_do_periodo_em_ordem_de_mes(monkeypatch):
         {"mes": "2026-05", "pago": 10000, "liquido": 9000},
     ]
     assert por_planilha[26]["recebimentos"] == []
-    receb = next(c for c in chamadas if c["tabela"] == "recebimentos_faturamento")
-    assert receb["filtros"] == {"and": "(mes.gte.2026-01-01,mes.lte.2026-12-31)"}
+    receb = next(c for c in chamadas if c["funcao"] == "ler_recebimentos_do_periodo")
+    assert receb["args"] == (date(2026, 1, 1), date(2026, 12, 31))
 
 
 def test_venda_de_antes_do_periodo_com_recebimento_no_periodo_entra_na_lista(monkeypatch):
-    def _fake_query(tabela, filtros=None, *a, **k):
-        filtros = filtros or {}
-        if tabela == "metricas_faturamento":
-            if "and" in filtros:
-                return []
-            if filtros.get("id_planilha") == "in.(5)":
-                return [{"id": 7, "id_planilha": 5, "data_venda": "2025-11-10T00:00:00", "valor_bruto_contrato": 60000}]
-        if tabela == "recebimentos_faturamento":
-            return [{"id_planilha_venda": 5, "mes": "2026-02-01", "pago": 20000, "liquido": 18000}]
+    def _vendas_do_periodo(inicio, fim):
         return []
 
-    monkeypatch.setattr(banco_mod, "query", _fake_query)
+    def _vendas_por_id_planilha(ids, colunas="*"):
+        if 5 in ids:
+            return [{"id": 7, "id_planilha": 5, "data_venda": "2025-11-10T00:00:00", "valor_bruto_contrato": 60000}]
+        return []
+
+    def _recebimentos_do_periodo(inicio, fim):
+        return [{"id_planilha_venda": 5, "mes": "2026-02-01", "pago": 20000, "liquido": 18000}]
+
+    monkeypatch.setattr(supabase, "ler_vendas_do_periodo", _vendas_do_periodo)
+    monkeypatch.setattr(supabase, "ler_vendas_por_id_planilha", _vendas_por_id_planilha)
+    monkeypatch.setattr(supabase, "ler_recebimentos_do_periodo", _recebimentos_do_periodo)
     vendas = banco_mod.buscar_vendas_detalhadas(date(2026, 1, 1), date(2026, 12, 31))
     assert len(vendas) == 1
     assert vendas[0]["id_planilha"] == 5

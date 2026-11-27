@@ -10,7 +10,7 @@ from app.config import settings
 from app.dominios.comercial.banco import buscar_totais
 from app.dominios.comercial.calculo import montar_resposta_comercial
 from app.dominios.pessoas.banco import listar_ativas
-from app.fontes.banco import iniciar_registro_de_falhas, tabelas_com_falha
+from app.fontes.banco import em_paralelo, iniciar_registro_de_falhas, tabelas_com_falha
 from app.metas import buscar_metas
 from app.periodo import TZ_SP, hoje_sp, resolver_periodo
 
@@ -39,12 +39,14 @@ def _comercial(granularidade: str, periodo_str: str, pessoas: list[str] | None, 
     ids = [int(p.id) for p in pessoas_cargo]
 
     chave_periodo = f"{periodo.inicio.isoformat()}:{periodo.fim.isoformat()}"
-    totais = obter_ou_calcular(
-        f"vw_metricas:{cargo}:{chave_periodo}",
-        settings.cache_ttl_metricas_segundos,
-        lambda: buscar_totais(cargo, ids, periodo.inicio, periodo.fim),
+    totais, metas = em_paralelo(
+        lambda: obter_ou_calcular(
+            f"vw_metricas:{cargo}:{chave_periodo}",
+            settings.cache_ttl_metricas_segundos,
+            lambda: buscar_totais(cargo, ids, periodo.inicio, periodo.fim),
+        ),
+        lambda: obter_ou_calcular("metas", settings.cache_ttl_metricas_segundos, buscar_metas),
     )
-    metas = obter_ou_calcular("metas", settings.cache_ttl_metricas_segundos, buscar_metas)
     resultado = montar_resposta_comercial(
         periodo=periodo,
         cargo=cargo,

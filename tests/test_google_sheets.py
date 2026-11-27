@@ -1,7 +1,7 @@
 import httpx
 import google.auth.transport.requests
 
-from app.fontes import google_sheets
+from app.workers import google_sheets
 
 
 class _Credenciais:

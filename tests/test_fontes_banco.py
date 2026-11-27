@@ -31,7 +31,7 @@ def test_timeout_isolado_tenta_de_novo_e_devolve_o_dado(monkeypatch):
             raise r
         return r
 
-    monkeypatch.setattr(banco.httpx, "get", _get)
+    monkeypatch.setattr(banco._cliente, "get", _get)
     assert _query("metricas_metas") == [{"id": 1}]
 
 
@@ -39,7 +39,7 @@ def test_timeout_persistente_degrada_para_vazio(monkeypatch):
     def _get(*a, **k):
         raise httpx.ReadTimeout("lento")
 
-    monkeypatch.setattr(banco.httpx, "get", _get)
+    monkeypatch.setattr(banco._cliente, "get", _get)
     assert _query("metricas_metas") == []
 
 
@@ -51,7 +51,7 @@ def test_resultado_de_consulta_que_falhou_nao_fica_no_cache(monkeypatch):
             raise httpx.ReadTimeout("lento")
         return _resposta([{"id": 1}])
 
-    monkeypatch.setattr(banco.httpx, "get", _get)
+    monkeypatch.setattr(banco._cliente, "get", _get)
     assert cache.obter_ou_calcular("metas", 60, lambda: _query("metricas_metas")) == []
 
     fora_do_ar = False
@@ -65,7 +65,7 @@ def test_resultado_de_consulta_bem_sucedida_fica_no_cache(monkeypatch):
         chamadas.append(1)
         return _resposta([{"id": 1}])
 
-    monkeypatch.setattr(banco.httpx, "get", _get)
+    monkeypatch.setattr(banco._cliente, "get", _get)
     cache.obter_ou_calcular("metas", 60, lambda: _query("metricas_metas"))
     cache.obter_ou_calcular("metas", 60, lambda: _query("metricas_metas"))
     assert len(chamadas) == 1
@@ -79,7 +79,7 @@ def test_schema_padrao_vem_de_settings(monkeypatch):
         headers_recebidos.append(k["headers"])
         return _resposta([])
 
-    monkeypatch.setattr(banco.httpx, "get", _get)
+    monkeypatch.setattr(banco._cliente, "get", _get)
     _query("users")
     assert headers_recebidos[-1]["Accept-Profile"] == "dash_teste"
 
@@ -91,7 +91,7 @@ def test_tabela_que_falhou_fica_registrada_pra_virar_aviso(monkeypatch):
     def _get(*a, **k):
         return httpx.Response(404, json={"code": "PGRST205"}, request=httpx.Request("GET", "https://exemplo.supabase.co"))
 
-    monkeypatch.setattr(banco.httpx, "get", _get)
+    monkeypatch.setattr(banco._cliente, "get", _get)
     banco.iniciar_registro_de_falhas()
     assert _query("vw_metricas") == []
     assert _query("vw_metricas") == []
@@ -190,3 +190,20 @@ def test_upsert_propaga_erro_do_postgrest(monkeypatch):
     monkeypatch.setattr(banco.httpx, "post", _post)
     with pytest.raises(httpx.HTTPStatusError):
         banco.upsert("metricas_sellers", [{"id_user": 1}], on_conflict="key_data_ref_user")
+
+
+def test_em_paralelo_devolve_na_ordem_e_traz_as_falhas_das_threads(monkeypatch):
+    def _get(url, *a, **k):
+        if url.endswith("/quebrada"):
+            raise httpx.ConnectError("fora")
+        return _resposta([{"t": url.rsplit("/", 1)[1]}])
+
+    monkeypatch.setattr(banco._cliente, "get", _get)
+    banco.iniciar_registro_de_falhas()
+    antes = banco.falhas_na_thread()
+
+    resultado = banco.em_paralelo(lambda: _query("a"), lambda: _query("quebrada"), lambda: _query("b"))
+
+    assert resultado == [[{"t": "a"}], [], [{"t": "b"}]]
+    assert banco.tabelas_com_falha() == ["quebrada"]
+    assert banco.falhas_na_thread() == antes + 1

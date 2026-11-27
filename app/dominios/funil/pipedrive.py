@@ -1,27 +1,23 @@
 """Métricas do Pipedrive nos funis LinkedIn, Instagram e SDR. Regras: docs/plans/pipedrive-fonte-de-dados.md."""
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass, replace
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from typing import Callable
 
 from app.config import settings
 from app.dominios.funil.banco import ContaFunil
 from app.fontes import pipedrive as api
-from app.fontes.banco import registrar_falha
+from app.fontes import supabase
+from app.fontes.banco import em_paralelo
 from app.periodo import TZ_SP
 from app.planilhas import COLUNAS_POR_TABELA
-
-logger = logging.getLogger(__name__)
 
 # Métricas que o Pipedrive sobrescreve em cada página de canal (o resto vem da planilha).
 # Instagram fica 100% na planilha: o pipeline "Prospecção Insta" não é usado (decisão de 20/11/2026).
 METRICAS_POR_CANAL: dict[str, tuple[str, ...]] = {
     "linkedin": ("numeros_captados",),
 }
-# owner_id do Pipedrive que é SDR → normalizar(users.nome) do SDR no dash.
-DONOS_SDR: dict[int, str] = {28932026: "juca", 27369234: "jennifer"}
 # Colunas de metricas_funil_sdr que vêm do Pipedrive.
 METRICAS_SDR = ("abordagens", "respondidos", "indicacoes")
 
@@ -54,8 +50,8 @@ def _no_periodo(d: str | None, inicio: date, fim: date) -> bool:
     return d is not None and inicio.isoformat() <= d <= fim.isoformat()
 
 
-def contar(criados: list[dict], por_estagio: dict[int, list[dict]], inicio: date, fim: date) -> list[Fato]:
-    """Fatos do período [inicio, fim] (datas em SP). `criados`: negócios por add_time. `por_estagio`: id do estágio → negócios que estão nele hoje."""
+def contar(criados: list[dict], inicio: date, fim: date) -> list[Fato]:
+    """Fatos dos negócios criados no período [inicio, fim] (datas em SP), por add_time: números captados e indicações."""
     fatos: list[Fato] = []
     for n in criados:
         d = _data_sp(n.get("add_time"))
@@ -69,7 +65,11 @@ def contar(criados: list[dict], por_estagio: dict[int, list[dict]], inicio: date
             fatos.append(Fato("numeros_captados", "instagram", dono, pessoa, d))
         if settings.pipe_id_etiqueta_negocio_indicacao is not None and settings.pipe_id_etiqueta_negocio_indicacao in etiquetas:
             fatos.append(Fato("indicacoes", None, dono, pessoa, d))
+    return fatos
 
+
+def _estagios() -> dict[int, tuple[str, str]]:
+    """Id do estágio no Pipedrive -> (métrica, canal), só dos configurados."""
     estagios = {
         settings.pipe_id_abordados_pipeline_linkedin: ("abordagens", "linkedin"),
         settings.pipe_id_respondidos_pipeline_linkedin: ("respondidos", "linkedin"),
@@ -77,43 +77,49 @@ def contar(criados: list[dict], por_estagio: dict[int, list[dict]], inicio: date
         settings.pipe_id_respondidos_pipeline_instagram: ("respondidos", "instagram"),
     }
     estagios.pop(None, None)
-    for id_estagio, negocios in por_estagio.items():
-        if id_estagio not in estagios:
+    return estagios
+
+
+def contar_entradas(entradas: list[dict], inicio: date, fim: date) -> list[Fato]:
+    """Abordagens: cada negócio uma vez, na primeira entrada no período em Abordados ou Respondido do canal.
+    Respondidos: cada entrada no período em Respondido (data em SP), mesmo que o negócio já tenha avançado.
+    `entradas` vem do histórico gravado pelo WorkerPipedrive."""
+    estagios = _estagios()
+    fatos: list[Fato] = []
+    abordados_vistos: set[tuple[int, str]] = set()
+    for e in sorted(entradas, key=lambda e: (e["entrou_em"], e["id_deal"])):
+        if e["id_estagio"] not in estagios:
             continue
-        metrica, canal = estagios[id_estagio]
-        for n in negocios:
-            if n.get("stage_id") != id_estagio:
-                continue
-            d = _data_sp(n.get("stage_change_time"))
-            if not _no_periodo(d, inicio, fim):
-                continue
-            fatos.append(Fato(metrica, canal, n.get("owner_id"), n.get("person_id"), d))
+        d = _data_sp(e["entrou_em"])
+        if not _no_periodo(d, inicio, fim):
+            continue
+        metrica, canal = estagios[e["id_estagio"]]
+        if (e["id_deal"], canal) not in abordados_vistos:
+            abordados_vistos.add((e["id_deal"], canal))
+            fatos.append(Fato("abordagens", canal, e.get("id_dono"), e.get("id_pessoa"), d))
+        if metrica == "respondidos":
+            fatos.append(Fato("respondidos", canal, e.get("id_dono"), e.get("id_pessoa"), d))
     return fatos
+
+
+def _buscar(inicio: date, fim: date) -> DadosPipedrive:
+    desde = datetime.combine(inicio, time.min, tzinfo=TZ_SP)
+    ate = datetime.combine(fim + timedelta(days=1), time.min, tzinfo=TZ_SP)
+    criados, entradas = em_paralelo(
+        lambda: api.negocios_criados_desde(desde),
+        lambda: supabase.ler_entradas_estagio(list(_estagios()), desde, ate) if _estagios() else [],
+    )
+    fatos = contar(criados, inicio, fim) + contar_entradas(entradas, inicio, fim)
+    # Só os números captados vão para a conta pela etiqueta da pessoa (`aplicar_em_contas`).
+    etiquetas = api.etiquetas_das_pessoas(
+        [f.id_pessoa for f in fatos if f.metrica == "numeros_captados" and f.id_pessoa is not None]
+    )
+    return DadosPipedrive(fatos, etiquetas)
 
 
 def buscar_pipedrive(inicio: date, fim: date) -> DadosPipedrive:
     """Tudo que os funis precisam do Pipedrive para [inicio, fim]. Pipedrive fora do ar ou sem configuração: VAZIO + falha 'pipedrive' registrada (aviso na tela, sem cache)."""
-    desde = datetime.combine(inicio, time.min, tzinfo=TZ_SP)
-    try:
-        criados = api.negocios_criados_desde(desde)
-        ids = [
-            i
-            for i in (
-                settings.pipe_id_abordados_pipeline_linkedin,
-                settings.pipe_id_respondidos_pipeline_linkedin,
-                settings.pipe_id_abordados_pipeline_instagram,
-                settings.pipe_id_respondidos_pipeline_instagram,
-            )
-            if i is not None
-        ]
-        por_estagio = {i: api.negocios_no_estagio(i, desde) for i in ids}
-        fatos = contar(criados, por_estagio, inicio, fim)
-        etiquetas = api.etiquetas_das_pessoas([f.id_pessoa for f in fatos if f.canal is not None and f.id_pessoa is not None])
-    except api.PipedriveIndisponivel:
-        logger.warning("Pipedrive indisponível — métricas do Pipedrive zeradas", exc_info=True)
-        registrar_falha("pipedrive")
-        return VAZIO
-    return DadosPipedrive(fatos, etiquetas)
+    return api.ou_vazio(lambda: _buscar(inicio, fim), VAZIO, "Pipedrive indisponível — métricas do Pipedrive zeradas")
 
 
 def aplicar_em_contas(

@@ -4,10 +4,11 @@ from __future__ import annotations
 from datetime import date
 
 from app.dominios.comercial import banco as banco_mod
+from app.fontes import supabase
 
 
 def _mockar_query(monkeypatch, linhas: list[dict]) -> None:
-    monkeypatch.setattr(banco_mod, "query", lambda *a, **k: linhas)
+    monkeypatch.setattr(supabase, "ler_metricas_do_cargo", lambda cargo, ids, inicio, fim: linhas)
 
 
 def test_soma_realizado_e_conta_dias_distintos(monkeypatch):
@@ -82,17 +83,12 @@ def test_serie_diaria_pre_populada_com_zero_em_todo_dia_do_intervalo(monkeypatch
 
 
 def test_sem_ids_devolve_vazio_sem_consultar(monkeypatch):
-    chamado = False
+    def _fake_ler(cargo, ids, inicio, fim):
+        raise AssertionError("não devia consultar")
 
-    def _fake_query(*a, **k):
-        nonlocal chamado
-        chamado = True
-        return []
-
-    monkeypatch.setattr(banco_mod, "query", _fake_query)
+    monkeypatch.setattr(supabase, "ler_metricas_do_cargo", _fake_ler)
     totais = banco_mod.buscar_totais("sdr", [], date(2026, 9, 1), date(2026, 9, 1))
     assert totais.realizado == {}
-    assert chamado is False
 
 
 def test_pessoa_sem_nenhuma_linha_fica_de_fora_dos_dicionarios(monkeypatch):
@@ -102,15 +98,13 @@ def test_pessoa_sem_nenhuma_linha_fica_de_fora_dos_dicionarios(monkeypatch):
     assert (10, "indicacoes") not in totais.dias_com_lancamento
 
 
-def test_consulta_filtra_a_view_pelo_cargo(monkeypatch):
+def test_consulta_pede_o_cargo_as_pessoas_e_o_intervalo(monkeypatch):
     chamadas = []
 
-    def _fake_query(tabela, filtros, **k):
-        chamadas.append((tabela, filtros))
+    def _fake_ler(cargo, ids, inicio, fim):
+        chamadas.append((cargo, ids, inicio, fim))
         return []
 
-    monkeypatch.setattr(banco_mod, "query", _fake_query)
+    monkeypatch.setattr(supabase, "ler_metricas_do_cargo", _fake_ler)
     banco_mod.buscar_totais("sdr", [4], date(2026, 10, 1), date(2026, 10, 2))
-    tabela, filtros = chamadas[0]
-    assert tabela == "vw_metricas"
-    assert filtros["cargo"] == "eq.sdr"
+    assert chamadas == [("sdr", [4], date(2026, 10, 1), date(2026, 10, 2))]

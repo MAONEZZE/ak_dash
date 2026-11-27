@@ -12,20 +12,15 @@ from datetime import date
 from fastapi.testclient import TestClient
 
 from app import cache
-from app import metas as metas_mod
 from app import workers
 from app.auth import exigir_usuario
-from app.dominios.comercial import banco as comercial_banco_mod
-from app.dominios.financeiro import banco as financeiro_banco_mod
-from app.dominios.funil import banco as funil_banco_mod
 from app.dominios.funil import evento as funil_evento_mod
 from app.dominios.funil import pipedrive as funil_pipedrive_mod
-from app.dominios.funil import sdr as funil_sdr_mod
 from app.dominios.funil.pipedrive import DadosPipedrive, Fato
-from app.dominios.geral import banco as geral_banco_mod
 from app.dominios.geral import rotas as geral_rotas_mod
-from app.dominios.pessoas import banco as pessoas_banco_mod
+from app.fontes import banco as fontes_banco_mod
 from app.fontes import pipedrive as fonte_pipedrive_mod
+from app.fontes import supabase as fontes_supabase_mod
 from app.main import app
 
 _BUSCAR_PIPEDRIVE_REAL = funil_pipedrive_mod.buscar_pipedrive
@@ -74,14 +69,14 @@ def _fake_query(tabela, filtros=None, schema="dash", colunas="*", **kwargs):
 
 
 def _sobrescrever_query(monkeypatch) -> None:
-    for mod in (pessoas_banco_mod, comercial_banco_mod, geral_banco_mod, financeiro_banco_mod, funil_banco_mod, funil_sdr_mod, metas_mod):
-        monkeypatch.setattr(mod, "query", _fake_query)
+    monkeypatch.setattr(fontes_banco_mod, "query", _fake_query)
 
 
 def _client(monkeypatch) -> TestClient:
     _sobrescrever_query(monkeypatch)
     monkeypatch.setattr(funil_pipedrive_mod, "buscar_pipedrive", lambda inicio, fim: funil_pipedrive_mod.VAZIO)
-    monkeypatch.setattr(funil_evento_mod, "buscar_pipedrive_evento", lambda data_evento, inicio, fim: dict(funil_evento_mod.ZERADO))
+    monkeypatch.setattr(funil_evento_mod, "buscar_pipedrive_evento", lambda data_evento: dict(funil_evento_mod.ZERADO))
+    monkeypatch.setattr(funil_evento_mod, "buscar_almocos_pagos", lambda data_evento: 0)
     cache.invalidar()
     app.dependency_overrides[exigir_usuario] = lambda: {"sub": "dev"}
     client = TestClient(app)
@@ -223,8 +218,7 @@ def test_geral_em_dia_busca_faturamento_do_dia_e_do_mes_corrente(monkeypatch):
             intervalos.append((filtros or {})["and"])
         return _fake_query(tabela, filtros, schema, colunas, **kwargs)
 
-    for mod in (pessoas_banco_mod, comercial_banco_mod, geral_banco_mod, financeiro_banco_mod, metas_mod):
-        monkeypatch.setattr(mod, "query", query_espiã)
+    monkeypatch.setattr(fontes_banco_mod, "query", query_espiã)
     cache.invalidar()
     app.dependency_overrides[exigir_usuario] = lambda: {"sub": "dev"}
 
@@ -317,9 +311,9 @@ def test_funil_devolve_meta_de_numeros_captados_do_seller_no_periodo(monkeypatch
     monkeypatch.setattr(f"{__name__}._CONTAS", [{"id": 1, "nome": "Jacob", "id_seller": 4}])
     cliente = _client(monkeypatch)
     monkeypatch.setattr(
-        metas_mod,
-        "query",
-        lambda tabela, *a, **kw: [{"id_user": 4, "cargo": "seller", "metrica": "numeros_captados", "valor_diario": 4}],
+        fontes_supabase_mod,
+        "ler_metas",
+        lambda: [{"id_user": 4, "cargo": "seller", "metrica": "numeros_captados", "valor_diario": 4}],
     )
 
     mes = cliente.get("/funil/linkedin", params={"granularidade": "mes", "periodo": "2026-11"}).json()
@@ -429,11 +423,12 @@ def test_funil_sdr_traz_a_proxima_confraria_para_o_velocimetro(monkeypatch):
             return [{"event_id": "e1", "status": s} for s in ("pending", "pending", "approved", "rejected")]
         return _fake_query(tabela, filtros, *a, **kw)
 
-    monkeypatch.setattr(geral_banco_mod, "query", query_com_evento)
+    monkeypatch.setattr(fontes_banco_mod, "query", query_com_evento)
     corpo = client.get("/funil-sdr", params={"granularidade": "mes", "periodo": "2026-11"}).json()
     assert corpo["evento"] == {
         "id": "e1", "titulo": "Confraria Akeel SP", "data": "2026-11-20T22:00:00",
-        "inscritos": 3, "inscritos_periodo": 2, "aprovados": 1, "pendentes": 2, "rejeitados": 1, "capacidade": 80,
+        "inscritos": 3, "inscritos_periodo": 2, "aprovados": 1, "pendentes": 2, "rejeitados": 1, "almocos_pagos": 0,
+        "capacidade": 80, "meta_velocimetro": 80,  # mês: a capacidade
     }
     # Inscritos do velocímetro: só approved/pending, feitos no mês (meia-noite de SP em UTC).
     assert filtros_periodo == [{
@@ -441,6 +436,55 @@ def test_funil_sdr_traz_a_proxima_confraria_para_o_velocimetro(monkeypatch):
         "status": "in.(approved,pending)",
         "and": '(created_at.gte."2026-11-01T03:00:00Z",created_at.lt."2026-12-01T03:00:00Z")',
     }]
+
+
+def test_funil_sdr_no_filtro_de_dia_meta_do_velocimetro_e_o_que_falta_dividido_pelos_dias_ate_o_evento(monkeypatch):
+    from app.dominios.funil import rotas as funil_rotas_mod
+
+    client = _client(monkeypatch)
+    monkeypatch.setattr(funil_rotas_mod, "hoje_sp", lambda: date(2026, 11, 23))
+    filtros_hoje: list[dict] = []
+
+    def query_com_evento(tabela, filtros=None, *a, **kw):
+        if tabela == "events":
+            # 26/11 às 19h de SP: faltam 23, 24 e 25 = 3 dias.
+            return [{"id": "e1", "title": "Imersão", "event_date": "2026-11-26T22:00:00", "capacity": 80}]
+        if tabela == "registrations" and "created_at" in (filtros or {}).get("and", ""):
+            filtros_hoje.append(filtros)
+            return [{"id": "r1"}, {"id": "r2"}]  # 2 inscrições feitas hoje
+        if tabela == "registrations":
+            # 70 aprovados/pendentes agora; até ontem eram 68.
+            return [{"event_id": "e1", "status": "approved"}] * 70 + [{"event_id": "e1", "status": "rejected"}]
+        return _fake_query(tabela, filtros, *a, **kw)
+
+    monkeypatch.setattr(fontes_banco_mod, "query", query_com_evento)
+    corpo = client.get("/funil-sdr", params={"granularidade": "dia", "periodo": "2026-11-23"}).json()
+    # Faltam 80 − 68 = 12 em 3 dias (seg 23 a qua 25): 4 por dia (fixa no dia, as 2 de hoje não abatem).
+    assert corpo["evento"]["meta_velocimetro"] == 4
+    assert corpo["evento"]["inscritos_periodo"] == 2
+    assert all('"2026-11-23T03:00:00Z"' in f["and"] for f in filtros_hoje)
+
+
+def test_funil_sdr_na_semana_meta_do_velocimetro_e_a_diaria_vezes_6_limitada_ao_que_falta(monkeypatch):
+    from app.dominios.funil import rotas as funil_rotas_mod
+
+    client = _client(monkeypatch)
+    monkeypatch.setattr(funil_rotas_mod, "hoje_sp", lambda: date(2026, 11, 23))
+
+    def query_com_evento(tabela, filtros=None, *a, **kw):
+        if tabela == "events":
+            # 05/12: de seg 23/11 a sex 04/12 sem o domingo 29 = 11 dias.
+            return [{"id": "e1", "title": "Imersão", "event_date": "2026-12-05T22:00:00", "capacity": 80}]
+        if tabela == "registrations" and "created_at" in (filtros or {}).get("and", ""):
+            return []
+        if tabela == "registrations":
+            return [{"event_id": "e1", "status": "approved"}] * 47
+        return _fake_query(tabela, filtros, *a, **kw)
+
+    monkeypatch.setattr(fontes_banco_mod, "query", query_com_evento)
+    corpo = client.get("/funil-sdr", params={"granularidade": "semana", "periodo": "2026-W48"}).json()
+    # Faltam 33 em 11 dias = 3/dia → semana 18.
+    assert corpo["evento"]["meta_velocimetro"] == 18
 
 
 def test_funil_sdr_com_evento_escolhido_traz_os_numeros_dele(monkeypatch):
@@ -455,15 +499,92 @@ def test_funil_sdr_com_evento_escolhido_traz_os_numeros_dele(monkeypatch):
             return [{"event_id": "e-antigo", "status": s} for s in ("approved", "approved", "rejected")]
         return _fake_query(tabela, filtros, *a, **kw)
 
-    monkeypatch.setattr(geral_banco_mod, "query", query_com_evento)
+    monkeypatch.setattr(fontes_banco_mod, "query", query_com_evento)
     corpo = client.get("/funil-sdr", params={"granularidade": "mes", "periodo": "2026-11", "evento": "e-antigo"}).json()
     assert filtros_eventos[0]["and"] == '(id.eq."e-antigo")'
     assert (corpo["evento"]["id"], corpo["evento"]["aprovados"], corpo["evento"]["rejeitados"]) == ("e-antigo", 2, 1)
 
 
+def test_funil_sdr_mostra_os_almocos_pagos_do_evento(monkeypatch):
+    client = _client(monkeypatch)
+    datas_almocos: list[date] = []
+
+    def query_com_evento(tabela, filtros=None, *a, **kw):
+        if tabela == "events":
+            return [{"id": "e-antigo", "title": "Confraria Akeel RJ", "event_date": "2026-10-10T22:00:00", "capacity": 50}]
+        if tabela == "registrations":
+            return [{"event_id": "e-antigo", "status": s} for s in ("approved", "approved", "rejected")]
+        return _fake_query(tabela, filtros, *a, **kw)
+
+    def almocos_falso(data_evento):
+        datas_almocos.append(data_evento)
+        return 7
+
+    monkeypatch.setattr(fontes_banco_mod, "query", query_com_evento)
+    monkeypatch.setattr(funil_evento_mod, "buscar_almocos_pagos", almocos_falso)
+    corpo = client.get("/funil-sdr", params={"granularidade": "mes", "periodo": "2026-11", "evento": "e-antigo"}).json()
+    assert corpo["evento"]["almocos_pagos"] == 7
+    assert datas_almocos == [date(2026, 10, 10)]
+
+
 def test_funil_sdr_evento_com_caractere_invalido_400(monkeypatch):
     resposta = _client(monkeypatch).get(
         "/funil-sdr", params={"granularidade": "mes", "periodo": "2026-11", "evento": 'x",title.neq.y'}
+    )
+    assert resposta.status_code == 400
+
+
+def test_sdr_200_com_ranking_previsao_e_serie_do_evento(monkeypatch):
+    from app.dominios.funil import rotas as rotas_funil_mod
+
+    client = _client(monkeypatch)
+    monkeypatch.setattr(rotas_funil_mod, "hoje_sp", lambda: date(2026, 11, 23))
+
+    def query_pagina_sdr(tabela, filtros=None, *a, **kw):
+        if tabela == "events":
+            return [{"id": "e1", "title": "Imersão", "event_date": "2026-12-02T16:00:00+00:00", "capacity": 60}]
+        if tabela == "registrations" and "order" in (filtros or {}):
+            return [{"created_at": "2026-11-20T15:00:00+00:00"}]
+        if tabela == "registrations":
+            return []
+        if tabela == "metricas_sdrs":
+            return [{"id_user": 9, "data": "2026-11-03", "key_data_ref_user": "x", "ligacoes_realizadas": 4}]
+        return _fake_query(tabela, filtros, *a, **kw)
+
+    monkeypatch.setattr(fontes_banco_mod, "query", query_pagina_sdr)
+    pedidos = []
+
+    def negocios_falso(inicio, fim, id_dash_por_dono):
+        pedidos.append((inicio, fim))
+        return {9: 40}
+
+    monkeypatch.setattr(rotas_funil_mod.sdr, "buscar_negocios_sdr", negocios_falso)
+    monkeypatch.setattr(
+        rotas_funil_mod.sdr, "buscar_inscricoes_pipedrive", lambda inicio, fim, donos, hoje: {9: {"mes": 5, "hoje": 1}}
+    )
+    resposta = client.get("/sdr", params={"granularidade": "mes", "periodo": "2026-11"})
+    assert resposta.status_code == 200
+    corpo = resposta.json()
+    assert corpo["evento"] == {"id": "e1", "titulo": "Imersão", "data": "2026-12-02T16:00:00+00:00", "capacidade": 60}
+    assert corpo["janela"] == {"inicio": "2026-11-20", "fim": "2026-12-01"}
+    sdr = corpo["sdrs"][0]
+    assert sdr["id_user"] == "9"
+    assert sdr["inscricoes"] == 3
+    assert sdr["ligacoes"] == 4
+    assert sdr["pontuacao"] == 62
+    assert sdr["posicao"] == 1
+    assert len(sdr["serie_evento"]) == 10  # 20/11 a 01/12 sem os domingos 22 e 29
+    assert sdr["ranking_mes"]["negocios"] == 40
+    assert sdr["ranking_mes"]["inscricoes"] == 5
+    assert sdr["ranking_mes"]["inscricoes_hoje"] == 1
+    assert corpo["mes_ranking"] == {"inicio": "2026-11-01", "fim": "2026-11-30"}
+    assert corpo["inscritos_sed_mes"] == 0  # o fake do SED não devolve inscrição no período
+    assert pedidos == [(date(2026, 11, 1), date(2026, 11, 30))]
+
+
+def test_sdr_evento_com_caractere_invalido_400(monkeypatch):
+    resposta = _client(monkeypatch).get(
+        "/sdr", params={"granularidade": "mes", "periodo": "2026-11", "evento": "a;b"}
     )
     assert resposta.status_code == 400
 
@@ -476,7 +597,7 @@ def test_funil_sdr_eventos_lista_os_proximos_eventos(monkeypatch):
             return [{"id": "e1", "title": "Imersão Alta Cadência", "event_date": "2026-11-18T22:00:00"}]
         return _fake_query(tabela, filtros, *a, **kw)
 
-    monkeypatch.setattr(geral_banco_mod, "query", query_eventos)
+    monkeypatch.setattr(fontes_banco_mod, "query", query_eventos)
     corpo = client.get("/funil-sdr/eventos").json()
     assert corpo["eventos"] == [{"id": "e1", "titulo": "Imersão Alta Cadência", "data": "2026-11-18T22:00:00"}]
 
@@ -491,7 +612,7 @@ def test_funil_evento_eventos_lista_as_imersoes(monkeypatch):
             return [{"id": "i2", "title": "Imersão Alta Cadência", "event_date": "2026-12-02T16:00:00+00:00"}]
         return _fake_query(tabela, filtros, *a, **kw)
 
-    monkeypatch.setattr(geral_banco_mod, "query", query_imersoes)
+    monkeypatch.setattr(fontes_banco_mod, "query", query_imersoes)
     resposta = client.get("/funil-evento/eventos")
     assert resposta.status_code == 200
     corpo = resposta.json()
@@ -500,14 +621,14 @@ def test_funil_evento_eventos_lista_as_imersoes(monkeypatch):
     assert filtros_eventos[0]["title"] == "ilike.*imers*"
 
 
-def test_funil_evento_sem_escolha_traz_a_proxima_imersao_com_o_funil(monkeypatch):
+def test_funil_evento_sem_escolha_traz_a_proxima_imersao_com_o_retrato_de_agora(monkeypatch):
     client = _client(monkeypatch)
-    chamadas_pipedrive: list[tuple] = []
+    chamadas_pipedrive: list[date] = []
     filtros_eventos: list[dict] = []
 
-    def fake_pipedrive(data_evento, inicio, fim):
-        chamadas_pipedrive.append((data_evento, inicio, fim))
-        return {"onboarding_agendado": 4, "onboarding_realizado": 3, "vendas": 1}
+    def fake_pipedrive(data_evento):
+        chamadas_pipedrive.append(data_evento)
+        return {"inscritos": 5, "onboarding_agendado": 4, "onboarding_realizado": 3, "vendas": 1}
 
     def query_imersao(tabela, filtros=None, *a, **kw):
         if tabela == "events":
@@ -520,7 +641,7 @@ def test_funil_evento_sem_escolha_traz_a_proxima_imersao_com_o_funil(monkeypatch
         return _fake_query(tabela, filtros, *a, **kw)
 
     monkeypatch.setattr(funil_evento_mod, "buscar_pipedrive_evento", fake_pipedrive)
-    monkeypatch.setattr(geral_banco_mod, "query", query_imersao)
+    monkeypatch.setattr(fontes_banco_mod, "query", query_imersao)
     resposta = client.get("/funil-evento", params={"granularidade": "mes", "periodo": "2026-11"})
     assert resposta.status_code == 200
     corpo = resposta.json()
@@ -533,17 +654,43 @@ def test_funil_evento_sem_escolha_traz_a_proxima_imersao_com_o_funil(monkeypatch
     assert corpo["funil"] == {
         "inscritos": 5, "onboarding_agendado": 4, "onboarding_realizado": 3, "comparecimento": 2, "vendas": 1,
     }
-    assert chamadas_pipedrive == [(date(2026, 12, 2), date(2026, 11, 1), date(2026, 11, 30))]
+    assert chamadas_pipedrive == [date(2026, 12, 2)]
     assert filtros_eventos[0]["title"] == "ilike.*imers*"
+
+
+def test_funil_evento_inscritos_vem_da_coluna_3_do_pipedrive_e_nao_do_sed(monkeypatch):
+    client = _client(monkeypatch)
+
+    def query_25_inscritos(tabela, filtros=None, *a, **kw):
+        if tabela == "events":
+            return [{"id": "i3", "title": "Imersão", "event_date": "2026-12-02T16:00:00+00:00", "capacity": 60}]
+        if tabela == "registrations" and "attended" in (filtros or {}):
+            return []
+        if tabela == "registrations":
+            return [{"event_id": "i3", "status": "pending"}] * 15 + [{"event_id": "i3", "status": "approved"}] * 10
+        return _fake_query(tabela, filtros, *a, **kw)
+
+    monkeypatch.setattr(
+        funil_evento_mod,
+        "buscar_pipedrive_evento",
+        lambda _d: {"inscritos": 7, "onboarding_agendado": 3, "onboarding_realizado": 2, "vendas": 0},
+    )
+    monkeypatch.setattr(fontes_banco_mod, "query", query_25_inscritos)
+    corpo = client.get("/funil-evento", params={"granularidade": "mes", "periodo": "2026-11"}).json()
+    assert corpo["funil"] == {
+        "inscritos": 7, "onboarding_agendado": 3, "onboarding_realizado": 2, "comparecimento": 0, "vendas": 0,
+    }
+    assert corpo["evento"]["pendentes"] == 15
+    assert corpo["evento"]["aprovados"] == 10
 
 
 def test_funil_evento_com_evento_escolhido_usa_a_data_dele(monkeypatch):
     client = _client(monkeypatch)
-    chamadas_pipedrive: list[tuple] = []
+    chamadas_pipedrive: list[date] = []
     filtros_eventos: list[dict] = []
 
-    def fake_pipedrive(data_evento, inicio, fim):
-        chamadas_pipedrive.append((data_evento, inicio, fim))
+    def fake_pipedrive(data_evento):
+        chamadas_pipedrive.append(data_evento)
         return dict(funil_evento_mod.ZERADO)
 
     def query_com_evento(tabela, filtros=None, *a, **kw):
@@ -555,7 +702,7 @@ def test_funil_evento_com_evento_escolhido_usa_a_data_dele(monkeypatch):
         return _fake_query(tabela, filtros, *a, **kw)
 
     monkeypatch.setattr(funil_evento_mod, "buscar_pipedrive_evento", fake_pipedrive)
-    monkeypatch.setattr(geral_banco_mod, "query", query_com_evento)
+    monkeypatch.setattr(fontes_banco_mod, "query", query_com_evento)
     resposta = client.get("/funil-evento", params={"granularidade": "semana", "periodo": "2026-W47", "evento": "e-antigo"})
     assert resposta.status_code == 200
     corpo = resposta.json()
@@ -563,15 +710,15 @@ def test_funil_evento_com_evento_escolhido_usa_a_data_dele(monkeypatch):
     assert corpo["evento"]["id"] == "e-antigo"
     assert corpo["periodo"]["inicio"] == "2026-11-16"
     assert corpo["periodo"]["fim"] == "2026-11-22"
-    assert chamadas_pipedrive == [(date(2026, 11, 17), date(2026, 11, 16), date(2026, 11, 22))]
+    assert chamadas_pipedrive == [date(2026, 11, 17)]
 
 
 def test_funil_evento_sem_imersao_zera_o_funil(monkeypatch):
     client = _client(monkeypatch)
-    chamadas_pipedrive: list[tuple] = []
+    chamadas_pipedrive: list[date] = []
 
-    def fake_pipedrive(data_evento, inicio, fim):
-        chamadas_pipedrive.append((data_evento, inicio, fim))
+    def fake_pipedrive(data_evento):
+        chamadas_pipedrive.append(data_evento)
         return dict(funil_evento_mod.ZERADO)
 
     def query_sem_imersao(tabela, filtros=None, *a, **kw):
@@ -580,7 +727,7 @@ def test_funil_evento_sem_imersao_zera_o_funil(monkeypatch):
         return _fake_query(tabela, filtros, *a, **kw)
 
     monkeypatch.setattr(funil_evento_mod, "buscar_pipedrive_evento", fake_pipedrive)
-    monkeypatch.setattr(geral_banco_mod, "query", query_sem_imersao)
+    monkeypatch.setattr(fontes_banco_mod, "query", query_sem_imersao)
     resposta = client.get("/funil-evento", params={"granularidade": "mes", "periodo": "2026-11"})
     assert resposta.status_code == 200
     corpo = resposta.json()
@@ -603,7 +750,7 @@ def test_funil_sdr_no_filtro_de_dia_busca_a_semana_ate_o_dia_para_o_grafico(monk
             filtros_sdr.append(filtros)
         return _fake_query(tabela, filtros, *a, **kw)
 
-    monkeypatch.setattr(funil_sdr_mod, "query", query_espia)
+    monkeypatch.setattr(fontes_banco_mod, "query", query_espia)
     resposta = client.get("/funil-sdr", params={"granularidade": "dia", "periodo": "2026-11-16"})
     assert resposta.status_code == 200
     assert filtros_sdr == [{"and": "(data.gte.2026-11-10,data.lte.2026-11-16)"}]

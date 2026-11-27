@@ -4,7 +4,7 @@ from datetime import datetime
 import httpx
 import pytest
 
-from app.fontes import pipedrive
+from app.fontes import banco, pipedrive
 from app.periodo import TZ_SP
 
 
@@ -46,6 +46,26 @@ def test_negocios_no_estagio_pagina_pelo_cursor(monkeypatch):
     assert chamadas[0][1] == {"stage_id": "11", "updated_since": "2026-11-01T03:00:00Z", "limit": "500"}
     assert chamadas[1][1]["cursor"] == "c2"
     assert chamadas[0][2] == {"x-api-token": "tok"}
+
+
+def test_negocios_atuais_no_estagio_pede_so_o_estagio_e_pagina_pelo_cursor(monkeypatch):
+    chamadas = []
+    respostas = [
+        _resposta({"data": [{"id": 1}], "additional_data": {"next_cursor": "c2"}}),
+        _resposta({"data": [{"id": 2}], "additional_data": {"next_cursor": None}}),
+    ]
+
+    def _get(url, params=None, headers=None, **kwargs):
+        chamadas.append((url, params))
+        return respostas.pop(0)
+
+    monkeypatch.setattr(pipedrive.httpx, "get", _get)
+
+    negocios = pipedrive.negocios_atuais_no_estagio(46)
+
+    assert negocios == [{"id": 1}, {"id": 2}]
+    assert chamadas[0][1] == {"stage_id": "46", "limit": "500"}
+    assert chamadas[1][1]["cursor"] == "c2"
 
 
 def test_negocios_ganhos_desde_filtra_won_e_pagina_pelo_cursor(monkeypatch):
@@ -162,3 +182,67 @@ def test_sem_configuracao_ou_com_erro_sobe_pipedrive_indisponivel(monkeypatch):
 
     with pytest.raises(pipedrive.PipedriveIndisponivel):
         pipedrive.negocios_no_estagio(11, datetime(2026, 11, 1, tzinfo=TZ_SP))
+
+
+def test_ou_vazio_devolve_o_vazio_e_registra_falha_quando_o_pipedrive_cai():
+    def _fora():
+        raise pipedrive.PipedriveIndisponivel("fora")
+
+    banco.iniciar_registro_de_falhas()
+    antes = banco.falhas_na_thread()
+
+    resultado = pipedrive.ou_vazio(_fora, {"x": 0}, "Pipedrive indisponível — teste")
+
+    assert resultado == {"x": 0}
+    assert banco.tabelas_com_falha() == ["pipedrive"]
+    assert banco.falhas_na_thread() == antes + 1
+
+
+def test_ou_vazio_devolve_o_resultado_sem_registrar_falha_quando_da_certo():
+    banco.iniciar_registro_de_falhas()
+    antes = banco.falhas_na_thread()
+
+    resultado = pipedrive.ou_vazio(lambda: [1, 2], [], "msg")
+
+    assert resultado == [1, 2]
+    assert banco.tabelas_com_falha() == []
+    assert banco.falhas_na_thread() == antes
+
+
+def _mudanca(campo, de, para, quando):
+    return {"object": "dealChange", "data": {"field_key": campo, "old_value": de, "new_value": para, "log_time": quando}}
+
+
+def test_mudancas_de_estagio_pagina_filtra_stage_id_e_espera_no_limite_de_taxa(monkeypatch):
+    chamadas = []
+    respostas = [
+        httpx.Response(429, json={}, request=httpx.Request("GET", "https://x.pipedrive.com")),
+        _resposta({
+            "data": [
+                _mudanca("stage_id", "4", "3", "2026-01-27 04:59:57"),
+                _mudanca("status", "open", "lost", "2026-01-29 14:58:33"),
+                {"object": "note", "data": {}},
+            ],
+            "additional_data": {"pagination": {"more_items_in_collection": True, "next_start": 500}},
+        }),
+        _resposta({
+            "data": [_mudanca("stage_id", "1", "4", "2026-01-27 04:52:43")],
+            "additional_data": {"pagination": {"more_items_in_collection": False}},
+        }),
+    ]
+
+    def _get(url, params=None, headers=None, **kwargs):
+        chamadas.append((url, dict(params)))
+        return respostas.pop(0)
+
+    monkeypatch.setattr(pipedrive.httpx, "get", _get)
+    esperas = []
+    monkeypatch.setattr(pipedrive.time, "sleep", esperas.append)
+
+    assert pipedrive.mudancas_de_estagio(13) == [
+        {"de": 1, "para": 4, "em": "2026-01-27T04:52:43Z"},
+        {"de": 4, "para": 3, "em": "2026-01-27T04:59:57Z"},
+    ]
+    assert esperas == [pipedrive.ESPERA_429_SEGUNDOS]
+    assert [c[0] for c in chamadas] == ["https://x.pipedrive.com/api/v1/deals/13/flow"] * 3
+    assert [c[1]["start"] for c in chamadas] == ["0", "0", "500"]

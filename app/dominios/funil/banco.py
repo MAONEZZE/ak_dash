@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 
-from app.fontes.banco import query
+from app.fontes import supabase
 from app.planilhas import COLUNAS_POR_TABELA
 
 
@@ -25,20 +25,13 @@ def buscar_contas(canal: str, inicio: date, fim: date, inicio_serie: date | None
     inicio_serie = inicio_serie or inicio
     colunas_metricas = COLUNAS_POR_TABELA["metricas_contas"]
 
-    contas = query("contas_funil", {"canal": f"eq.{canal}"}, colunas="id,nome,id_seller")
+    contas = supabase.ler_contas_do_canal(canal)
     if not contas:
         return []
     contas = sorted(contas, key=lambda c: c["id"])
     ids = [c["id"] for c in contas]
 
-    linhas = query(
-        "metricas_contas",
-        {
-            "id_conta": f"in.({','.join(str(i) for i in ids)})",
-            "and": f"(data.gte.{inicio_serie.isoformat()},data.lte.{fim.isoformat()})",
-        },
-        colunas="id_conta,data," + ",".join(colunas_metricas),
-    )
+    linhas = supabase.ler_metricas_das_contas(inicio_serie, fim, ids)
 
     somas: dict[int, dict[str, int]] = {i: {m: 0 for m in colunas_metricas} for i in ids}
     series: dict[int, list[dict]] = {i: [] for i in ids}

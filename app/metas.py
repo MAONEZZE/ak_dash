@@ -1,6 +1,6 @@
 """Leitura das metas — valor DIÁRIO por (PESSOA, cargo, métrica).
 
-Fonte: `dash2.metas`, uma linha por (`id_user`, `cargo`, `metrica`) com o
+Fonte: `metas` (via `app.fontes.supabase`), uma linha por (`id_user`, `cargo`, `metrica`) com o
 `valor_diario`, preenchido pela planilha.
 
 A meta ATUAL vale pra qualquer período (decisão do usuário, 2026-10-05): não
@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Iterable
 
-from app.fontes.banco import query
+from app.fontes import supabase
 from app.periodo import dias_uteis_totais
 
 
@@ -74,7 +74,7 @@ class Metas:
 
 
 def buscar_metas() -> Metas:
-    linhas = query("metas", colunas="id_user,cargo,metrica,valor_diario")
+    linhas = supabase.ler_metas()
     valores: dict[tuple[int, str, str], int] = {}
     for r in linhas:
         id_user, cargo, metrica, valor = r.get("id_user"), r.get("cargo"), r.get("metrica"), r.get("valor_diario")

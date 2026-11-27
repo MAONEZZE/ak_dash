@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from app import planilha_logs
+from app.workers import planilha_logs
 
 
 CABECALHO = ["Data", "Hora", "Usuario da ação", "Atividade feita", "Ação evento", "Nome do Cliente", "Telefone do Cliente", "Quem indicou", "Prospectado por", "Linkedin do Cliente", "instagram do Cliente", "url négocio"]

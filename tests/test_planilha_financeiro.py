@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from app import planilha_financeiro
+from app.workers import planilha_financeiro
 
 
 CABECALHO = ["ID", "Data da Venda", "Cliente", "Telefone"] + [""] * 42

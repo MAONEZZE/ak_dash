@@ -5,17 +5,20 @@ import logging
 import threading
 import time
 from calendar import monthrange
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Callable
 
 from app import cache
 from app.config import Settings
 from app.fontes import banco
-from app.fontes.google_sheets import LeitorSheets, criar_credenciais
+from app.fontes import pipedrive as pipedrive_api
+from app.fontes import supabase
+from app.workers.google_sheets import LeitorSheets, criar_credenciais
 from app.periodo import TZ_SP, hoje_sp
-from app.planilha_financeiro import APELIDOS, COLUNAS_VENDA, ler_base_vendas
-from app.planilha_logs import COLUNAS_LOG, ler_logs
+from app.workers.planilha_financeiro import APELIDOS, COLUNAS_VENDA, ler_base_vendas
+from app.workers.planilha_logs import COLUNAS_LOG, ler_logs
 from app.planilhas import (
     COLUNAS_POR_TABELA,
     Aba,
@@ -44,6 +47,9 @@ CLOSERS = Planilha("closers", "metricas_closers", "closer")
 class Worker:
     # Já logou a primeira leitura ok? (na classe: subclasses com __init__ próprio também têm)
     _leu_ok = False
+    # Chaves do cache (app/cache.py) que dependem das tabelas que este worker grava: só elas são
+    # invalidadas quando ele grava. "metas" pega também "metas-funil-sdr".
+    PREFIXOS_CACHE: tuple[str, ...] = ("vw_metricas:", "geral_", "metas")
 
     def __init__(
         self,
@@ -63,11 +69,11 @@ class Worker:
         self.status = {"ultima_leitura_ok": None, "ultimo_erro": None}
         self._puladas: set[str] = set()
 
-    def _consultar(self, tabela: str, filtros: dict[str, str], colunas: str) -> list[dict]:
+    def _exigir(self, rotulo: str, ler: Callable[[], list[dict]]) -> list[dict]:
         antes = banco.falhas_na_thread()
-        linhas = banco.query(tabela, filtros, colunas=colunas)
+        linhas = ler()
         if banco.falhas_na_thread() != antes:
-            raise RuntimeError(f"consulta a {tabela} falhou")
+            raise RuntimeError(f"consulta a {rotulo} falhou")
         return linhas
 
     def _carregar_estado(self, ano: int, mes: int) -> None:
@@ -76,15 +82,14 @@ class Worker:
         colunas = COLUNAS_POR_TABELA[self.planilha.tabela]
         self.metricas = {
             l["key_data_ref_user"]: l
-            for l in self._consultar(
+            for l in self._exigir(
                 self.planilha.tabela,
-                {"and": f"(data.gte.{inicio},data.lte.{fim})"},
-                "id_user,data,key_data_ref_user," + ",".join(colunas),
+                lambda: supabase.ler_metricas_planilha(self.planilha.tabela, inicio, fim, colunas),
             )
         }
         self.metas = {
             (l["id_user"], l["metrica"]): l["valor_diario"]
-            for l in self._consultar("metas", {"cargo": f"eq.{self.planilha.cargo}"}, "id_user,metrica,valor_diario")
+            for l in self._exigir("metas", lambda: supabase.ler_metas_do_cargo(self.planilha.cargo))
         }
 
     def ciclo(self) -> None:
@@ -92,11 +97,11 @@ class Worker:
         self._carregar_estado(hoje.year, hoje.month)  # estado sempre do banco: cada ciclo é um job independente
 
         abas = [a for titulo, linhas in self.ler_abas(self.planilha_id) if (a := ler_linhas(titulo, linhas)) is not None]
-        usuarios = self._consultar("users", {}, "id,nome")
-        com_cargo = {l["id_user"] for l in self._consultar("user_cargos", {"cargo": f"eq.{self.planilha.cargo}"}, "id_user")}
+        usuarios = self._exigir("users", supabase.ler_usuarios)
+        com_cargo = {l["id_user"] for l in self._exigir("user_cargos", lambda: supabase.ler_ids_com_cargo(self.planilha.cargo))}
 
         if self._sincronizar(abas, usuarios, com_cargo, hoje):
-            cache.invalidar()
+            cache.invalidar_prefixos(self.PREFIXOS_CACHE)
 
     def _sincronizar(self, abas: list[Aba], usuarios: list[dict], com_cargo: set[int], hoje: date) -> bool:
         colunas = COLUNAS_POR_TABELA[self.planilha.tabela]
@@ -144,31 +149,25 @@ class Worker:
         gravou = False
 
         if metricas_novas:
-            banco.upsert(
+            supabase.gravar_metricas_planilha(
                 self.planilha.tabela,
                 [{**l, "atualizado_em": carimbo} for l in sorted(metricas_novas.values(), key=lambda l: (l["id_user"], l["data"]))],
-                on_conflict="key_data_ref_user",
             )
             self.metricas.update(metricas_novas)
             gravou = True
 
         if metas_novas:
-            banco.upsert(
-                "metas",
+            supabase.gravar_metas(
                 [
                     {"id_user": i, "cargo": self.planilha.cargo, "metrica": m, "valor_diario": v, "atualizado_em": carimbo}
                     for (i, m), v in sorted(metas_novas.items())
                 ],
-                on_conflict="id_user,cargo,metrica",
             )
             self.metas.update(metas_novas)
             gravou = True
 
         for i, m in sorted(metas_apagadas):
-            banco.apagar(
-                "metas",
-                {"id_user": f"eq.{i}", "cargo": f"eq.{self.planilha.cargo}", "metrica": f"eq.{m}"},
-            )
+            supabase.apagar_meta(i, self.planilha.cargo, m)
             self.metas.pop((i, m), None)
             gravou = True
 
@@ -198,6 +197,7 @@ class Worker:
 
 class WorkerSdr(Worker):
     """Planilha de SDRs: além de metricas_sdrs/metas (Geral e Time), espelha as abas por pessoa em metricas_funil_sdr e as metas da aba "Dashboard SDR" em metas_funil_sdr (página Funil SDR). Uma leitura da planilha por ciclo."""
+    PREFIXOS_CACHE = (*Worker.PREFIXOS_CACHE, "funil-sdr:")
 
     def __init__(
         self,
@@ -214,18 +214,13 @@ class WorkerSdr(Worker):
         super()._carregar_estado(ano, mes)
         inicio = date(ano, mes, 1)
         fim = date(ano, mes, monthrange(ano, mes)[1])
-        colunas = COLUNAS_POR_TABELA["metricas_funil_sdr"]
         self.funil = {
             (l["id_user"], l["data"]): l
-            for l in self._consultar(
-                "metricas_funil_sdr",
-                {"and": f"(data.gte.{inicio},data.lte.{fim})"},
-                "id_user,data," + ",".join(colunas),
-            )
+            for l in self._exigir("metricas_funil_sdr", lambda: supabase.ler_metricas_funil_sdr(inicio, fim))
         }
         self.metas_funil = {
             (l["metrica"], l["periodo"], l["id_user"]): l["valor"]
-            for l in self._consultar("metas_funil_sdr", {}, "metrica,periodo,id_user,valor")
+            for l in self._exigir("metas_funil_sdr", supabase.ler_metas_funil_sdr)
         }
 
     def _sincronizar_funil(self, abas: list[Aba], usuarios: list[dict], com_cargo: set[int], hoje: date) -> bool:
@@ -248,10 +243,8 @@ class WorkerSdr(Worker):
             novas.update({k: l for k, l in desejadas.items() if self.funil.get(k) != l})
         if not novas:
             return False
-        banco.upsert(
-            "metricas_funil_sdr",
+        supabase.gravar_metricas_funil_sdr(
             [{**l, "atualizado_em": self.agora().isoformat()} for _, l in sorted(novas.items())],
-            on_conflict="id_user,data",
         )
         self.funil.update(novas)
         return True
@@ -277,20 +270,15 @@ class WorkerSdr(Worker):
         apagadas = [k for k in self.metas_funil if k not in desejadas]
         carimbo = self.agora().isoformat()
         if novas:
-            banco.upsert(
-                "metas_funil_sdr",
+            supabase.gravar_metas_funil_sdr(
                 [
                     {"metrica": m, "periodo": p, "id_user": i, "valor": v, "atualizado_em": carimbo}
                     for (m, p, i), v in sorted(novas.items(), key=lambda kv: (kv[0][0], kv[0][1], kv[0][2] or 0))
                 ],
-                on_conflict="metrica,periodo,id_user",
             )
             self.metas_funil.update(novas)
         for m, p, i in apagadas:
-            banco.apagar(
-                "metas_funil_sdr",
-                {"metrica": f"eq.{m}", "periodo": f"eq.{p}", "id_user": "is.null" if i is None else f"eq.{i}"},
-            )
+            supabase.apagar_meta_funil_sdr(m, p, i)
             self.metas_funil.pop((m, p, i))
         return bool(novas or apagadas)
 
@@ -300,8 +288,8 @@ class WorkerSdr(Worker):
 
         brutas = self.ler_abas(self.planilha_id)
         abas = [a for titulo, linhas in brutas if (a := ler_linhas(titulo, linhas)) is not None]
-        usuarios = self._consultar("users", {}, "id,nome")
-        com_cargo = {l["id_user"] for l in self._consultar("user_cargos", {"cargo": f"eq.{self.planilha.cargo}"}, "id_user")}
+        usuarios = self._exigir("users", supabase.ler_usuarios)
+        com_cargo = {l["id_user"] for l in self._exigir("user_cargos", lambda: supabase.ler_ids_com_cargo(self.planilha.cargo))}
 
         gravou = self._sincronizar(abas, usuarios, com_cargo, hoje)
         if self._sincronizar_funil(abas, usuarios, com_cargo, hoje):
@@ -310,11 +298,12 @@ class WorkerSdr(Worker):
         if dashboard is not None and self._sincronizar_metas_funil(dashboard, usuarios, com_cargo):
             gravou = True
         if gravou:
-            cache.invalidar()
+            cache.invalidar_prefixos(self.PREFIXOS_CACHE)
 
 
 class WorkerFunil(Worker):
     """Espelha as abas de seller da planilha de um funil (LinkedIn/Instagram) em metricas_sellers e metas, e as abas de conta em metricas_contas."""
+    PREFIXOS_CACHE = (*Worker.PREFIXOS_CACHE, "funil:")
 
     def __init__(
         self,
@@ -333,14 +322,9 @@ class WorkerFunil(Worker):
         super()._carregar_estado(ano, mes)
         inicio = date(ano, mes, 1)
         fim = date(ano, mes, monthrange(ano, mes)[1])
-        colunas = COLUNAS_POR_TABELA["metricas_contas"]
         self.metricas_contas = {
             (l["id_conta"], l["data"]): l
-            for l in self._consultar(
-                "metricas_contas",
-                {"and": f"(data.gte.{inicio},data.lte.{fim})"},
-                "id_conta,data," + ",".join(colunas),
-            )
+            for l in self._exigir("metricas_contas", lambda: supabase.ler_metricas_das_contas(inicio, fim))
         }
 
     def _sincronizar_contas(self, abas_conta: list[Aba], hoje: date) -> bool:
@@ -373,13 +357,11 @@ class WorkerFunil(Worker):
         if not metricas_novas:
             return False
 
-        banco.upsert(
-            "metricas_contas",
+        supabase.gravar_metricas_contas(
             [
                 {**l, "atualizado_em": self.agora().isoformat()}
                 for l in sorted(metricas_novas.values(), key=lambda l: (l["id_conta"], l["data"]))
             ],
-            on_conflict="id_conta,data",
         )
         self.metricas_contas.update(metricas_novas)
         return True
@@ -389,8 +371,8 @@ class WorkerFunil(Worker):
         self._carregar_estado(hoje.year, hoje.month)  # estado sempre do banco: cada ciclo é um job independente
 
         abas = [a for titulo, linhas in self.ler_abas(self.planilha_id) if (a := ler_linhas(titulo, linhas)) is not None]
-        usuarios = self._consultar("users", {}, "id,nome")
-        com_cargo = {l["id_user"] for l in self._consultar("user_cargos", {"cargo": f"eq.{self.planilha.cargo}"}, "id_user")}
+        usuarios = self._exigir("users", supabase.ler_usuarios)
+        com_cargo = {l["id_user"] for l in self._exigir("user_cargos", lambda: supabase.ler_ids_com_cargo(self.planilha.cargo))}
 
         abas_seller = [a for a in abas if (u := resolver_usuario(a.pessoa, usuarios)) is not None and u["id"] in com_cargo]
         gravou = self._sincronizar(abas_seller, usuarios, com_cargo, hoje)
@@ -399,7 +381,7 @@ class WorkerFunil(Worker):
         id_seller = resolver_usuario(abas_seller[0].pessoa, usuarios)["id"] if abas_seller else None
 
         def contas_do_canal() -> dict[str, dict]:
-            return {l["nome"]: l for l in self._consultar("contas_funil", {"canal": f"eq.{self.canal}"}, "id,canal,nome,id_seller")}
+            return {l["nome"]: l for l in self._exigir("contas_funil", lambda: supabase.ler_contas_do_canal(self.canal))}
 
         existentes = contas_do_canal()
         novas = [
@@ -409,7 +391,7 @@ class WorkerFunil(Worker):
         ]
         if novas:
             carimbo = self.agora().isoformat()
-            banco.upsert("contas_funil", [{**l, "atualizado_em": carimbo} for l in novas], on_conflict="canal,nome")
+            supabase.gravar_contas_funil([{**l, "atualizado_em": carimbo} for l in novas])
             existentes = contas_do_canal()
             gravou = True
         self.contas = {nome: l["id"] for nome, l in existentes.items()}
@@ -417,11 +399,12 @@ class WorkerFunil(Worker):
             gravou = True
 
         if gravou:
-            cache.invalidar()
+            cache.invalidar_prefixos(self.PREFIXOS_CACHE)
 
 
 class WorkerFinanceiro(Worker):
     """Espelha a aba BASE_VENDAS da Isaac Newton2.0 em metricas_faturamento + recebimentos_faturamento."""
+    PREFIXOS_CACHE = ("faturamento:", "financeiro:")
 
     def __init__(
         self,
@@ -445,20 +428,19 @@ class WorkerFinanceiro(Worker):
     def _carregar_estado(self) -> None:
         self.vendas = {
             l["id_planilha"]: l
-            for l in self._consultar(
+            for l in self._exigir(
                 "metricas_faturamento",
-                {"id_planilha": "not.is.null"},
-                "id_planilha,id_cliente," + ",".join(c for c in COLUNAS_VENDA if c != "id_planilha"),
+                lambda: supabase.ler_vendas_com_id_planilha("id_planilha,id_cliente," + ",".join(c for c in COLUNAS_VENDA if c != "id_planilha")),
             )
         }
         self.recebimentos = {
             (l["id_planilha_venda"], l["mes"]): l
-            for l in self._consultar("recebimentos_faturamento", {}, "id_planilha_venda,mes,pago,liquido")
+            for l in self._exigir("recebimentos_faturamento", supabase.ler_todos_recebimentos)
         }
 
     def _resolver_clientes(self, lidas: list) -> dict[int, int | None]:
         def casar() -> dict[int, int | None]:
-            clientes = self._consultar("cliente_faturamento", {}, "id,nome,telefone")
+            clientes = self._exigir("cliente_faturamento", supabase.ler_clientes)
             por_telefone = {c["telefone"]: c["id"] for c in clientes if c["telefone"]}
             por_nome = {normalizar(c["nome"]): c["id"] for c in clientes}
             resolvidos: dict[int, int | None] = {}
@@ -480,8 +462,8 @@ class WorkerFinanceiro(Worker):
             elif v.cliente_nome:
                 sem_telefone.setdefault(normalizar(v.cliente_nome), {"nome": v.cliente_nome})
         if com_telefone or sem_telefone:
-            banco.upsert("cliente_faturamento", list(com_telefone.values()), on_conflict="telefone")
-            banco.upsert("cliente_faturamento", list(sem_telefone.values()), on_conflict="id")
+            supabase.gravar_clientes_por_telefone(list(com_telefone.values()))
+            supabase.gravar_clientes_por_id(list(sem_telefone.values()))
             resolvidos = casar()
         return resolvidos
 
@@ -518,38 +500,30 @@ class WorkerFinanceiro(Worker):
         gravou = False
 
         if vendas_novas:
-            banco.upsert(
-                self.planilha.tabela,
-                [{**l, "atualizado_em": carimbo} for l in vendas_novas.values()],
-                on_conflict="id_planilha",
-            )
+            supabase.gravar_vendas([{**l, "atualizado_em": carimbo} for l in vendas_novas.values()])
             self.vendas.update(vendas_novas)
             gravou = True
 
         if receb_novos:
-            banco.upsert(
-                "recebimentos_faturamento",
-                [{**l, "atualizado_em": carimbo} for l in receb_novos.values()],
-                on_conflict="id_planilha_venda,mes",
-            )
+            supabase.gravar_recebimentos([{**l, "atualizado_em": carimbo} for l in receb_novos.values()])
             self.recebimentos.update(receb_novos)
             gravou = True
 
         # só depois de ler e gravar a planilha: uma leitura que falha não pode esvaziar o faturamento
         if self._apagar_legado and desejadas:
-            banco.apagar("metricas_faturamento", {"id_planilha": "is.null"})
+            supabase.apagar_vendas_sem_id_planilha()
             self._apagar_legado = False
             gravou = True
 
         meses_apagados = [k for k in sorted(self.recebimentos) if k not in receb_desejados and k[0] in desejadas]
         for i, mes in meses_apagados:
-            banco.apagar("recebimentos_faturamento", {"id_planilha_venda": f"eq.{i}", "mes": f"eq.{mes}"})
+            supabase.apagar_recebimento(i, mes)
             self.recebimentos.pop((i, mes))
             gravou = True
 
         removidas = sorted(set(self.vendas) - set(desejadas))
         if removidas:
-            banco.apagar("metricas_faturamento", {"id_planilha": f"in.({','.join(map(str, removidas))})"})
+            supabase.apagar_vendas(removidas)
             for i in removidas:
                 self.vendas.pop(i, None)
             for k in [k for k in self.recebimentos if k[0] in removidas]:
@@ -557,7 +531,7 @@ class WorkerFinanceiro(Worker):
             gravou = True
 
         if gravou:
-            cache.invalidar()
+            cache.invalidar_prefixos(self.PREFIXOS_CACHE)
 
 
 class WorkerLogs(Worker):
@@ -580,7 +554,10 @@ class WorkerLogs(Worker):
     def _carregar_estado(self) -> None:
         self.logs = {
             l["chave"]: l
-            for l in self._consultar("logs_pipedrive", {}, "chave,ocorrencias,id_user," + ",".join(COLUNAS_LOG))
+            for l in self._exigir(
+                "logs_pipedrive",
+                lambda: supabase.ler_logs("chave,ocorrencias,id_user," + ",".join(COLUNAS_LOG)),
+            )
         }
 
     def ciclo(self) -> None:
@@ -598,7 +575,7 @@ class WorkerLogs(Worker):
         if not leitura.eventos:
             # leitura vazia não pode esvaziar a tabela (mesmo cuidado do financeiro)
             raise RuntimeError("aba Logs sem nenhum evento válido; nada foi apagado")
-        usuarios = self._consultar("users", {}, "id,nome")
+        usuarios = self._exigir("users", supabase.ler_usuarios)
 
         desejados: dict[str, dict] = {}
         for e in leitura.eventos:
@@ -616,18 +593,112 @@ class WorkerLogs(Worker):
             if {c: self.logs.get(k, {}).get(c) for c in d} != d
         }
         if novos:
-            banco.upsert(
-                "logs_pipedrive",
-                [{**l, "atualizado_em": self.agora().isoformat()} for l in novos.values()],
-                on_conflict="chave",
-            )
+            supabase.gravar_logs([{**l, "atualizado_em": self.agora().isoformat()} for l in novos.values()])
             self.logs.update(novos)
 
         removidas = sorted(set(self.logs) - set(desejados))
         if removidas:
-            banco.apagar("logs_pipedrive", {"chave": f"in.({','.join(removidas)})"})
+            supabase.apagar_logs(removidas)
             for k in removidas:
                 self.logs.pop(k, None)
+
+
+# Desde quando o WorkerPipedrive guarda o histórico de estágios (o filtro de ano do dash começa aqui).
+INICIO_HISTORICO_PIPEDRIVE = datetime(2026, 1, 1, tzinfo=TZ_SP)
+# O cursor volta essa margem a cada ciclo: negócio atualizado enquanto o ciclo anterior rodava não escapa.
+MARGEM_CURSOR_PIPEDRIVE = timedelta(minutes=5)
+INTERVALO_PIPEDRIVE_SEGUNDOS = 60.0
+LOTE_PIPEDRIVE = 100  # negócios gravados por vez: o preenchimento inicial salva o progresso aos poucos
+CONCORRENCIA_HISTORICO = 4  # chamadas de histórico ao mesmo tempo (limite do Pipedrive: 120 a cada 2s)
+
+
+def entradas_por_estagio(negocio: dict, mudancas: list[dict]) -> dict[int, str]:
+    """Primeira entrada (UTC, ISO) do negócio em cada estágio.
+
+    O estágio em que o negócio nasceu (o `de` da primeira mudança; sem mudança, o estágio atual)
+    entra em `add_time`; cada mudança entra no estágio `para` no momento `em`. Reentrada não conta.
+    """
+    if not negocio.get("add_time"):
+        return {}
+    inicial = mudancas[0]["de"] if mudancas and mudancas[0]["de"] is not None else negocio.get("stage_id")
+    entradas: dict[int, str] = {}
+    if inicial is not None:
+        entradas[int(inicial)] = negocio["add_time"]
+    for m in mudancas:
+        entradas.setdefault(m["para"], m["em"])
+    return entradas
+
+
+def _campos_negocio(negocio: dict) -> dict:
+    return {"id_dono": negocio.get("owner_id"), "id_pessoa": negocio.get("person_id"), "stage_change_time": negocio.get("stage_change_time")}
+
+
+class WorkerPipedrive(Worker):
+    """Espelha o histórico de estágios do Pipedrive em pipedrive_negocios + pipedrive_entradas_estagio.
+
+    A cada ciclo lista os negócios atualizados desde o ciclo anterior (no primeiro, desde
+    INICIO_HISTORICO_PIPEDRIVE) e relê o histórico (/v1/deals/{id}/flow) só de quem mudou de estágio
+    desde a última leitura (`stage_change_time` diferente do guardado). Dono/pessoa trocados sem
+    mudar de estágio só atualizam pipedrive_negocios. Ver sql/2026-11-25-pipedrive-estagios.sql.
+    """
+
+    PREFIXOS_CACHE = ("pipedrive:",)
+
+    def __init__(self, agora: Callable[[], datetime] = lambda: datetime.now(TZ_SP)):
+        self.planilha = Planilha("pipedrive", "pipedrive_entradas_estagio", "")
+        self.planilha_id = ""
+        self.agora = agora
+        self.status = {"ultima_leitura_ok": None, "ultimo_erro": None}
+        self._puladas: set[str] = set()
+        self.cursor: datetime | None = None
+        self.negocios: dict[int, dict] | None = None
+
+    def ciclo(self) -> None:
+        inicio_ciclo = self.agora()
+        if self.negocios is None:
+            self.negocios = {
+                int(l["id_deal"]): {k: l.get(k) for k in ("id_dono", "id_pessoa", "stage_change_time")}
+                for l in self._exigir("pipedrive_negocios", supabase.ler_negocios_pipedrive)
+            }
+
+        mudaram: list[tuple[dict, bool]] = []  # (negócio, precisa reler o histórico?)
+        for n in pipedrive_api.negocios_atualizados_desde(self.cursor or INICIO_HISTORICO_PIPEDRIVE):
+            campos = _campos_negocio(n)
+            guardado = self.negocios.get(n["id"])
+            if guardado != campos:
+                mudaram.append((n, guardado is None or guardado["stage_change_time"] != campos["stage_change_time"]))
+
+        for i in range(0, len(mudaram), LOTE_PIPEDRIVE):
+            self._gravar_lote(mudaram[i:i + LOTE_PIPEDRIVE])
+
+        self.cursor = inicio_ciclo - MARGEM_CURSOR_PIPEDRIVE
+        if mudaram:
+            cache.marcar_vencido(self.PREFIXOS_CACHE)
+
+    def _gravar_lote(self, lote: list[tuple[dict, bool]]) -> None:
+        reler = [n for n, precisa in lote if precisa]
+
+        def historico(n: dict) -> list[dict]:
+            # Sem stage_change_time o negócio nunca mudou de estágio: nem chama a API.
+            return pipedrive_api.mudancas_de_estagio(n["id"]) if n.get("stage_change_time") else []
+
+        with ThreadPoolExecutor(max_workers=CONCORRENCIA_HISTORICO) as executor:
+            historicos = list(executor.map(historico, reler))
+
+        carimbo = self.agora().isoformat()
+        # Negócio antes das entradas: a entrada referencia o negócio (chave estrangeira).
+        supabase.gravar_negocios_pipedrive(
+            [{"id_deal": n["id"], **_campos_negocio(n), "atualizado_em": carimbo} for n, _ in lote]
+        )
+        supabase.gravar_entradas_estagio(
+            [
+                {"id_deal": n["id"], "id_estagio": estagio, "entrou_em": em, "atualizado_em": carimbo}
+                for n, mudancas in zip(reler, historicos)
+                for estagio, em in sorted(entradas_por_estagio(n, mudancas).items())
+            ]
+        )
+        for n, _ in lote:
+            self.negocios[n["id"]] = _campos_negocio(n)
 
 
 ATIVOS: list[Worker] = []
@@ -641,6 +712,11 @@ def iniciar(config: Settings) -> threading.Event:
     MOTIVO_INATIVOS = None
     if not config.workers_ativos:
         return parar
+    # O worker do Pipedrive não depende das planilhas: sobe mesmo sem a conta de serviço do Google.
+    if config.pipe_token and config.pipe_base_url_v1 and config.pipe_base_url_v2 and config.supabase_url and config.supabase_service_key:
+        pipedrive = WorkerPipedrive()
+        ATIVOS.append(pipedrive)
+        threading.Thread(target=pipedrive.rodar, args=(parar, INTERVALO_PIPEDRIVE_SEGUNDOS), name="worker-pipedrive", daemon=True).start()
     if not config.google_service_account_json:
         motivo = "GOOGLE_SERVICE_ACCOUNT_JSON ausente ou ilegível no .env"
     elif not (config.supabase_url and config.supabase_service_key):

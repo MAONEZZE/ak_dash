@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, timedelta
 
-from app.fontes.banco import query
+from app.fontes import supabase
 from app.metricas import metricas_do_cargo
 
 
@@ -48,15 +48,7 @@ def buscar_totais(cargo: str, ids: list[int], inicio: date, fim: date) -> Totais
     if not ids:
         return TotaisCargo({}, {}, serie_diaria, {}, 0)
 
-    linhas = query(
-        "vw_metricas",
-        {
-            "id_user": f"in.({','.join(str(i) for i in ids)})",
-            "and": f"(data.gte.{inicio.isoformat()},data.lte.{fim.isoformat()})",
-            "cargo": f"eq.{cargo}",
-        },
-        colunas="data,id_user,metrica,valor,conta",
-    )
+    linhas = supabase.ler_metricas_do_cargo(cargo, ids, inicio, fim)
 
     realizado: dict[tuple[int, str], int] = {}
     dias_vistos: dict[tuple[int, str], set[date]] = {}

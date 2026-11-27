@@ -126,11 +126,19 @@ class Settings:
         default_factory=lambda: _int_env("PIPE_ID_ETIQUETA_NEGOCIO_INDICACAO")
     )
     # Colunas de onboarding do pipeline LinkedIn — página Funil Evento (docs/plans/funil-evento.md).
+    # Coluna "3. Inscrito" do pipeline akeel 2.0 — etapa Inscritos do Funil Evento.
+    pipe_id_inscrito_pipeline_linkedin: int | None = field(
+        default_factory=lambda: _int_env("PIPE_ID_INSCRITO_PIPELINE_LINKEDIN")
+    )
     pipe_id_onboarding_agendado_pipeline_linkedin: int | None = field(
         default_factory=lambda: _int_env("PIPE_ID_ONBOARDING_AGENDADO_PIPELINE_LINKEDIN")
     )
     pipe_id_onboarding_realizado_pipeline_linkedin: int | None = field(
         default_factory=lambda: _int_env("PIPE_ID_ONBOARDING_REALIZADO_PIPELINE_LINKEDIN")
+    )
+    # Chave do campo customizado "Almoço" do negócio (tipo set) — card Almoços Pagos do Funil SDR.
+    pipe_id_campo_almoco: str | None = field(
+        default_factory=lambda: os.getenv("PIPE_ID_CAMPO_ALMOCO") or None
     )
 
 
@@ -144,3 +152,16 @@ def etiqueta_pessoa(canal: str, conta: str) -> int | None:
     )
     sufixo = re.sub(r"[^A-Z0-9]+", "_", sem_acento.upper()).strip("_")
     return _int_env(f"PIPE_ID_ETIQUETA_PESSOA_{canal.upper()}_{sufixo}")
+
+
+PREFIXO_DONO_SDR = "PIPE_ID_USUARIO_SDR_"
+
+
+def donos_sdr() -> dict[int, str]:
+    """owner_id do Pipedrive de cada SDR → nome em minúsculas, das envs PIPE_ID_USUARIO_SDR_<NOME> (ex.: _JUCA=28932026 → "juca",
+    comparado com `normalizar(users.nome)`). Lida na hora, para SDR novo não exigir restart."""
+    return {
+        int(valor): nome[len(PREFIXO_DONO_SDR):].lower()
+        for nome, valor in os.environ.items()
+        if nome.startswith(PREFIXO_DONO_SDR) and valor.strip()
+    }

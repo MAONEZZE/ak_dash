@@ -21,9 +21,10 @@ cada recebimento, atribuído ao `user_closer` da VENDA a que ele pertence
 `inscritos`/`aprovados` continuam sempre `None`
 aqui — não existem nesta tabela, vêm do SED (ver `buscar_confrarias_do_mes`).
 
-Também lê o SEGUNDO Supabase (`SED.events`/`SED.registrations`), que
+Também lê o SEGUNDO Supabase (`SED.events`/`SED.registrations`, via
+`app.fontes.sed`), que
 alimenta a tabela de Confrarias da Geral — ver `buscar_confrarias_do_mes` —
-e `dash2.logs_pipedrive`, o espelho da planilha de logs — ver `buscar_logs`.
+e `logs_pipedrive`, o espelho da planilha de logs — ver `buscar_logs`.
 
 As métricas de atividade (números captados, ligações, reuniões, indicações)
 NÃO passam por aqui: a Geral lê as mesmas `buscar_totais`/`dash.vw_metricas`
@@ -33,11 +34,12 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta
 
-from app.config import settings
 from app.periodo import TZ_SP
-from app.fontes.banco import query
+from app.fontes import sed
+from app.fontes import supabase
+from app.fontes.banco import em_paralelo
 
 CHAVES_FATURAMENTO = ("faturamento", "liquidado", "inscritos", "aprovados")
 
@@ -45,12 +47,12 @@ CHAVES_FATURAMENTO = ("faturamento", "liquidado", "inscritos", "aprovados")
 # (2026-11-02); o teto só evita mandar uma lista sem fim.
 LIMITE_EVENTOS = 50
 
-# A Geral só mostra as Confrarias (decisão do usuário, 2026-10-05). `ilike`
-# com `*` dos dois lados = "contém", sem diferenciar maiúsculas.
-FILTRO_TITULO_EVENTOS = "ilike.*confraria akeel*"
+# A Geral só mostra as Confrarias (decisão do usuário, 2026-10-05). Título
+# "contém", sem diferenciar maiúsculas: o `ilike` é montado em `app.fontes.sed`.
+TITULO_EVENTOS = "confraria akeel"
 
 # Funil Evento: só Imersões ("imers" pega Imersão e Imersao).
-FILTRO_TITULO_IMERSOES = "ilike.*imers*"
+TITULO_IMERSOES = "imers"
 
 # "Inscrito" = TODA linha de `SED.registrations` do evento, seja qual for o
 # status — o card mede captação (quanta gente se inscreveu), não ocupação de
@@ -77,14 +79,9 @@ def _linha_vazia() -> dict[str, float | None]:
 
 
 def buscar_faturamento(inicio: date, fim: date, ids_pessoas: list[int]) -> Faturamento:
-    fim_exclusivo = fim + timedelta(days=1)
-    linhas = query(
-        "metricas_faturamento",
-        {"and": f"(data_venda.gte.{inicio.isoformat()},data_venda.lt.{fim_exclusivo.isoformat()})"},
-    )
-    recebimentos = query(
-        "recebimentos_faturamento",
-        {"and": f"(mes.gte.{inicio.replace(day=1).isoformat()},mes.lte.{fim.isoformat()})"},
+    linhas, recebimentos = em_paralelo(
+        lambda: supabase.ler_vendas_do_periodo(inicio, fim),
+        lambda: supabase.ler_recebimentos_do_periodo(inicio, fim),
     )
 
     empresa: dict[str, float | None] = {**_linha_vazia(), "faturamento": 0.0, "liquidado": 0.0}
@@ -96,11 +93,7 @@ def buscar_faturamento(inicio: date, fim: date, ids_pessoas: list[int]) -> Fatur
     ids = sorted({int(r["id_planilha_venda"]) for r in recebimentos})
     closer_por_venda: dict[int, int | None] = {}
     if ids:
-        vendas = query(
-            "metricas_faturamento",
-            {"id_planilha": f"in.({','.join(map(str, ids))})"},
-            colunas="id_planilha,user_closer",
-        )
+        vendas = supabase.ler_vendas_por_id_planilha(ids, colunas="id_planilha,user_closer")
         closer_por_venda = {int(v["id_planilha"]): v.get("user_closer") for v in vendas}
 
     for r in recebimentos:
@@ -135,53 +128,37 @@ class EventoInscricoes:
     rejeitados: int = 0
 
 
-def _instante_utc(momento: datetime) -> str:
-    """ISO-8601 em UTC com sufixo `Z`.
-
-    `Z` em vez do `+00:00` que o `isoformat()` produz: o `+` depende de
-    percent-encoding correto para não virar espaço na querystring, e `Z` não
-    tem essa armadilha. Datetime ingênuo é assumido como UTC.
-    """
-    if momento.tzinfo is None:
-        return momento.isoformat(timespec="seconds") + "Z"
-    return momento.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
 def buscar_confrarias_do_mes(inicio: date, fim: date) -> list[EventoInscricoes]:
     """Confrarias ("confraria akeel" no título) de `inicio` a `fim` (o mês
     corrente inteiro, inclusive as que já passaram) do segundo Supabase
     (`SED.events`), por data crescente, com a contagem de inscrições de cada
     uma — no máximo `LIMITE_EVENTOS`.
 
-    Os limites são meia-noite de São Paulo convertida pra UTC com sufixo `Z`.
-    Esse formato é correto nos dois esquemas possíveis da coluna:
-
-    - sendo `timestamp` sem fuso, o Postgres descarta o `Z` e compara relógio
-      de parede contra relógio de parede — e a coluna guarda UTC, porque é
-      assim que o Prisma grava;
-    - sendo `timestamptz`, o `Z` é respeitado e a comparação é de instantes.
-
-    Os valores vão entre aspas dentro do `and=(...)`: `:` é reservado na
-    árvore lógica do PostgREST. Sem as envs `SUPABASE_INSCRICOES_*`,
-    `query()` devolve vazio e a lista sai `[]` — nunca derruba /geral.
+    Os limites são meia-noite de São Paulo; o formato que o PostgREST recebe
+    fica em `app.fontes.sed`. Sem as envs `SUPABASE_INSCRICOES_*`, a lista sai
+    `[]` — nunca derruba /geral.
     """
-    de = _instante_utc(datetime.combine(inicio, time.min, tzinfo=TZ_SP))
-    ate = _instante_utc(datetime.combine(fim + timedelta(days=1), time.min, tzinfo=TZ_SP))
-    return _buscar_confrarias(f'(event_date.gte."{de}",event_date.lt."{ate}")', LIMITE_EVENTOS)
+    eventos = sed.ler_eventos_entre(
+        datetime.combine(inicio, time.min, tzinfo=TZ_SP),
+        datetime.combine(fim + timedelta(days=1), time.min, tzinfo=TZ_SP),
+        TITULO_EVENTOS,
+        LIMITE_EVENTOS,
+    )[:LIMITE_EVENTOS]
+    return _com_inscricoes(eventos)
 
 
 def buscar_proximo_evento(agora: datetime) -> EventoInscricoes | None:
     """O evento (qualquer título, não só Confraria) com `event_date` a partir de
     `agora` mais próximo, com as inscrições dele — padrão do velocímetro do
     Funil SDR. `None` quando não há nenhum agendado (ou sem as envs do SED)."""
-    eventos = _buscar_confrarias(f'(event_date.gte."{_instante_utc(agora)}")', 1, filtro_titulo=None)
+    eventos = _com_inscricoes(sed.ler_eventos_a_partir_de(agora, 1)[:1])
     return eventos[0] if eventos else None
 
 
 def buscar_proxima_imersao(agora: datetime) -> EventoInscricoes | None:
     """A Imersão com `event_date` a partir de `agora` mais próxima, com as inscrições — padrão do
     Funil Evento sem evento escolhido. `None` quando não há nenhuma agendada."""
-    eventos = _buscar_confrarias(f'(event_date.gte."{_instante_utc(agora)}")', 1, filtro_titulo=FILTRO_TITULO_IMERSOES)
+    eventos = _com_inscricoes(sed.ler_eventos_a_partir_de(agora, 1, titulo_contem=TITULO_IMERSOES)[:1])
     return eventos[0] if eventos else None
 
 
@@ -189,57 +166,33 @@ def listar_proximos_eventos(agora: datetime, limite: int = LIMITE_EVENTOS) -> li
     """Opções do filtro de evento do Funil SDR: todos os eventos a partir de
     `agora` (qualquer título), do mais próximo ao mais distante, só
     id/título/data — sem contar inscrições, que só o escolhido precisa."""
-    eventos = query(
-        "events",
-        {"and": f'(event_date.gte."{_instante_utc(agora)}")', "order": "event_date.asc", "limit": str(limite)},
-        schema=settings.supabase_inscricoes_schema or "public",
-        colunas="id,title,event_date",
-        url_base=settings.supabase_inscricoes_url,
-        service_key=settings.supabase_inscricoes_service_key,
-    )[:limite]
+    eventos = sed.ler_eventos_a_partir_de(agora, limite, colunas="id,title,event_date")[:limite]
     return [{"id": str(e["id"]), "titulo": e.get("title") or "Sem título", "data": e["event_date"]} for e in eventos]
 
 
 def listar_imersoes(limite: int = LIMITE_EVENTOS) -> list[dict]:
     """Opções do filtro de evento do Funil Evento: Imersões com data, passadas e futuras, da mais
     recente/futura para a mais antiga — só id/título/data."""
-    eventos = query(
-        "events",
-        {"title": FILTRO_TITULO_IMERSOES, "event_date": "not.is.null", "order": "event_date.desc", "limit": str(limite)},
-        schema=settings.supabase_inscricoes_schema or "public",
-        colunas="id,title,event_date",
-        url_base=settings.supabase_inscricoes_url,
-        service_key=settings.supabase_inscricoes_service_key,
-    )[:limite]
+    eventos = sed.ler_imersoes(TITULO_IMERSOES, limite)[:limite]
     return [{"id": str(e["id"]), "titulo": e.get("title") or "Sem título", "data": e["event_date"]} for e in eventos]
 
 
 def buscar_evento(id_evento: str) -> EventoInscricoes | None:
     """Um evento pelo id (qualquer título), com as inscrições — o escolhido no
     filtro de evento. Quem chama valida o id antes: ele vai dentro do filtro do PostgREST."""
-    eventos = _buscar_confrarias(f'(id.eq."{id_evento}")', 1, filtro_titulo=None)
+    eventos = _com_inscricoes(sed.ler_evento_por_id(id_evento)[:1])
     return eventos[0] if eventos else None
 
 
 def contar_inscritos_no_periodo(id_evento: str, inicio: date, fim: date) -> int:
     """Inscrições `approved`/`pending` do evento feitas (`created_at`) de
     `inicio` a `fim`, dias de São Paulo — velocímetro do Funil SDR, que segue o
-    filtro de data. Mesmo formato de limites de `buscar_confrarias_do_mes`.
-    Quem chama valida o id: ele vai dentro do filtro do PostgREST."""
-    de = _instante_utc(datetime.combine(inicio, time.min, tzinfo=TZ_SP))
-    ate = _instante_utc(datetime.combine(fim + timedelta(days=1), time.min, tzinfo=TZ_SP))
+    filtro de data. Quem chama valida o id: ele vai dentro do filtro do PostgREST."""
     return len(
-        query(
-            "registrations",
-            {
-                "event_id": f"eq.{id_evento}",
-                "status": "in.(approved,pending)",
-                "and": f'(created_at.gte."{de}",created_at.lt."{ate}")',
-            },
-            schema=settings.supabase_inscricoes_schema or "public",
-            colunas="id",
-            url_base=settings.supabase_inscricoes_url,
-            service_key=settings.supabase_inscricoes_service_key,
+        sed.ler_inscricoes_no_periodo(
+            id_evento,
+            datetime.combine(inicio, time.min, tzinfo=TZ_SP),
+            datetime.combine(fim + timedelta(days=1), time.min, tzinfo=TZ_SP),
         )
     )
 
@@ -247,43 +200,13 @@ def contar_inscritos_no_periodo(id_evento: str, inicio: date, fim: date) -> int:
 def contar_comparecimento(id_evento: str) -> int:
     """Check-ins do evento (`attended = true`), qualquer status — etapa Comparecimento do Funil Evento.
     Sem horário de check-in no SED, então não segue o filtro de data. Quem chama valida o id."""
-    return len(
-        query(
-            "registrations",
-            {"event_id": f"eq.{id_evento}", "attended": "is.true"},
-            schema=settings.supabase_inscricoes_schema or "public",
-            colunas="id",
-            url_base=settings.supabase_inscricoes_url,
-            service_key=settings.supabase_inscricoes_service_key,
-        )
-    )
+    return len(sed.ler_comparecimentos(id_evento))
 
 
-def _buscar_confrarias(filtro_data: str, limite: int, *, filtro_titulo: str | None = FILTRO_TITULO_EVENTOS) -> list[EventoInscricoes]:
-    """`filtro_titulo=None` tira o filtro de título: o Funil SDR olha qualquer evento."""
-    filtros = {"and": filtro_data, "order": "event_date.asc", "limit": str(limite)}
-    if filtro_titulo:
-        filtros["title"] = filtro_titulo
-    eventos = query(
-        "events",
-        filtros,
-        schema=settings.supabase_inscricoes_schema or "public",
-        colunas="id,title,event_date,capacity",
-        url_base=settings.supabase_inscricoes_url,
-        service_key=settings.supabase_inscricoes_service_key,
-    )[:limite]
+def _com_inscricoes(eventos: list[dict]) -> list[EventoInscricoes]:
     if not eventos:
         return []
-
-    ids = ",".join(f'"{e["id"]}"' for e in eventos)
-    inscricoes = query(
-        "registrations",
-        {"event_id": f"in.({ids})"},
-        schema=settings.supabase_inscricoes_schema or "public",
-        colunas="event_id,status",
-        url_base=settings.supabase_inscricoes_url,
-        service_key=settings.supabase_inscricoes_service_key,
-    )
+    inscricoes = sed.ler_inscricoes_dos_eventos([str(e["id"]) for e in eventos])
 
     inscritos = Counter(r.get("event_id") for r in inscricoes)
     aprovados = Counter(r.get("event_id") for r in inscricoes if r.get("status") == "approved")
@@ -320,14 +243,10 @@ class LogAtividade:
 
 def buscar_logs(inicio: date, fim: date) -> list[LogAtividade]:
     """Os `LIMITE_LOGS` logs mais recentes de `inicio` a `fim` em
-    `dash2.logs_pipedrive` (espelho da aba Logs da planilha `PLANILHA_LOGS_ID`,
+    `logs_pipedrive` (espelho da aba Logs da planilha `PLANILHA_LOGS_ID`,
     mantido pelo WorkerLogs), do mais novo pro mais antigo.
     """
-    linhas = query(
-        "logs_pipedrive",
-        {"and": f"(data.gte.{inicio.isoformat()},data.lte.{fim.isoformat()})"},
-        colunas="data,hora,usuario_acao,atividade,cliente_nome",
-    )
+    linhas = supabase.ler_logs_do_periodo(inicio, fim)
     linhas.sort(key=lambda r: (str(r.get("data") or ""), str(r.get("hora") or "")), reverse=True)
     return [
         LogAtividade(
