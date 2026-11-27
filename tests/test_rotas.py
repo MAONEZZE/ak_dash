@@ -641,6 +641,53 @@ def test_sdr_200_com_ranking_previsao_e_serie_do_evento(monkeypatch):
     assert pedidos == [(date(2026, 11, 1), date(2026, 11, 30))]
 
 
+def test_sdr_inscricoes_e_badge_do_ranking_somam_a_janela_da_meta(monkeypatch):
+    from app.dominios.funil import rotas as rotas_funil_mod
+
+    client = _client(monkeypatch)
+    monkeypatch.setattr(rotas_funil_mod, "hoje_sp", lambda: date(2026, 11, 23))
+
+    def query_pagina_sdr(tabela, filtros=None, *a, **kw):
+        if tabela == "events":
+            return [{"id": "e1", "title": "Imersão", "event_date": "2026-12-02T16:00:00+00:00", "capacity": 60}]
+        if tabela == "registrations" and "order" in (filtros or {}):
+            return [{"created_at": "2026-11-20T15:00:00+00:00"}]
+        if tabela == "registrations":
+            return []
+        return _fake_query(tabela, filtros, *a, **kw)
+
+    monkeypatch.setattr(fontes_banco_mod, "query", query_pagina_sdr)
+    monkeypatch.setattr(rotas_funil_mod.sdr, "buscar_negocios_sdr", lambda inicio, fim, id_dash_por_dono: {})
+    monkeypatch.setattr(
+        fontes_supabase_mod, "ler_metas_do_cargo", lambda cargo: [{"id_user": 9, "metrica": "inscricoes_realizadas", "valor_diario": 4}]
+    )
+    zeros = {m: 0 for m in rotas_funil_mod.sdr.METRICAS}
+    intervalos = []
+
+    def metricas_falsas(inicio, fim):
+        intervalos.append((inicio, fim))
+        return [
+            {**zeros, "id_user": 9, "data": "2026-11-28", "inscricoes_realizadas": 5},
+            {**zeros, "id_user": 9, "data": "2026-12-01", "inscricoes_realizadas": 2},
+        ]
+
+    monkeypatch.setattr(rotas_funil_mod.sdr, "buscar_metricas_funil_sdr", metricas_falsas)
+    chamadas_sed = []
+
+    def inscritos_falsos(id_evento, inicio, fim):
+        chamadas_sed.append((id_evento, inicio, fim))
+        return 12
+
+    monkeypatch.setattr(rotas_funil_mod, "contar_inscritos_no_periodo", inscritos_falsos)
+    resposta = client.get("/sdr", params={"granularidade": "mes", "periodo": "2026-11"})
+    assert resposta.status_code == 200
+    corpo = resposta.json()
+    assert corpo["sdrs"][0]["ranking_mes"]["inscricoes"] == 7
+    assert corpo["inscritos_sed_mes"] == 12
+    assert chamadas_sed == [("e1", date(2026, 11, 20), date(2026, 12, 1))]
+    assert (date(2026, 11, 20), date(2026, 12, 1)) in intervalos
+
+
 def test_sdr_evento_sem_inscricao_meta_comeca_na_criacao_do_evento(monkeypatch):
     from app.dominios.funil import rotas as rotas_funil_mod
 
