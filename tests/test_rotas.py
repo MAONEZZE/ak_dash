@@ -802,6 +802,7 @@ def test_funil_evento_sem_escolha_traz_a_proxima_imersao_com_o_retrato_de_agora(
         return _fake_query(tabela, filtros, *a, **kw)
 
     monkeypatch.setattr(funil_evento_mod, "buscar_pipedrive_evento", fake_pipedrive)
+    monkeypatch.setattr(funil_evento_mod, "buscar_almocos_pagos", lambda d: 0)
     monkeypatch.setattr(fontes_banco_mod, "query", query_imersao)
     resposta = client.get("/funil-evento", params={"granularidade": "mes", "periodo": "2026-11"})
     assert resposta.status_code == 200
@@ -810,13 +811,36 @@ def test_funil_evento_sem_escolha_traz_a_proxima_imersao_com_o_retrato_de_agora(
     assert corpo["avisos"] == []
     assert corpo["evento"] == {
         "id": "i2", "titulo": "Imersão Alta Cadência", "data": "2026-12-02T16:00:00+00:00",
-        "total": 6, "aprovados": 3, "pendentes": 2, "rejeitados": 1,
+        "total": 6, "aprovados": 3, "pendentes": 2, "rejeitados": 1, "almocos_pagos": 0,
     }
     assert corpo["funil"] == {
         "inscritos": 5, "onboarding_agendado": 4, "onboarding_realizado": 3, "comparecimento": 2, "vendas": 1,
     }
     assert chamadas_pipedrive == [date(2026, 12, 2)]
     assert filtros_eventos[0]["title"] == "ilike.*imers*"
+
+
+def test_funil_evento_mostra_os_almocos_pagos_da_imersao(monkeypatch):
+    client = _client(monkeypatch)
+    datas: list[date] = []
+
+    def query_imersao(tabela, filtros=None, *a, **kw):
+        if tabela == "events":
+            return [{"id": "i2", "title": "Imersão Alta Cadência", "event_date": "2026-12-02T16:00:00+00:00", "capacity": 60}]
+        if tabela == "registrations":
+            return []
+        return _fake_query(tabela, filtros, *a, **kw)
+
+    def almocos_falso(data_evento):
+        datas.append(data_evento)
+        return 7
+
+    monkeypatch.setattr(funil_evento_mod, "buscar_pipedrive_evento", lambda _d: dict(funil_evento_mod.ZERADO))
+    monkeypatch.setattr(funil_evento_mod, "buscar_almocos_pagos", almocos_falso)
+    monkeypatch.setattr(fontes_banco_mod, "query", query_imersao)
+    corpo = client.get("/funil-evento", params={"granularidade": "mes", "periodo": "2026-11"}).json()
+    assert corpo["evento"]["almocos_pagos"] == 7
+    assert datas == [date(2026, 12, 2)]
 
 
 def test_funil_evento_inscritos_vem_da_coluna_3_do_pipedrive_e_nao_do_sed(monkeypatch):

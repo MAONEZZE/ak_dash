@@ -399,6 +399,7 @@ def get_funil_evento(
     else:
         dados = obter_ou_calcular(f"evento:{evento}", ttl, lambda: buscar_evento(evento))
     funil = dict(FUNIL_EVENTO_ZERADO)
+    almocos_pagos = 0
     if dados is not None:
         pipe = dict(funil_evento.ZERADO)
         if dados.data:
@@ -407,6 +408,9 @@ def get_funil_evento(
                 f"pipedrive:evento:{dados.id}",
                 ttl,
                 lambda: funil_evento.buscar_pipedrive_evento(data_evento),
+            )
+            almocos_pagos = obter_ou_calcular(
+                f"pipedrive:almocos:{dados.id}", ttl, lambda: funil_evento.buscar_almocos_pagos(data_evento)
             )
         comparecimento = obter_ou_calcular(
             f"evento:{dados.id}:comparecimento", ttl, lambda: contar_comparecimento(dados.id)
@@ -425,6 +429,8 @@ def get_funil_evento(
             "aprovados": dados.aprovados,
             "pendentes": dados.pendentes,
             "rejeitados": dados.rejeitados,
+            # Card Almoços pagos: coluna Onboarding realizado do Pipedrive agora (ver `funil_evento.buscar_almocos_pagos`).
+            "almocos_pagos": almocos_pagos,
         },
         "funil": funil,
     }
