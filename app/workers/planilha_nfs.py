@@ -11,3 +11,18 @@ def mes_da_aba(titulo: str) -> int | None:
     if n.startswith("nfs ") and n[4:] in MESES:
         return MESES.index(n[4:]) + 1
     return None
+
+
+def valor_monetario(valor) -> float | None:
+    if valor is None:
+        return None
+    if isinstance(valor, (int, float)) and not isinstance(valor, bool):
+        return float(valor)
+    t = valor.replace("R$", "").replace(" ", "").strip()
+    if not t:
+        return None
+    t = t.replace(".", "").replace(",", ".")
+    try:
+        return float(t)
+    except ValueError:
+        return None
