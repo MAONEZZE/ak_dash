@@ -471,6 +471,24 @@ class WorkerFinanceiro(Worker):
         anterior = (h.year, h.month - 1) if h.month > 1 else (h.year - 1, 12)
         self.sincronizar(self.ler_abas(self.planilha_id), [anterior, (h.year, h.month)])
 
+    def carga_completa(self) -> list[str]:
+        abas = self.ler_abas(self.planilha_id)
+        abas_validas: list[tuple[str, list[list]]] = []
+        validas: list[tuple[int, int]] = []
+        for titulo, linhas in abas:
+            m = mes_da_aba(titulo)
+            if m is None:
+                continue
+            try:
+                ler_aba_nfs(linhas, self.ano, m)
+            except ValueError as erro:
+                logger.warning("Carga financeiro: aba '%s' pulada: %s", titulo, erro)
+                continue
+            abas_validas.append((titulo, linhas))
+            validas.append((self.ano, m))
+        self.sincronizar(abas_validas, sorted(validas))
+        return [f"{a:04d}-{m:02d}" for a, m in sorted(validas)]
+
 
 class WorkerLogs(Worker):
     """Espelha a aba Logs da planilha Logs Pipedrive em logs_pipedrive (chave = sha1 do conteúdo da linha)."""

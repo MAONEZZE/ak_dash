@@ -930,3 +930,23 @@ def test_rodar_agenda_um_ciclo_a_cada_intervalo_contado_do_inicio(monkeypatch):
     w.rodar(_Parar(), 5.0)
 
     assert esperas == [2.0, 0.0, 4.0]
+
+
+def test_financeiro_carga_completa_grava_todas_as_abas_nfs_e_pula_junho(monkeypatch, caplog):
+    banco = _Banco({"users": [], "notas_financeiro": []})
+    _instalar(monkeypatch, banco)
+    abas = [
+        ("NFS julho", [CAB_NFS, ["A", "venda nova", 100, None, None, "PIX", None]]),
+        ("NFS novembro", [CAB_NFS, ["B", "venda nova", 200, None, None, "PIX", None]]),
+        ("NFs Junho", [["Cliente", "NFSE", "Valor contábil"], ["X", 1, 10]]),
+        ("dados clientes", [["CNPJ/CPF"]]),
+    ]
+    w = workers.WorkerFinanceiro("ID_FIN", 2026, lambda _id: abas, hoje=lambda: date(2026, 11, 27))
+
+    with caplog.at_level(logging.WARNING):
+        meses = w.carga_completa()
+
+    assert meses == ["2026-07", "2026-11"]
+    upserts_notas = [u for u in banco.upserts if u[0] == "notas_financeiro"]
+    assert sorted(l["chave"] for l in _sem_carimbo(upserts_notas[0][1])) == ["2026-07:2", "2026-11:2"]
+    assert any("NFs Junho" in r.getMessage() for r in caplog.records)
