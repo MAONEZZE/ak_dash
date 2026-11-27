@@ -140,6 +140,34 @@ def test_etiquetas_das_pessoas_em_lotes_de_100(monkeypatch):
     assert chamadas == []
 
 
+def test_etiquetas_dos_negocios_em_lotes_de_100(monkeypatch):
+    chamadas = []
+
+    def _get(url, params=None, headers=None, **kwargs):
+        chamadas.append((url, params))
+        ids = params["ids"].split(",")
+        corpo = {
+            "data": [{"id": int(i), "label_ids": None if i == "7" else [int(i) * 10]} for i in ids],
+            "additional_data": {"next_cursor": None},
+        }
+        return _resposta(corpo)
+
+    monkeypatch.setattr(pipedrive.httpx, "get", _get)
+
+    resultado = pipedrive.etiquetas_dos_negocios(list(range(1, 151)) + [7, 7])
+
+    assert [c[0] for c in chamadas] == ["https://x.pipedrive.com/api/v2/deals"] * 2
+    assert chamadas[0][1]["ids"] == ",".join(str(i) for i in range(1, 101))
+    assert chamadas[1][1]["ids"] == ",".join(str(i) for i in range(101, 151))
+    assert len(resultado) == 150
+    assert resultado[1] == (10,)
+    assert resultado[7] == ()
+
+    chamadas.clear()
+    assert pipedrive.etiquetas_dos_negocios([]) == {}
+    assert chamadas == []
+
+
 def test_etiquetas_de_negocio_le_as_opcoes_do_campo_label_na_v1(monkeypatch):
     chamadas = []
 

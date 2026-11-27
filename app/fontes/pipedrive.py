@@ -153,16 +153,25 @@ def etiquetas_de_negocio() -> dict[int, str]:
     return {}
 
 
-def etiquetas_das_pessoas(ids: list[int]) -> dict[int, tuple[int, ...]]:
-    """Etiquetas (label_ids) de cada pessoa. Ids repetidos são pedidos uma vez só."""
+def _etiquetas_por_id(caminho: str, ids: list[int]) -> dict[int, tuple[int, ...]]:
     unicos = sorted(set(ids))
     resultado = {}
     for i in range(0, len(unicos), LOTE_PESSOAS):
         lote = unicos[i:i + LOTE_PESSOAS]
-        for pagina in _paginas("/persons", {"ids": ",".join(str(x) for x in lote)}):
+        for pagina in _paginas(caminho, {"ids": ",".join(str(x) for x in lote)}):
             for p in pagina:
                 resultado[p["id"]] = tuple(p.get("label_ids") or [])
     return resultado
+
+
+def etiquetas_das_pessoas(ids: list[int]) -> dict[int, tuple[int, ...]]:
+    """Etiquetas (label_ids) de cada pessoa. Ids repetidos são pedidos uma vez só."""
+    return _etiquetas_por_id("/persons", ids)
+
+
+def etiquetas_dos_negocios(ids: list[int]) -> dict[int, tuple[int, ...]]:
+    """Etiquetas (label_ids) de cada negócio. Ids repetidos são pedidos uma vez só."""
+    return _etiquetas_por_id("/deals", ids)
 
 
 def ou_vazio(calcular: Callable[[], T], vazio: T, mensagem: str) -> T:
