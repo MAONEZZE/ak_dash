@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import re
 from datetime import date
+
+import pytest
 
 from app.workers import planilha_nfs
 
@@ -72,3 +75,13 @@ def test_ler_aba_nfs_monta_notas_pelo_nome_da_coluna():
         {"chave": "2026-11:2", "mes": "2026-11-01", "linha": 2, "cliente": "Ana", "categoria": "venda nova", "produto": "Aceleração", "valor_pago": 5000.0, "valor_venda": 30000.0, "data_venda": "2026-11-09", "data_referencia": "2026-11-09", "forma_pagamento": "Cartão", "canal": "LinkedIn", "vendedor": "Jacob", "status": "Emitida"},
         {"chave": "2026-11:4", "mes": "2026-11-01", "linha": 4, "cliente": "Bruno", "categoria": None, "produto": "Sprint", "valor_pago": 1000.0, "valor_venda": None, "data_venda": None, "data_referencia": "2026-11-01", "forma_pagamento": "PIX", "canal": None, "vendedor": None, "status": None},
     ]
+
+
+def test_ler_aba_nfs_sem_cliente_ou_valor_pago_levanta_value_error():
+    mensagem = re.escape("aba NFS 06/2026 sem as colunas Cliente e Valor pago")
+    linhas_sem_colunas = [["Cliente", "NFSE", "Data", "Descrição do Serviço", "Valor contábil"], ["X", 1, 46174, "s", 10]]
+
+    with pytest.raises(ValueError, match=mensagem):
+        planilha_nfs.ler_aba_nfs(linhas_sem_colunas, 2026, 6)
+    with pytest.raises(ValueError, match=mensagem):
+        planilha_nfs.ler_aba_nfs([], 2026, 6)
