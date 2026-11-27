@@ -188,7 +188,7 @@ def test_financeiro_200_periodo_atual(monkeypatch):
     resposta = _client(monkeypatch).get("/financeiro", params={"granularidade": "mes"})
     assert resposta.status_code == 200
     corpo = resposta.json()
-    assert corpo["vendas"] == []  # `metricas_faturamento` vazia no fake de query
+    assert corpo["notas"] == []  # `notas_financeiro` vazia no fake de query
 
 
 def test_financeiro_400_periodo_inteiramente_no_futuro(monkeypatch):

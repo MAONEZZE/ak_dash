@@ -98,17 +98,24 @@ def test_schema_respostafunil_tem_os_campos_que_o_bff_produz():
 def test_schema_respostafinanceiro_tem_os_campos_que_o_bff_produz():
     spec = _carregar_openapi()
     campos = set(spec["components"]["schemas"]["RespostaFinanceiro"]["required"])
-    assert campos == {"periodo", "cards", "vendas"}
+    assert campos == {"periodo", "notas"}
 
 
-def test_vendafinanceiro_descreve_recebimentos_por_mes():
+def test_notafinanceiro_tem_os_campos_que_o_bff_produz():
     schemas = _carregar_openapi()["components"]["schemas"]
-    venda = schemas["VendaFinanceiro"]
-    recebimento = schemas["RecebimentoMes"]
-    assert "recebimentos" in venda["required"]
-    assert "id_planilha" in venda["required"]
-    assert venda["properties"]["recebimentos"]["items"]["$ref"] == "#/components/schemas/RecebimentoMes"
-    assert set(recebimento["required"]) == {"mes", "pago", "liquido"}
+    assert set(schemas["NotaFinanceiro"]["required"]) == {
+        "chave",
+        "mes",
+        "data_referencia",
+        "cliente",
+        "categoria",
+        "produto",
+        "valor_pago",
+        "valor_venda",
+        "forma_pagamento",
+        "canal",
+    }
+    assert schemas["RespostaFinanceiro"]["properties"]["notas"]["items"]["$ref"] == "#/components/schemas/NotaFinanceiro"
 
 
 def test_pessoa_aceita_tres_cargos_e_email_opcional():
