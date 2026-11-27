@@ -28,6 +28,8 @@ def _ids(monkeypatch):
             pipe_id_respondidos_pipeline_instagram=22,
             pipe_id_etiqueta_negocio_linkedin=101,
             pipe_id_etiqueta_negocio_indicacao=102,
+            pipe_id_oportunidades_pipeline_principal=1,
+            pipe_id_etiqueta_negocio_instagram=127,
         ),
     )
 
@@ -209,3 +211,26 @@ def test_linhas_sdr_somam_por_sdr_e_dia_so_dos_donos_sdr():
         {"id_user": 14, "data": "2026-11-10", "abordagens": 0, "respondidos": 0, "indicacoes": 1},
         {"id_user": 14, "data": "2026-11-11", "abordagens": 0, "respondidos": 1, "indicacoes": 0},
     ]
+
+
+def test_entrada_na_oportunidade_feita_com_prosp_insta_vira_numero_captado_do_instagram(monkeypatch):
+    entradas = [
+        {"id_deal": 30, "id_estagio": 1, "entrou_em": "2026-11-10T13:00:00+00:00", "id_dono": 5, "id_pessoa": 801},
+        # sem a etiqueta
+        {"id_deal": 31, "id_estagio": 1, "entrou_em": "2026-11-11T13:00:00+00:00", "id_dono": 5, "id_pessoa": 802},
+        # 22h do dia 30/11 em SP
+        {"id_deal": 32, "id_estagio": 1, "entrou_em": "2026-12-01T01:00:00+00:00", "id_dono": 6, "id_pessoa": 803},
+        # entrou antes do início
+        {"id_deal": 33, "id_estagio": 1, "entrou_em": "2026-10-31T13:00:00+00:00", "id_dono": 5, "id_pessoa": 804},
+        # outro estágio
+        {"id_deal": 34, "id_estagio": 21, "entrou_em": "2026-11-12T13:00:00+00:00", "id_dono": 5, "id_pessoa": 805},
+    ]
+    etiquetas = {30: (127, 5), 31: (126,), 32: (127,), 33: (127,), 34: (127,)}
+
+    assert pipedrive.contar_oportunidades_instagram(entradas, etiquetas, date(2026, 11, 1), date(2026, 11, 30)) == [
+        Fato("numeros_captados", "instagram", 5, 801, "2026-11-10"),
+        Fato("numeros_captados", "instagram", 6, 803, "2026-11-30"),
+    ]
+
+    monkeypatch.setattr(pipedrive, "settings", dataclasses.replace(pipedrive.settings, pipe_id_etiqueta_negocio_instagram=None))
+    assert pipedrive.contar_oportunidades_instagram(entradas, etiquetas, date(2026, 11, 1), date(2026, 11, 30)) == []

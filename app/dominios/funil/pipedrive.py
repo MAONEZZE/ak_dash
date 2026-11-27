@@ -99,6 +99,23 @@ def contar_entradas(entradas: list[dict], inicio: date, fim: date) -> list[Fato]
     return fatos
 
 
+def contar_oportunidades_instagram(entradas: list[dict], etiquetas_dos_negocios: dict[int, tuple[int, ...]], inicio: date, fim: date) -> list[Fato]:
+    """Números captados do Instagram: negócios que entraram no período (data em SP) na Oportunidade feita do pipeline principal e têm a etiqueta de negócio PROSP_INSTA. `entradas` vem do histórico do WorkerPipedrive."""
+    estagio = settings.pipe_id_oportunidades_pipeline_principal
+    etiqueta = settings.pipe_id_etiqueta_negocio_instagram
+    if estagio is None or etiqueta is None:
+        return []
+    fatos: list[Fato] = []
+    for e in sorted(entradas, key=lambda e: (e["entrou_em"], e["id_deal"])):
+        if e["id_estagio"] != estagio:
+            continue
+        d = _data_sp(e["entrou_em"])
+        if not _no_periodo(d, inicio, fim) or etiqueta not in etiquetas_dos_negocios.get(e["id_deal"], ()):
+            continue
+        fatos.append(Fato("numeros_captados", "instagram", e.get("id_dono"), e.get("id_pessoa"), d))
+    return fatos
+
+
 def _buscar(inicio: date, fim: date) -> DadosPipedrive:
     desde = datetime.combine(inicio, time.min, tzinfo=TZ_SP)
     ate = datetime.combine(fim + timedelta(days=1), time.min, tzinfo=TZ_SP)
