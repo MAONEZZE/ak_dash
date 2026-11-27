@@ -514,6 +514,32 @@ def test_financeiro_grava_notas_do_mes_corrente_e_do_anterior(monkeypatch):
     assert len(invalidacoes) == 1
 
 
+def test_financeiro_segundo_ciclo_so_apaga_a_linha_que_saiu_da_aba(monkeypatch):
+    banco = _Banco({"users": [{"id": 1, "nome": "Jacob"}], "notas_financeiro": []})
+    _instalar(monkeypatch, banco)
+    fonte = {"abas": [
+        ("NFS novembro", [CAB_NFS, ["Ana", "venda nova", 5000, 30000, 46335, "PIX", "Jacob"], ["Duda", "venda nova", 1000, None, None, "PIX", None]]),
+        ("NFS outubro", [CAB_NFS, ["Bia", "upsell", 2000, None, None, "Boleto", "Kelly"]]),
+        ("NFS setembro", [CAB_NFS, ["Caio", "venda nova", 9000, 9000, None, "PIX", "Jacob"]]),
+    ]}
+    w = workers.WorkerFinanceiro("ID_FIN", 2026, lambda _id: fonte["abas"], hoje=lambda: date(2026, 11, 27))
+    w.ciclo()
+    banco.upserts.clear()
+    banco.apagados.clear()
+
+    w.ciclo()
+
+    assert banco.upserts == []
+    assert banco.apagados == []
+
+    fonte["abas"][0] = ("NFS novembro", [CAB_NFS, ["Ana", "venda nova", 5000, 30000, 46335, "PIX", "Jacob"]])
+
+    w.ciclo()
+
+    assert banco.upserts == []
+    assert banco.apagados == [("notas_financeiro", {"mes": "eq.2026-11-01", "linha": "in.(3)"})]
+
+
 CABECALHO_LOGS = ["Data", "Hora", "Usuario da ação", "Atividade feita", "Ação evento", "Nome do Cliente", "Telefone do Cliente"]
 LOG_1 = ["05/08/2026", "18:18", "Jennifer Pamplona", "Números Captados", "adição", "Isaque Costa", "31 987130727"]
 LOG_2 = ["06/08/2026", "10:19", "Thalyson", "Reuniões Agendadas", "adição", "Katia"]
