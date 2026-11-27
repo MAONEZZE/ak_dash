@@ -329,6 +329,55 @@ def test_funil_sem_seller_ligado_nao_tem_meta(monkeypatch):
     assert corpo["meta_numeros_captados"] is None
 
 
+def test_seller_200_com_numeros_captados_do_mes_de_hoje_e_meta_por_seller(monkeypatch):
+    from app.dominios.funil import rotas as funil_rotas_mod
+
+    monkeypatch.setattr(
+        f"{__name__}._USERS",
+        [
+            *_USERS,
+            {"id": 4, "nome": "Duda", "email": None, "imagem_url": None, "active": True},
+            {"id": 13, "nome": "Lucas", "email": None, "imagem_url": "l.png", "active": True},
+        ],
+    )
+    monkeypatch.setattr(
+        f"{__name__}._USER_CARGOS",
+        [*_USER_CARGOS, {"id_user": 4, "cargo": "seller"}, {"id_user": 13, "cargo": "seller"}],
+    )
+    monkeypatch.setattr(f"{__name__}._CONTAS", [{"id": 1, "nome": "Jacob", "id_seller": 4}])
+    cliente = _client(monkeypatch)
+    monkeypatch.setattr(
+        fontes_supabase_mod,
+        "ler_metas",
+        lambda: [{"id_user": 13, "cargo": "seller", "metrica": "numeros_captados", "valor_diario": 3}],
+    )
+    monkeypatch.setattr(funil_rotas_mod, "hoje_sp", lambda: date(2026, 11, 2))
+    monkeypatch.setattr(
+        funil_pipedrive_mod,
+        "buscar_pipedrive",
+        lambda inicio, fim: DadosPipedrive(
+            [Fato("numeros_captados", "linkedin", 1, 501, "2026-11-02"), Fato("numeros_captados", "instagram", 1, 502, "2026-11-03")],
+            {501: (55,)},
+        ),
+    )
+    monkeypatch.setenv("PIPE_ID_ETIQUETA_PESSOA_LINKEDIN_JACOB", "55")
+
+    resposta = cliente.get("/seller", params={"granularidade": "mes", "periodo": "2026-11"})
+    assert resposta.status_code == 200
+    corpo = resposta.json()
+    assert corpo["periodo"] == {"granularidade": "mes", "inicio": "2026-11-01", "fim": "2026-11-30"}
+    assert corpo["avisos"] == []
+    assert corpo["sellers"] == [
+        {"id_user": "4", "nome": "Duda", "imagem_url": None, "numeros_captados": 2, "numeros_captados_hoje": 1, "meta": None},
+        {"id_user": "13", "nome": "Lucas", "imagem_url": "l.png", "numeros_captados": 0, "numeros_captados_hoje": 0, "meta": 66},
+    ]
+
+
+def test_seller_periodo_invalido_400(monkeypatch):
+    resposta = _client(monkeypatch).get("/seller", params={"granularidade": "mes", "periodo": "xx"})
+    assert resposta.status_code == 400
+
+
 def test_funil_com_pipedrive_fora_do_ar_avisa_e_zera(monkeypatch):
     cliente = _client(monkeypatch)
     monkeypatch.setattr(funil_pipedrive_mod, "buscar_pipedrive", _BUSCAR_PIPEDRIVE_REAL)

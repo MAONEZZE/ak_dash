@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.auth import exigir_usuario
 from app.cache import obter_ou_calcular
 from app.config import donos_sdr, etiqueta_pessoa, settings
-from app.dominios.funil import evento as funil_evento, pipedrive, sdr
+from app.dominios.funil import evento as funil_evento, pipedrive, sdr, seller
 from app.dominios.funil.banco import buscar_contas
 from app.dominios.geral.banco import (
     buscar_evento,
@@ -353,6 +353,29 @@ def get_pagina_sdr(
             inscricoes_mes=inscricoes_mes,
             inscritos_sed_mes=inscritos_sed_mes,
         ),
+        "avisos": [f"fonte_indisponivel:{t}" for t in tabelas_com_falha()],
+    }
+
+
+@router.get("/seller")
+def get_pagina_seller(
+    granularidade: str = Query(...),
+    periodo: str = Query(...),
+    _usuario: dict = Depends(exigir_usuario),
+) -> dict:
+    iniciar_registro_de_falhas()
+    p = _resolver_periodo_ou_400(granularidade, periodo)
+    (linkedin, instagram), pessoas, metas = em_paralelo(
+        lambda: em_paralelo(lambda: _contas_do_canal("linkedin", p), lambda: _contas_do_canal("instagram", p)),
+        lambda: obter_ou_calcular("pessoas:ativas", settings.cache_ttl_pessoas_segundos, listar_ativas),
+        lambda: obter_ou_calcular("metas", settings.cache_ttl_metricas_segundos, buscar_metas),
+    )
+    sellers = sorted(
+        ({"id": int(x.id), "nome": x.nome, "imagem_url": x.imagem_url} for x in pessoas if x.cargo == "seller"),
+        key=lambda s: s["id"],
+    )
+    return {
+        **seller.montar_resposta_pagina_seller(p, sellers, {"linkedin": linkedin, "instagram": instagram}, metas, hoje_sp()),
         "avisos": [f"fonte_indisponivel:{t}" for t in tabelas_com_falha()],
     }
 
