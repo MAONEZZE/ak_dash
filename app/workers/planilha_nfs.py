@@ -116,3 +116,14 @@ def ler_aba_nfs(linhas: list[list], ano: int, mes: int) -> list[dict]:
             "status": _texto(linha, "status"),
         })
     return notas
+
+
+APELIDOS_VENDEDOR = {"jorge jacob": "jacob", "thalysson": "thalyson"}
+
+
+def resolver_vendedor(nome: str | None, usuarios: list[dict]) -> int | None:
+    if not nome or not nome.strip():
+        return None
+    alvo = normalizar(nome)
+    alvo = APELIDOS_VENDEDOR.get(alvo, alvo)
+    return next((int(u["id"]) for u in sorted(usuarios, key=lambda u: u["id"]) if normalizar(u["nome"]) == alvo), None)

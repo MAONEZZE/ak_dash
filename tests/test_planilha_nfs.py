@@ -85,3 +85,12 @@ def test_ler_aba_nfs_sem_cliente_ou_valor_pago_levanta_value_error():
         planilha_nfs.ler_aba_nfs(linhas_sem_colunas, 2026, 6)
     with pytest.raises(ValueError, match=mensagem):
         planilha_nfs.ler_aba_nfs([], 2026, 6)
+
+
+def test_resolver_vendedor_usa_nome_e_apelidos():
+    usuarios = [{"id": 1, "nome": "Jacob"}, {"id": 8, "nome": "Thalyson"}, {"id": 6, "nome": "Letícia"}, {"id": 3, "nome": "Alex"}]
+    nomes = ["Jacob", "Jorge Jacob", "Thalysson", "Leticia", " alex ", "Kelly", None]
+
+    ids = [planilha_nfs.resolver_vendedor(nome, usuarios) for nome in nomes]
+
+    assert ids == [1, 1, 8, 6, 3, None, None]
