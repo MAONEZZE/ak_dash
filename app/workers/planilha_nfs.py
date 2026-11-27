@@ -71,3 +71,48 @@ def data_venda(valor, ano: int) -> date | None:
     else:
         return None
     return data if data.year == ano else None
+
+
+COLUNAS_NOTA = ["chave", "mes", "linha", "cliente", "categoria", "produto", "valor_pago", "valor_venda", "data_venda", "data_referencia", "forma_pagamento", "canal", "vendedor", "status"]
+
+
+def ler_aba_nfs(linhas: list[list], ano: int, mes: int) -> list[dict]:
+    indices = {normalizar(h): i for i, h in enumerate(linhas[0]) if h} if linhas else {}
+    if "cliente" not in indices or "valor pago" not in indices:
+        raise ValueError(f"aba NFS {mes:02d}/{ano} sem as colunas Cliente e Valor pago")
+
+    def _cru(linha, nome):
+        i = indices.get(nome)
+        if i is None or i >= len(linha):
+            return None
+        return linha[i]
+
+    def _texto(linha, nome):
+        valor = _cru(linha, nome)
+        if valor is None or not str(valor).strip():
+            return None
+        return str(valor).strip()
+
+    notas = []
+    for n, linha in enumerate(linhas[1:], start=2):
+        cliente = _texto(linha, "cliente")
+        if cliente is None:
+            continue
+        data = data_venda(_cru(linha, "data de venda"), ano)
+        notas.append({
+            "chave": f"{ano:04d}-{mes:02d}:{n}",
+            "mes": f"{ano:04d}-{mes:02d}-01",
+            "linha": n,
+            "cliente": cliente,
+            "categoria": categoria(_cru(linha, "categoria")),
+            "produto": produto(_cru(linha, "produto")),
+            "valor_pago": valor_monetario(_cru(linha, "valor pago")),
+            "valor_venda": valor_monetario(_cru(linha, "valor da venda")),
+            "data_venda": data.isoformat() if data else None,
+            "data_referencia": (data or date(ano, mes, 1)).isoformat(),
+            "forma_pagamento": forma_pagamento(_cru(linha, "forma de pagto")),
+            "canal": _texto(linha, "origem do lead"),
+            "vendedor": _texto(linha, "vendedor"),
+            "status": _texto(linha, "status"),
+        })
+    return notas

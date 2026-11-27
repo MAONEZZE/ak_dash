@@ -56,3 +56,19 @@ def test_data_venda_valida_serial_e_texto_e_recusa_lixo():
     assert planilha_nfs.data_venda("abril", 2026) is None
     assert planilha_nfs.data_venda(None, 2026) is None
     assert planilha_nfs.data_venda("", 2026) is None
+
+
+def test_ler_aba_nfs_monta_notas_pelo_nome_da_coluna():
+    linhas = [
+        ["Status", "Cliente ", "Categoria", "Produto", "Valor pago", "Valor da venda", "Data de Venda", "Forma de pagto", "Origem do lead", "Vendedor"],
+        ["Emitida", "Ana ", "venda nova", "Aceleracao", "R$ 5.000,00", 30000, 46335, "Cartão de crédito", "LinkedIn", " Jacob"],
+        [None, None, None, None, None, None, None, None, None, None],
+        ["", "Bruno", "", "Sprint", 1000, None, "abril", "PIX"],
+    ]
+
+    notas = planilha_nfs.ler_aba_nfs(linhas, 2026, 11)
+
+    assert notas == [
+        {"chave": "2026-11:2", "mes": "2026-11-01", "linha": 2, "cliente": "Ana", "categoria": "venda nova", "produto": "Aceleração", "valor_pago": 5000.0, "valor_venda": 30000.0, "data_venda": "2026-11-09", "data_referencia": "2026-11-09", "forma_pagamento": "Cartão", "canal": "LinkedIn", "vendedor": "Jacob", "status": "Emitida"},
+        {"chave": "2026-11:4", "mes": "2026-11-01", "linha": 4, "cliente": "Bruno", "categoria": None, "produto": "Sprint", "valor_pago": 1000.0, "valor_venda": None, "data_venda": None, "data_referencia": "2026-11-01", "forma_pagamento": "PIX", "canal": None, "vendedor": None, "status": None},
+    ]
