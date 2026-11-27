@@ -316,24 +316,22 @@ def get_pagina_sdr(
         if dados_evento is None
         else {"id": dados_evento.id, "titulo": dados_evento.titulo, "data": dados_evento.data, "capacidade": dados_evento.capacidade}
     )
-    # Card "Ranking SDR" (mês do fim do filtro): negócios de que cada SDR é dono e entradas no estágio Inscrito,
-    # do Pipedrive (donos nas envs PIPE_ID_USUARIO_SDR_*); o badge é o total de inscritos do evento no SED.
+    # Card "Ranking SDR" (mês do fim do filtro): inscrições da planilha (metricas_funil_sdr); negócios do Pipedrive;
+    # badge = inscritos do evento no SED. Donos nas envs PIPE_ID_USUARIO_SDR_*.
     id_dash_por_dono = {
         dono: s["id"] for dono, nome in donos_sdr().items() for s in sdrs if normalizar(s["nome"]) == nome
     }
     inicio_mes, fim_mes = sdr.mes_do_ranking(p)
     hoje = hoje_sp()
     chave_donos = sorted(id_dash_por_dono.items())
-    negocios, inscricoes_pipedrive, inscritos_sed_mes = em_paralelo(
+    negocios, linhas_mes, inscritos_sed_mes = em_paralelo(
         lambda: obter_ou_calcular(
             f"pagina-sdr:negocios:{inicio_mes}:{chave_donos}",
             ttl,
             lambda: sdr.buscar_negocios_sdr(inicio_mes, fim_mes, id_dash_por_dono),
         ),
         lambda: obter_ou_calcular(
-            f"pagina-sdr:inscricoes-pipedrive:{inicio_mes}:{hoje}:{chave_donos}",
-            ttl,
-            lambda: sdr.buscar_inscricoes_pipedrive(inicio_mes, fim_mes, id_dash_por_dono, hoje),
+            f"pagina-sdr:linhas:{inicio_mes}:{fim_mes}", ttl, lambda: sdr.buscar_metricas_funil_sdr(inicio_mes, fim_mes)
         ),
         lambda: None
         if dados_evento is None
@@ -343,12 +341,16 @@ def get_pagina_sdr(
             lambda: contar_inscritos_no_periodo(dados_evento.id, inicio_mes, fim_mes),
         ),
     )
+    inscricoes_mes = sdr.inscricoes_do_mes(linhas_mes, [s["id"] for s in sdrs], hoje)
+    data_evento = funil_evento.data_do_evento_sp(dados_evento.data) if dados_evento is not None and dados_evento.data else None
+    janela_meta = sdr.janela_da_meta((inicio_mes, fim_mes), data_evento)
     return {
         **sdr.montar_resposta_pagina_sdr(
             p, sdrs, linhas, linhas_janela, ligacoes, metas, evento_dict, dias, hoje=hoje,
             mes_ranking=(inicio_mes, fim_mes),
+            janela_meta=janela_meta,
             negocios=negocios,
-            inscricoes_pipedrive=inscricoes_pipedrive,
+            inscricoes_mes=inscricoes_mes,
             inscritos_sed_mes=inscritos_sed_mes,
         ),
         "avisos": [f"fonte_indisponivel:{t}" for t in tabelas_com_falha()],
