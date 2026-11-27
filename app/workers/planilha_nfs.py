@@ -1,6 +1,8 @@
 """Leitura das abas "NFS <mês>" da planilha do financeiro, sem I/O. Usado pelo WorkerFinanceiro e por scripts/carga_financeiro.py."""
 from __future__ import annotations
 
+from datetime import date, datetime, timedelta
+
 from app.planilhas import normalizar
 
 MESES = ["janeiro", "fevereiro", "marco", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"]
@@ -56,3 +58,16 @@ def forma_pagamento(valor) -> str:
     if "boleto" in n:
         return "Boleto"
     return "Outros"
+
+
+def data_venda(valor, ano: int) -> date | None:
+    if isinstance(valor, (int, float)) and not isinstance(valor, bool):
+        data = date(1899, 12, 30) + timedelta(days=int(valor))
+    elif isinstance(valor, str):
+        try:
+            data = datetime.strptime(valor.strip(), "%d/%m/%Y").date()
+        except ValueError:
+            return None
+    else:
+        return None
+    return data if data.year == ano else None

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date
+
 from app.workers import planilha_nfs
 
 
@@ -44,3 +46,13 @@ def test_categoria_produto_e_forma_saem_normalizados():
     assert planilha_nfs.forma_pagamento("PIX e Cartão ") == "Outros"
     assert planilha_nfs.forma_pagamento(None) == "Outros"
     assert planilha_nfs.forma_pagamento("Dinheiro") == "Outros"
+
+
+def test_data_venda_valida_serial_e_texto_e_recusa_lixo():
+    assert planilha_nfs.data_venda(46335, 2026) == date(2026, 11, 9)
+    assert planilha_nfs.data_venda(46294, 2026) == date(2026, 9, 29)
+    assert planilha_nfs.data_venda("23/10/2026", 2026) == date(2026, 10, 23)
+    assert planilha_nfs.data_venda(42701, 2026) is None
+    assert planilha_nfs.data_venda("abril", 2026) is None
+    assert planilha_nfs.data_venda(None, 2026) is None
+    assert planilha_nfs.data_venda("", 2026) is None
