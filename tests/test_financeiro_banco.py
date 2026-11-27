@@ -1,7 +1,4 @@
-"""Testes de `dominios/financeiro/banco.py` — vendas detalhadas + junção com
-
-cliente. Mesmo padrão de mock de `tests/test_geral_banco.py`.
-"""
+"""Testes de `dominios/financeiro/banco.py` — notas do período no formato do contrato."""
 from __future__ import annotations
 
 from datetime import date
@@ -10,332 +7,48 @@ from app.dominios.financeiro import banco as banco_mod
 from app.fontes import supabase
 
 
-def _mockar(monkeypatch, tabelas: dict[str, list[dict]]) -> list[dict]:
-    chamadas: list[dict] = []
+def test_buscar_notas_devolve_notas_no_formato_do_contrato(monkeypatch):
+    chamadas: list[tuple] = []
 
-    def _substituto(funcao, devolve):
-        def _fake(*args):
-            chamadas.append({"funcao": funcao, "args": args})
-            return devolve(args)
-        return _fake
+    def fake(inicio, fim):
+        chamadas.append((inicio, fim))
+        return [
+            {
+                "chave": "2026-11:2",
+                "mes": "2026-11-01",
+                "linha": 2,
+                "cliente": "Ana",
+                "categoria": "venda nova",
+                "produto": "Aceleração",
+                "valor_pago": 5000,
+                "valor_venda": None,
+                "data_venda": None,
+                "data_referencia": "2026-11-01",
+                "forma_pagamento": "PIX",
+                "canal": None,
+                "vendedor": "Jacob",
+                "id_vendedor": 1,
+                "status": "Emitida",
+                "atualizado_em": "x",
+            }
+        ]
 
-    catalogos = {
-        "ler_vendas_do_periodo": lambda args: tabelas.get("metricas_faturamento", []),
-        "ler_recebimentos_do_periodo": lambda args: tabelas.get("recebimentos_faturamento", []),
-        "ler_vendas_por_id_planilha": lambda args: [
-            v for v in tabelas.get("metricas_faturamento", []) if v.get("id_planilha") in args[0]
-        ],
-        "ler_clientes_por_id": lambda args: tabelas.get("cliente_faturamento", []),
-        "ler_usuarios_por_id": lambda args: tabelas.get("users", []),
-    }
-    for funcao, devolve in catalogos.items():
-        monkeypatch.setattr(supabase, funcao, _substituto(funcao, devolve))
-    return chamadas
+    monkeypatch.setattr(supabase, "ler_notas_financeiro_do_periodo", fake)
 
+    notas = banco_mod.buscar_notas(date(2026, 1, 1), date(2026, 11, 27))
 
-def test_soma_de_vendas_junta_nome_do_cliente_por_id_cliente(monkeypatch):
-    _mockar(
-        monkeypatch,
+    assert chamadas == [(date(2026, 1, 1), date(2026, 11, 27))]
+    assert notas == [
         {
-            "metricas_faturamento": [
-                {
-                    "id": 1,
-                    "data_venda": "2026-08-05T00:00:00",
-                    "id_cliente": 42,
-                    "produto": "Mentoria",
-                    "canal": "Instagram",
-                    "metodo_pagamento": "Pix",
-                    "num_parcelas": 1,
-                    "valor_bruto_contrato": 10000,
-                    "liquido_entrada": 9500,
-                },
-            ],
-            "cliente_faturamento": [{"id": 42, "nome": "Maria Silva"}],
-        },
-    )
-    vendas = banco_mod.buscar_vendas_detalhadas(date(2026, 8, 1), date(2026, 8, 31))
-    assert len(vendas) == 1
-    assert vendas[0]["cliente"] == "Maria Silva"
-    assert vendas[0]["valor_bruto_contrato"] == 10000
-    assert vendas[0]["liquido_entrada"] == 9500
-
-
-def test_venda_com_id_cliente_sem_cliente_correspondente_fica_com_cliente_none(monkeypatch):
-    _mockar(
-        monkeypatch,
-        {
-            "metricas_faturamento": [
-                {
-                    "id": 2,
-                    "data_venda": "2026-08-06T00:00:00",
-                    "id_cliente": 999,
-                    "produto": None,
-                    "canal": None,
-                    "metodo_pagamento": None,
-                    "num_parcelas": None,
-                    "valor_bruto_contrato": 5000,
-                    "liquido_entrada": 1000,
-                },
-            ],
-            "cliente_faturamento": [],
-        },
-    )
-    vendas = banco_mod.buscar_vendas_detalhadas(date(2026, 8, 1), date(2026, 8, 31))
-    assert vendas[0]["cliente"] is None
-
-
-def test_venda_sem_id_cliente_fica_com_cliente_none_sem_consultar_a_toa(monkeypatch):
-    chamadas = _mockar(
-        monkeypatch,
-        {
-            "metricas_faturamento": [
-                {
-                    "id": 3,
-                    "data_venda": "2026-08-07T00:00:00",
-                    "id_cliente": None,
-                    "produto": None,
-                    "canal": None,
-                    "metodo_pagamento": None,
-                    "num_parcelas": None,
-                    "valor_bruto_contrato": 3000,
-                    "liquido_entrada": 500,
-                },
-            ],
-        },
-    )
-    vendas = banco_mod.buscar_vendas_detalhadas(date(2026, 8, 1), date(2026, 8, 31))
-    assert vendas[0]["cliente"] is None
-    # buscar_clientes([]) não dispara consulta — só vendas e recebimentos do período.
-    assert [c["funcao"] for c in chamadas] == ["ler_vendas_do_periodo", "ler_recebimentos_do_periodo"]
-
-
-def test_periodo_sem_venda_devolve_lista_vazia(monkeypatch):
-    _mockar(monkeypatch, {"metricas_faturamento": []})
-    vendas = banco_mod.buscar_vendas_detalhadas(date(2026, 9, 1), date(2026, 9, 30))
-    assert vendas == []
-
-
-def test_venda_com_user_closer_junta_nome_do_closer(monkeypatch):
-    _mockar(
-        monkeypatch,
-        {
-            "metricas_faturamento": [
-                {
-                    "id": 4,
-                    "data_venda": "2026-08-10T00:00:00",
-                    "id_cliente": None,
-                    "produto": "KeepSide",
-                    "canal": "LinkedIn",
-                    "metodo_pagamento": "PIX",
-                    "num_parcelas": 1,
-                    "valor_bruto_contrato": 60000,
-                    "valor_entrada": 60000,
-                    "liquido_entrada": 43475.40,
-                    "imposto": 0.1,
-                    "taxa": 0.1949,
-                    "user_closer": 5,
-                },
-            ],
-            "users": [{"id": 5, "nome": "Mariana"}],
-        },
-    )
-    vendas = banco_mod.buscar_vendas_detalhadas(date(2026, 8, 1), date(2026, 8, 31))
-    assert vendas[0]["user_closer"] == 5
-    assert vendas[0]["closer"] == "Mariana"
-    assert vendas[0]["valor_entrada"] == 60000
-    assert vendas[0]["imposto"] == 0.1
-    assert vendas[0]["taxa"] == 0.1949
-
-
-def test_venda_com_user_closer_sem_correspondente_fica_com_closer_none(monkeypatch):
-    _mockar(
-        monkeypatch,
-        {
-            "metricas_faturamento": [
-                {
-                    "id": 5,
-                    "data_venda": "2026-08-11T00:00:00",
-                    "id_cliente": None,
-                    "produto": None,
-                    "canal": None,
-                    "metodo_pagamento": None,
-                    "num_parcelas": None,
-                    "valor_bruto_contrato": 1000,
-                    "liquido_entrada": 900,
-                    "user_closer": 999,
-                },
-            ],
-            "users": [],
-        },
-    )
-    vendas = banco_mod.buscar_vendas_detalhadas(date(2026, 8, 1), date(2026, 8, 31))
-    assert vendas[0]["closer"] is None
-
-
-def test_venda_sem_user_closer_fica_com_closer_none_sem_consultar_users(monkeypatch):
-    chamadas = _mockar(
-        monkeypatch,
-        {
-            "metricas_faturamento": [
-                {
-                    "id": 6,
-                    "data_venda": "2026-08-12T00:00:00",
-                    "id_cliente": None,
-                    "produto": None,
-                    "canal": None,
-                    "metodo_pagamento": None,
-                    "num_parcelas": None,
-                    "valor_bruto_contrato": 1000,
-                    "liquido_entrada": 900,
-                    "user_closer": None,
-                },
-            ],
-        },
-    )
-    vendas = banco_mod.buscar_vendas_detalhadas(date(2026, 8, 1), date(2026, 8, 31))
-    assert vendas[0]["user_closer"] is None
-    assert vendas[0]["closer"] is None
-    assert [c["funcao"] for c in chamadas] == ["ler_vendas_do_periodo", "ler_recebimentos_do_periodo"]
-
-
-def test_buscar_closers_com_lista_vazia_nao_consulta():
-    assert banco_mod.buscar_closers([]) == {}
-
-
-def test_venda_com_segundo_pagamento_expoe_valor_taxa_liquido_e_forma_pgto_2(monkeypatch):
-    _mockar(
-        monkeypatch,
-        {
-            "metricas_faturamento": [
-                {
-                    "id": 7,
-                    "data_venda": "2026-08-13T00:00:00",
-                    "id_cliente": None,
-                    "produto": "KeepSide",
-                    "canal": "LinkedIn",
-                    "metodo_pagamento": "PIX",
-                    "num_parcelas": 2,
-                    "valor_bruto_contrato": 60000,
-                    "valor_entrada": 30000,
-                    "liquido_entrada": 27000,
-                    "imposto": 0.1,
-                    "taxa": 0,
-                    "valor_pgto_2": 30000,
-                    "taxa_pgto_2": 0.1949,
-                    "liquido_pgto_2": 21737.7,
-                    "forma_pgto_2": "Cartão",
-                },
-            ],
-        },
-    )
-    vendas = banco_mod.buscar_vendas_detalhadas(date(2026, 8, 1), date(2026, 8, 31))
-    assert vendas[0]["valor_pgto_2"] == 30000
-    assert vendas[0]["taxa_pgto_2"] == 0.1949
-    assert vendas[0]["liquido_pgto_2"] == 21737.7
-    assert vendas[0]["forma_pgto_2"] == "Cartão"
-
-
-def test_venda_sem_segundo_pagamento_fica_zerada_e_forma_pgto_2_none(monkeypatch):
-    _mockar(
-        monkeypatch,
-        {
-            "metricas_faturamento": [
-                {
-                    "id": 8,
-                    "data_venda": "2026-08-14T00:00:00",
-                    "id_cliente": None,
-                    "produto": None,
-                    "canal": None,
-                    "metodo_pagamento": None,
-                    "num_parcelas": 1,
-                    "valor_bruto_contrato": 1000,
-                    "valor_entrada": 1000,
-                    "liquido_entrada": 900,
-                },
-            ],
-        },
-    )
-    vendas = banco_mod.buscar_vendas_detalhadas(date(2026, 8, 1), date(2026, 8, 31))
-    assert vendas[0]["valor_pgto_2"] == 0
-    assert vendas[0]["taxa_pgto_2"] == 0
-    assert vendas[0]["liquido_pgto_2"] == 0
-    assert vendas[0]["forma_pgto_2"] is None
-
-
-def test_filtro_de_data_usa_lt_no_dia_seguinte_ao_fim(monkeypatch):
-    chamadas = _mockar(monkeypatch, {"metricas_faturamento": []})
-    banco_mod.buscar_vendas_detalhadas(date(2026, 8, 1), date(2026, 8, 31))
-    assert chamadas[0] == {"funcao": "ler_vendas_do_periodo", "args": (date(2026, 8, 1), date(2026, 8, 31))}
-
-
-def test_buscar_clientes_com_lista_vazia_nao_consulta():
-    assert banco_mod.buscar_clientes([]) == {}
-
-
-def test_cada_venda_traz_recebimentos_do_periodo_em_ordem_de_mes(monkeypatch):
-    chamadas = _mockar(
-        monkeypatch,
-        {
-            "metricas_faturamento": [
-                {
-                    "id": 1,
-                    "id_planilha": 25,
-                    "data_venda": "2026-04-16T00:00:00",
-                    "id_cliente": None,
-                    "produto": None,
-                    "canal": None,
-                    "metodo_pagamento": None,
-                    "num_parcelas": None,
-                    "valor_bruto_contrato": 20000,
-                    "liquido_entrada": 18000,
-                },
-                {
-                    "id": 2,
-                    "id_planilha": 26,
-                    "data_venda": "2026-04-20T00:00:00",
-                    "id_cliente": None,
-                    "produto": None,
-                    "canal": None,
-                    "metodo_pagamento": None,
-                    "num_parcelas": None,
-                    "valor_bruto_contrato": 5000,
-                    "liquido_entrada": 4500,
-                },
-            ],
-            "recebimentos_faturamento": [
-                {"id_planilha_venda": 25, "mes": "2026-05-01", "pago": 10000, "liquido": 9000},
-                {"id_planilha_venda": 25, "mes": "2026-04-01", "pago": 10000, "liquido": 9000},
-            ],
-        },
-    )
-    vendas = banco_mod.buscar_vendas_detalhadas(date(2026, 1, 1), date(2026, 12, 31))
-    por_planilha = {v["id_planilha"]: v for v in vendas}
-    assert por_planilha[25]["recebimentos"] == [
-        {"mes": "2026-04", "pago": 10000, "liquido": 9000},
-        {"mes": "2026-05", "pago": 10000, "liquido": 9000},
+            "chave": "2026-11:2",
+            "mes": "2026-11",
+            "data_referencia": "2026-11-01",
+            "cliente": "Ana",
+            "categoria": "venda nova",
+            "produto": "Aceleração",
+            "valor_pago": 5000,
+            "valor_venda": 0,
+            "forma_pagamento": "PIX",
+            "canal": None,
+        }
     ]
-    assert por_planilha[26]["recebimentos"] == []
-    receb = next(c for c in chamadas if c["funcao"] == "ler_recebimentos_do_periodo")
-    assert receb["args"] == (date(2026, 1, 1), date(2026, 12, 31))
-
-
-def test_venda_de_antes_do_periodo_com_recebimento_no_periodo_entra_na_lista(monkeypatch):
-    def _vendas_do_periodo(inicio, fim):
-        return []
-
-    def _vendas_por_id_planilha(ids, colunas="*"):
-        if 5 in ids:
-            return [{"id": 7, "id_planilha": 5, "data_venda": "2025-11-10T00:00:00", "valor_bruto_contrato": 60000}]
-        return []
-
-    def _recebimentos_do_periodo(inicio, fim):
-        return [{"id_planilha_venda": 5, "mes": "2026-02-01", "pago": 20000, "liquido": 18000}]
-
-    monkeypatch.setattr(supabase, "ler_vendas_do_periodo", _vendas_do_periodo)
-    monkeypatch.setattr(supabase, "ler_vendas_por_id_planilha", _vendas_por_id_planilha)
-    monkeypatch.setattr(supabase, "ler_recebimentos_do_periodo", _recebimentos_do_periodo)
-    vendas = banco_mod.buscar_vendas_detalhadas(date(2026, 1, 1), date(2026, 12, 31))
-    assert len(vendas) == 1
-    assert vendas[0]["id_planilha"] == 5
-    assert vendas[0]["data_venda"] == "2025-11-10T00:00:00"
-    assert vendas[0]["recebimentos"] == [{"mes": "2026-02", "pago": 20000, "liquido": 18000}]
