@@ -296,6 +296,15 @@ def test_mes_do_ranking_e_o_mes_do_fim_do_filtro():
     assert sdr.mes_do_ranking(resolver_periodo("mes", "2026-12")) == (date(2026, 12, 1), date(2026, 12, 31))
 
 
+def test_janela_da_meta_vai_do_dia_1_a_vespera_do_evento_no_maximo_o_fim_do_mes():
+    mes = (date(2026, 11, 1), date(2026, 11, 30))
+    assert sdr.janela_da_meta(mes, date(2026, 11, 26)) == (date(2026, 11, 1), date(2026, 11, 25))
+    assert sdr.janela_da_meta(mes, date(2026, 12, 2)) == (date(2026, 11, 1), date(2026, 11, 30))
+    assert sdr.janela_da_meta(mes, None) == (date(2026, 11, 1), date(2026, 11, 30))
+    assert sdr.janela_da_meta(mes, date(2026, 11, 1)) is None
+    assert sdr.janela_da_meta(mes, date(2026, 10, 20)) is None
+
+
 def test_ranking_do_mes_entra_no_card_de_cada_sdr_com_a_meta_mensal_de_inscricoes():
     p = resolver_periodo("dia", "2026-11-25")
     sdrs = [{"id": 11, "nome": "Juca", "imagem_url": None}, {"id": 14, "nome": "Jennifer", "imagem_url": None}]

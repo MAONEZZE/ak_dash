@@ -195,6 +195,14 @@ def mes_do_ranking(periodo: Periodo) -> tuple[date, date]:
     return inicio, proximo - timedelta(days=1)
 
 
+def janela_da_meta(mes: tuple[date, date], data_evento: date | None) -> tuple[date, date] | None:
+    """Janela da meta do ranking: do 1º dia do mês até a véspera do evento, no máximo até o fim do mês. Sem evento: o mês. Véspera antes do mês: `None`."""
+    fim = mes[1] if data_evento is None else min(mes[1], data_evento - timedelta(days=1))
+    if fim < mes[0]:
+        return None
+    return mes[0], fim
+
+
 def _limites_sp(inicio: date, fim: date) -> tuple[datetime, datetime]:
     return datetime.combine(inicio, time.min, tzinfo=TZ_SP), datetime.combine(fim + timedelta(days=1), time.min, tzinfo=TZ_SP)
 
