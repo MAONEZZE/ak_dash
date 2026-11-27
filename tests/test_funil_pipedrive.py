@@ -129,12 +129,13 @@ def test_buscar_pipedrive_junta_criados_e_entradas_do_historico(monkeypatch):
         lambda ids, desde, ate: entradas_pedidas.append((sorted(ids), desde, ate)) or [E],
     )
     monkeypatch.setattr(pipedrive.api, "etiquetas_das_pessoas", etiquetas)
+    monkeypatch.setattr(pipedrive.api, "etiquetas_dos_negocios", lambda ids: {})
 
     resultado = pipedrive.buscar_pipedrive(date(2026, 11, 1), date(2026, 11, 30))
 
     desde = datetime(2026, 11, 1, tzinfo=TZ_SP)
     assert criados == [desde]
-    assert entradas_pedidas == [([11, 12, 21, 22], desde, datetime(2026, 12, 1, tzinfo=TZ_SP))]
+    assert entradas_pedidas == [([1, 11, 12, 21, 22], desde, datetime(2026, 12, 1, tzinfo=TZ_SP))]
     # só os números captados precisam da etiqueta da pessoa
     assert pessoas_pedidas == [501]
     assert resultado == pipedrive.DadosPipedrive(
@@ -234,3 +235,38 @@ def test_entrada_na_oportunidade_feita_com_prosp_insta_vira_numero_captado_do_in
 
     monkeypatch.setattr(pipedrive, "settings", dataclasses.replace(pipedrive.settings, pipe_id_etiqueta_negocio_instagram=None))
     assert pipedrive.contar_oportunidades_instagram(entradas, etiquetas, date(2026, 11, 1), date(2026, 11, 30)) == []
+
+
+def test_buscar_pipedrive_le_a_oportunidade_feita_e_pede_etiquetas_dos_negocios_dela(monkeypatch):
+    estagios_pedidos = []
+    negocios_pedidos = []
+    pessoas_pedidas = []
+    O = {"id_deal": 30, "id_estagio": 1, "entrou_em": "2026-11-10T13:00:00+00:00", "id_dono": 5, "id_pessoa": 801}
+    I = {"id_deal": 40, "id_estagio": 21, "entrou_em": "2026-11-11T13:00:00+00:00", "id_dono": 5, "id_pessoa": 901}
+
+    def ler_entradas(ids, desde, ate):
+        estagios_pedidos.extend(sorted(ids))
+        return [O, I]
+
+    def etiquetas_negocios(ids):
+        negocios_pedidos.extend(ids)
+        return {30: (127,)}
+
+    def etiquetas_pessoas(ids):
+        pessoas_pedidas.extend(ids)
+        return {801: (190,), 901: (71,)}
+
+    monkeypatch.setattr(pipedrive.api, "negocios_criados_desde", lambda inicio: [])
+    monkeypatch.setattr(pipedrive.supabase, "ler_entradas_estagio", ler_entradas)
+    monkeypatch.setattr(pipedrive.api, "etiquetas_dos_negocios", etiquetas_negocios)
+    monkeypatch.setattr(pipedrive.api, "etiquetas_das_pessoas", etiquetas_pessoas)
+
+    resultado = pipedrive.buscar_pipedrive(date(2026, 11, 1), date(2026, 11, 30))
+
+    assert estagios_pedidos == [1, 11, 12, 21, 22]
+    assert negocios_pedidos == [30]
+    assert pessoas_pedidas == [901, 801]
+    assert resultado.fatos == [
+        Fato("abordagens", "instagram", 5, 901, "2026-11-11"),
+        Fato("numeros_captados", "instagram", 5, 801, "2026-11-10"),
+    ]

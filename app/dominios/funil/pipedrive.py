@@ -16,6 +16,7 @@ from app.planilhas import COLUNAS_POR_TABELA
 # Métricas que o Pipedrive sobrescreve em cada página de canal (o resto vem da planilha).
 METRICAS_POR_CANAL: dict[str, tuple[str, ...]] = {
     "linkedin": ("numeros_captados",),
+    "instagram": ("abordagens", "numeros_captados"),
 }
 # Colunas de metricas_funil_sdr que vêm do Pipedrive.
 METRICAS_SDR = ("abordagens", "respondidos", "indicacoes")
@@ -119,14 +120,22 @@ def contar_oportunidades_instagram(entradas: list[dict], etiquetas_dos_negocios:
 def _buscar(inicio: date, fim: date) -> DadosPipedrive:
     desde = datetime.combine(inicio, time.min, tzinfo=TZ_SP)
     ate = datetime.combine(fim + timedelta(days=1), time.min, tzinfo=TZ_SP)
+    oportunidade = settings.pipe_id_oportunidades_pipeline_principal
+    estagios = sorted({*_estagios(), *([oportunidade] if oportunidade is not None else [])})
     criados, entradas = em_paralelo(
         lambda: api.negocios_criados_desde(desde),
-        lambda: supabase.ler_entradas_estagio(list(_estagios()), desde, ate) if _estagios() else [],
+        lambda: supabase.ler_entradas_estagio(estagios, desde, ate) if estagios else [],
     )
-    fatos = contar(criados, inicio, fim) + contar_entradas(entradas, inicio, fim)
-    # Só os números captados vão para a conta pela etiqueta da pessoa (`aplicar_em_contas`).
+    ids_oportunidade = [e["id_deal"] for e in entradas if e["id_estagio"] == oportunidade]
+    etiquetas_negocios = api.etiquetas_dos_negocios(ids_oportunidade) if ids_oportunidade else {}
+    fatos = (
+        contar(criados, inicio, fim)
+        + contar_entradas(entradas, inicio, fim)
+        + contar_oportunidades_instagram(entradas, etiquetas_negocios, inicio, fim)
+    )
+    # Só as métricas que vão para a conta (METRICAS_POR_CANAL) precisam da etiqueta da pessoa.
     etiquetas = api.etiquetas_das_pessoas(
-        [f.id_pessoa for f in fatos if f.metrica == "numeros_captados" and f.id_pessoa is not None]
+        [f.id_pessoa for f in fatos if f.id_pessoa is not None and f.metrica in METRICAS_POR_CANAL.get(f.canal, ())]
     )
     return DadosPipedrive(fatos, etiquetas)
 

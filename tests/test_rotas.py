@@ -345,20 +345,30 @@ def test_funil_com_pipedrive_fora_do_ar_avisa_e_zera(monkeypatch):
         assert corpo["sem_conta"]["numeros_captados"] == 0
 
 
-def test_funil_instagram_vem_so_da_planilha_sem_consultar_o_pipedrive(monkeypatch):
-    # Decisão de 20/11/2026: o pipeline do Instagram no Pipedrive não é usado; a página volta para a planilha.
+def test_funil_instagram_abordagens_e_numeros_captados_vem_do_pipedrive_por_perfil(monkeypatch):
     cliente = _client(monkeypatch)
-
-    def nao_devia_chamar(inicio, fim):
-        raise AssertionError("/funil/instagram não deve consultar o Pipedrive")
-
-    monkeypatch.setattr(funil_pipedrive_mod, "buscar_pipedrive", nao_devia_chamar)
+    monkeypatch.setattr(
+        funil_pipedrive_mod,
+        "buscar_pipedrive",
+        lambda inicio, fim: DadosPipedrive(
+            [
+                Fato("abordagens", "instagram", 5, 901, "2026-11-02"),
+                Fato("abordagens", "instagram", 5, 902, "2026-11-03"),
+                Fato("numeros_captados", "instagram", 5, 901, "2026-11-02"),
+                Fato("abordagens", "linkedin", 5, 901, "2026-11-02"),
+            ],
+            {901: (71,)},
+        ),
+    )
+    monkeypatch.setenv("PIPE_ID_ETIQUETA_PESSOA_INSTAGRAM_JACOB", "71")
 
     corpo = cliente.get("/funil/instagram", params={"granularidade": "mes", "periodo": "2026-11"}).json()
 
-    assert corpo["avisos"] == []
-    assert corpo["contas"][0]["metricas"]["conexoes_enviadas"] == 43
-    assert corpo["sem_conta"] == {k: 0 for k in corpo["contas"][0]["metricas"]}
+    assert corpo["contas"][0]["metricas"]["abordagens"] == 1
+    assert corpo["contas"][0]["metricas"]["numeros_captados"] == 1
+    assert corpo["contas"][0]["metricas"]["conexoes_enviadas"] == 43  # planilha continua
+    assert corpo["sem_conta"]["abordagens"] == 1
+    assert corpo["sem_conta"]["numeros_captados"] == 0
 
 
 def test_funil_canal_invalido_404(monkeypatch):
@@ -394,10 +404,10 @@ def test_funil_sdr_200_com_sdrs_e_metricas_do_dashboard(monkeypatch):
     corpo = resposta.json()
     assert set(corpo) == {"periodo", "dias_uteis", "avisos", "metricas_time", "funil", "sdrs", "evento"}
     assert corpo["evento"] is None  # sem Confraria agendada
-    # Oportunidades = números captados LinkedIn do Pipedrive (1 na conta + 1 sem conta) + Instagram da planilha (0;
-    # o Fato do Instagram no Pipedrive é ignorado) + indicações do SDR (1).
+    # Oportunidades = números captados LinkedIn do Pipedrive (1 na conta + 1 sem conta) + Instagram do Pipedrive (1, sem perfil → sem_conta)
+    # + indicações do SDR (1).
     assert corpo["funil"] == {
-        "numeros_captados": 2, "indicacoes": 1, "oportunidades": 3, "abordados": 2, "respondidos": 1, "inscritos": 3,
+        "numeros_captados": 3, "indicacoes": 1, "oportunidades": 4, "abordados": 2, "respondidos": 1, "inscritos": 3,
     }
     assert [(s["nome"], s["metricas"]["abordagens"], s["metricas"]["respondidos"], s["metricas"]["indicacoes"], s["metricas"]["inscricoes_realizadas"]) for s in corpo["sdrs"]] == [
         ("Nathan", 0, 0, 0, 3),
