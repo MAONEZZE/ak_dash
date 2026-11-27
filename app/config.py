@@ -107,11 +107,15 @@ class Settings:
     pipe_id_pipeline_instagram: int | None = field(
         default_factory=lambda: _int_env("PIPE_ID_PIPELINE_INSTAGRAM")
     )
-    pipe_id_abordados_pipeline_linkedin: int | None = field(
-        default_factory=lambda: _int_env("PIPE_ID_ABORDADOS_PIPELINE_LINKEDIN")
+    # Coluna "Oportunidade feita" do pipeline principal (akeel 2.0) — Números Captados do Funil Instagram.
+    pipe_id_oportunidades_pipeline_principal: int | None = field(
+        default_factory=lambda: _int_env("PIPE_ID_OPORTUNIDADES_PIPELINE_PRINCIPAL")
     )
-    pipe_id_respondidos_pipeline_linkedin: int | None = field(
-        default_factory=lambda: _int_env("PIPE_ID_RESPONDIDOS_PIPELINE_LINKEDIN")
+    pipe_id_abordados_pipeline_principal: int | None = field(
+        default_factory=lambda: _int_env("PIPE_ID_ABORDADOS_PIPELINE_PRINCIPAL")
+    )
+    pipe_id_respondidos_pipeline_principal: int | None = field(
+        default_factory=lambda: _int_env("PIPE_ID_RESPONDIDOS_PIPELINE_PRINCIPAL")
     )
     pipe_id_abordados_pipeline_instagram: int | None = field(
         default_factory=lambda: _int_env("PIPE_ID_ABORDADOS_PIPELINE_INSTAGRAM")
@@ -122,19 +126,23 @@ class Settings:
     pipe_id_etiqueta_negocio_linkedin: int | None = field(
         default_factory=lambda: _int_env("PIPE_ID_ETIQUETA_NEGOCIO_LINKEDIN")
     )
+    # Etiqueta de negócio PROSP_INSTA.
+    pipe_id_etiqueta_negocio_instagram: int | None = field(
+        default_factory=lambda: _int_env("PIPE_ID_ETIQUETA_NEGOCIO_INSTAGRAM")
+    )
     pipe_id_etiqueta_negocio_indicacao: int | None = field(
         default_factory=lambda: _int_env("PIPE_ID_ETIQUETA_NEGOCIO_INDICACAO")
     )
-    # Colunas de onboarding do pipeline LinkedIn — página Funil Evento (docs/plans/funil-evento.md).
+    # Colunas de onboarding do pipeline principal — página Funil Evento (docs/plans/funil-evento.md).
     # Coluna "3. Inscrito" do pipeline akeel 2.0 — etapa Inscritos do Funil Evento.
-    pipe_id_inscrito_pipeline_linkedin: int | None = field(
-        default_factory=lambda: _int_env("PIPE_ID_INSCRITO_PIPELINE_LINKEDIN")
+    pipe_id_inscrito_pipeline_principal: int | None = field(
+        default_factory=lambda: _int_env("PIPE_ID_INSCRITO_PIPELINE_PRINCIPAL")
     )
-    pipe_id_onboarding_agendado_pipeline_linkedin: int | None = field(
-        default_factory=lambda: _int_env("PIPE_ID_ONBOARDING_AGENDADO_PIPELINE_LINKEDIN")
+    pipe_id_onboarding_agendado_pipeline_principal: int | None = field(
+        default_factory=lambda: _int_env("PIPE_ID_ONBOARDING_AGENDADO_PIPELINE_PRINCIPAL")
     )
-    pipe_id_onboarding_realizado_pipeline_linkedin: int | None = field(
-        default_factory=lambda: _int_env("PIPE_ID_ONBOARDING_REALIZADO_PIPELINE_LINKEDIN")
+    pipe_id_onboarding_realizado_pipeline_principal: int | None = field(
+        default_factory=lambda: _int_env("PIPE_ID_ONBOARDING_REALIZADO_PIPELINE_PRINCIPAL")
     )
     # Chave do campo customizado "Almoço" do negócio (tipo set) — card Almoços Pagos do Funil SDR.
     pipe_id_campo_almoco: str | None = field(

@@ -22,8 +22,8 @@ def _ids(monkeypatch):
         dataclasses.replace(
             pipedrive.settings,
             pipe_id_pipeline_instagram=3,
-            pipe_id_abordados_pipeline_linkedin=11,
-            pipe_id_respondidos_pipeline_linkedin=12,
+            pipe_id_abordados_pipeline_principal=11,
+            pipe_id_respondidos_pipeline_principal=12,
             pipe_id_abordados_pipeline_instagram=21,
             pipe_id_respondidos_pipeline_instagram=22,
             pipe_id_etiqueta_negocio_linkedin=101,
@@ -72,7 +72,7 @@ def test_quem_entrou_em_respondido_conta_tambem_como_abordado_uma_vez(monkeypatc
     monkeypatch.setattr(
         pipedrive,
         "settings",
-        dataclasses.replace(pipedrive.settings, pipe_id_abordados_pipeline_linkedin=2, pipe_id_respondidos_pipeline_linkedin=3),
+        dataclasses.replace(pipedrive.settings, pipe_id_abordados_pipeline_principal=2, pipe_id_respondidos_pipeline_principal=3),
     )
     entradas = [
         # negócio 10: só entrou em Respondidos

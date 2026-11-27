@@ -61,9 +61,9 @@ def _buscar(data_evento: date) -> dict[str, int]:
     ids = ids_etiquetas_do_evento(api.etiquetas_de_negocio(), data_evento)
     if not ids:
         return dict(ZERADO)
-    inscrito = settings.pipe_id_inscrito_pipeline_linkedin
-    agendado = settings.pipe_id_onboarding_agendado_pipeline_linkedin
-    realizado = settings.pipe_id_onboarding_realizado_pipeline_linkedin
+    inscrito = settings.pipe_id_inscrito_pipeline_principal
+    agendado = settings.pipe_id_onboarding_agendado_pipeline_principal
+    realizado = settings.pipe_id_onboarding_realizado_pipeline_principal
     inscritos = api.negocios_atuais_no_estagio(inscrito) if inscrito is not None else []
     agendados = api.negocios_atuais_no_estagio(agendado) if agendado is not None else []
     realizados = api.negocios_atuais_no_estagio(realizado) if realizado is not None else []
@@ -74,14 +74,14 @@ def _buscar(data_evento: date) -> dict[str, int]:
 
 
 def _buscar_almocos(data_evento: date) -> int:
-    if settings.pipe_id_campo_almoco is None or settings.pipe_id_onboarding_realizado_pipeline_linkedin is None:
+    if settings.pipe_id_campo_almoco is None or settings.pipe_id_onboarding_realizado_pipeline_principal is None:
         return 0
     ids = ids_etiquetas_do_evento(api.etiquetas_de_negocio(), data_evento)
     if not ids:
         return 0
     return contar_almocos_pagos(
         ids,
-        api.negocios_atuais_no_estagio(settings.pipe_id_onboarding_realizado_pipeline_linkedin),
+        api.negocios_atuais_no_estagio(settings.pipe_id_onboarding_realizado_pipeline_principal),
         settings.pipe_id_campo_almoco,
     )
 

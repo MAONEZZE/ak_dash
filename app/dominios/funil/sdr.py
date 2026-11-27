@@ -217,7 +217,7 @@ def buscar_inscricoes_pipedrive(
     inicio: date, fim: date, id_dash_por_dono: dict[int, int], hoje: date
 ) -> dict[int, dict[str, int]]:
     """Entradas no estágio Inscrito (histórico do WorkerPipedrive) em [inicio, fim], por SDR. Sem o estágio configurado: `{}`."""
-    estagio = settings.pipe_id_inscrito_pipeline_linkedin
+    estagio = settings.pipe_id_inscrito_pipeline_principal
     if estagio is None:
         return {}
     desde, ate = _limites_sp(inicio, fim)

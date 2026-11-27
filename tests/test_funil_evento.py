@@ -77,9 +77,9 @@ def test_buscar_pipedrive_evento_conta_inscritos_e_onboardings_com_a_etiqueta_e_
         "settings",
         dataclasses.replace(
             evento.settings,
-            pipe_id_inscrito_pipeline_linkedin=7,
-            pipe_id_onboarding_agendado_pipeline_linkedin=44,
-            pipe_id_onboarding_realizado_pipeline_linkedin=46,
+            pipe_id_inscrito_pipeline_principal=7,
+            pipe_id_onboarding_agendado_pipeline_principal=44,
+            pipe_id_onboarding_realizado_pipeline_principal=46,
         ),
     )
     monkeypatch.setattr(evento.api, "etiquetas_de_negocio", lambda: {130: "imersão_02/12", 131: "imersão_30/03"})
@@ -114,7 +114,7 @@ def test_buscar_almocos_pagos_le_quem_esta_hoje_em_onboarding_realizado(monkeypa
         "settings",
         dataclasses.replace(
             evento.settings,
-            pipe_id_onboarding_realizado_pipeline_linkedin=46,
+            pipe_id_onboarding_realizado_pipeline_principal=46,
             pipe_id_campo_almoco="k",
         ),
     )
@@ -153,7 +153,7 @@ def test_almocos_pagos_com_pipedrive_fora_do_ar_zera_e_registra_falha(monkeypatc
         "settings",
         dataclasses.replace(
             evento.settings,
-            pipe_id_onboarding_realizado_pipeline_linkedin=46,
+            pipe_id_onboarding_realizado_pipeline_principal=46,
             pipe_id_campo_almoco="k",
         ),
     )

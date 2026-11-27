@@ -71,8 +71,8 @@ def contar(criados: list[dict], inicio: date, fim: date) -> list[Fato]:
 def _estagios() -> dict[int, tuple[str, str]]:
     """Id do estágio no Pipedrive -> (métrica, canal), só dos configurados."""
     estagios = {
-        settings.pipe_id_abordados_pipeline_linkedin: ("abordagens", "linkedin"),
-        settings.pipe_id_respondidos_pipeline_linkedin: ("respondidos", "linkedin"),
+        settings.pipe_id_abordados_pipeline_principal: ("abordagens", "linkedin"),
+        settings.pipe_id_respondidos_pipeline_principal: ("respondidos", "linkedin"),
         settings.pipe_id_abordados_pipeline_instagram: ("abordagens", "instagram"),
         settings.pipe_id_respondidos_pipeline_instagram: ("respondidos", "instagram"),
     }
