@@ -32,7 +32,7 @@ def _ids(monkeypatch):
     )
 
 
-def test_criado_no_periodo_vira_numero_captado_do_canal():
+def test_criado_no_periodo_com_etiqueta_linkedin_vira_numero_captado_e_pipeline_instagram_nao():
     a = {"id": 1, "add_time": "2026-11-05T15:00:00Z", "pipeline_id": 1, "label_ids": [101], "owner_id": 25564860, "person_id": 501}
     # 23h do dia 04 em SP
     b = {"id": 2, "add_time": "2026-11-05T02:00:00Z", "pipeline_id": 3, "label_ids": [], "owner_id": 28932026, "person_id": 502}
@@ -43,7 +43,6 @@ def test_criado_no_periodo_vira_numero_captado_do_canal():
 
     assert pipedrive.contar([a, b, c, d], date(2026, 11, 1), date(2026, 11, 30)) == [
         Fato("numeros_captados", "linkedin", 25564860, 501, "2026-11-05"),
-        Fato("numeros_captados", "instagram", 28932026, 502, "2026-11-04"),
     ]
 
 

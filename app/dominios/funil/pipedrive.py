@@ -14,7 +14,6 @@ from app.periodo import TZ_SP
 from app.planilhas import COLUNAS_POR_TABELA
 
 # Métricas que o Pipedrive sobrescreve em cada página de canal (o resto vem da planilha).
-# Instagram fica 100% na planilha: o pipeline "Prospecção Insta" não é usado (decisão de 20/11/2026).
 METRICAS_POR_CANAL: dict[str, tuple[str, ...]] = {
     "linkedin": ("numeros_captados",),
 }
@@ -51,7 +50,7 @@ def _no_periodo(d: str | None, inicio: date, fim: date) -> bool:
 
 
 def contar(criados: list[dict], inicio: date, fim: date) -> list[Fato]:
-    """Fatos dos negócios criados no período [inicio, fim] (datas em SP), por add_time: números captados e indicações."""
+    """Fatos dos negócios criados no período [inicio, fim] (datas em SP), por add_time: números captados do LinkedIn (etiqueta de negócio) e indicações."""
     fatos: list[Fato] = []
     for n in criados:
         d = _data_sp(n.get("add_time"))
@@ -61,8 +60,6 @@ def contar(criados: list[dict], inicio: date, fim: date) -> list[Fato]:
         dono, pessoa = n.get("owner_id"), n.get("person_id")
         if settings.pipe_id_etiqueta_negocio_linkedin is not None and settings.pipe_id_etiqueta_negocio_linkedin in etiquetas:
             fatos.append(Fato("numeros_captados", "linkedin", dono, pessoa, d))
-        if settings.pipe_id_pipeline_instagram is not None and n.get("pipeline_id") == settings.pipe_id_pipeline_instagram:
-            fatos.append(Fato("numeros_captados", "instagram", dono, pessoa, d))
         if settings.pipe_id_etiqueta_negocio_indicacao is not None and settings.pipe_id_etiqueta_negocio_indicacao in etiquetas:
             fatos.append(Fato("indicacoes", None, dono, pessoa, d))
     return fatos
