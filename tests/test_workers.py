@@ -9,7 +9,6 @@ from app import config
 from app import workers
 from app.periodo import TZ_SP
 from app.workers import planilha_logs
-from app.workers.planilha_financeiro import ler_base_vendas
 
 
 @pytest.fixture(autouse=True)
@@ -487,260 +486,32 @@ def test_virada_do_mes_recarrega_estado_e_grava_no_mes_novo(monkeypatch):
     ]
 
 
-def test_financeiro_primeiro_ciclo_grava_vendas_com_cliente_e_recebimentos(monkeypatch):
-    banco = _Banco({
-        "cliente_faturamento": [{"id": 84, "nome": "Fernando Seguim", "telefone": 11942556237}],
-        "metricas_faturamento": [],
-        "recebimentos_faturamento": [],
-    })
+CAB_NFS = ["Cliente", "Categoria", "Valor pago", "Valor da venda", "Data de Venda", "Forma de pagto", "Vendedor"]
+
+
+def test_financeiro_grava_notas_do_mes_corrente_e_do_anterior(monkeypatch):
+    banco = _Banco({"users": [{"id": 1, "nome": "Jacob"}], "notas_financeiro": []})
     invalidacoes = _instalar(monkeypatch, banco)
-    cab_fin = ["ID", "Data da Venda"] + [""] * 44
-    linha = [8, 46037, "Fernando Seguim", "11 942556237", "", "", "Jacob", "", 9893.8, "", 9893.8, "PIX", "", 0.1, 0, 8904.42] + [""] * 6 + [9893.8, 8904.42]
-    w = workers.WorkerFinanceiro("ID_FIN", 2026, lambda _id: [("BASE_VENDAS", [cab_fin, linha])])
+    abas = [
+        ("NFS novembro", [CAB_NFS, ["Ana", "venda nova", 5000, 30000, 46335, "PIX", "Jacob"]]),
+        ("NFS outubro", [CAB_NFS, ["Bia", "upsell", 2000, None, None, "Boleto", "Kelly"]]),
+        ("NFS setembro", [CAB_NFS, ["Caio", "venda nova", 9000, 9000, None, "PIX", "Jacob"]]),
+    ]
+    w = workers.WorkerFinanceiro("ID_FIN", 2026, lambda _id: abas, hoje=lambda: date(2026, 11, 27))
 
     w.ciclo()
 
-    venda = banco.upserts[0]
-    assert venda[0] == "metricas_faturamento"
-    assert venda[2] == "id_planilha"
-    sem_carimbo = _sem_carimbo(venda[1])[0]
-    assert sem_carimbo["id_cliente"] == 84
-    assert sem_carimbo["id_planilha"] == 8
-    assert sem_carimbo["user_closer"] == 1
-    assert isinstance(venda[1][0]["atualizado_em"], str)
-    recebimentos = banco.upserts[1]
-    assert recebimentos[0] == "recebimentos_faturamento"
-    assert recebimentos[2] == "id_planilha_venda,mes"
-    assert _sem_carimbo(recebimentos[1]) == [
-        {"id_planilha_venda": 8, "mes": "2026-01-01", "pago": 9893.8, "liquido": 8904.42},
-    ]
-    assert banco.apagados == [("metricas_faturamento", {"id_planilha": "is.null"})]
-    assert len(invalidacoes) == 1
+    assert [(t, c) for t, _, c in banco.upserts] == [("notas_financeiro", "chave")]
+    linhas = banco.upserts[0][1]
+    assert sorted(l["chave"] for l in _sem_carimbo(linhas)) == ["2026-10:2", "2026-11:2"]
+    por_chave = {l["chave"]: l for l in linhas}
+    assert por_chave["2026-11:2"]["id_vendedor"] == 1
+    assert por_chave["2026-11:2"]["valor_pago"] == 5000.0
+    assert por_chave["2026-10:2"]["id_vendedor"] is None
+    assert all(isinstance(l["atualizado_em"], str) for l in linhas)
     assert w.planilha.nome == "financeiro"
-
-
-def test_financeiro_primeira_carga_apaga_vendas_legadas_sem_id_planilha(monkeypatch):
-    banco = _Banco({
-        "cliente_faturamento": [{"id": 84, "nome": "Fernando Seguim", "telefone": 11942556237}],
-        "metricas_faturamento": [],
-        "recebimentos_faturamento": [],
-    })
-    _instalar(monkeypatch, banco)
-    cab_fin = ["ID", "Data da Venda"] + [""] * 44
-    linha = [8, 46037, "Fernando Seguim", "11 942556237", "", "", "Jacob", "", 9893.8, "", 9893.8, "PIX", "", 0.1, 0, 8904.42] + [""] * 6 + [9893.8, 8904.42]
-    w = workers.WorkerFinanceiro("ID_FIN", 2026, lambda _id: [("BASE_VENDAS", [cab_fin, linha])])
-    w.ciclo()
-    assert ("metricas_faturamento", {"id_planilha": "is.null"}) in banco.apagados
-    banco.apagados.clear()
-
-    w.ciclo()
-
     assert banco.apagados == []
-
-
-def test_financeiro_falha_na_leitura_nao_apaga_vendas_legadas(monkeypatch):
-    banco = _Banco({
-        "cliente_faturamento": [{"id": 84, "nome": "Fernando Seguim", "telefone": 11942556237}],
-        "metricas_faturamento": [],
-        "recebimentos_faturamento": [],
-    })
-    _instalar(monkeypatch, banco)
-    cab_fin = ["ID", "Data da Venda"] + [""] * 44
-    linha = [8, 46037, "Fernando Seguim", "11 942556237", "", "", "Jacob", "", 9893.8, "", 9893.8, "PIX", "", 0.1, 0, 8904.42] + [""] * 6 + [9893.8, 8904.42]
-    fonte = {"abas": [], "erro": None}
-
-    def ler(_id):
-        if fonte["erro"]:
-            raise fonte["erro"]
-        return fonte["abas"]
-
-    w = workers.WorkerFinanceiro("ID_FIN", 2026, ler)
-
-    fonte["erro"] = RuntimeError("403 Forbidden")
-    w.executar_ciclo()
-
-    assert banco.apagados == []
-    assert banco.upserts == []
-    assert "403" in w.status["ultimo_erro"]["mensagem"]
-
-    fonte["erro"] = None
-    fonte["abas"] = [("DASHBOARD", [["x"]])]
-    w.executar_ciclo()
-
-    assert banco.apagados == []
-    assert banco.upserts == []
-
-    fonte["abas"] = [("BASE_VENDAS", [cab_fin, linha])]
-    w.executar_ciclo()
-
-    assert banco.apagados.count(("metricas_faturamento", {"id_planilha": "is.null"})) == 1
-    assert banco.upserts[0][0] == "metricas_faturamento"
-
-
-def test_financeiro_ciclo_sem_mudanca_nao_grava(monkeypatch):
-    banco = _Banco({
-        "cliente_faturamento": [{"id": 84, "nome": "Fernando Seguim", "telefone": 11942556237}],
-        "metricas_faturamento": [],
-        "recebimentos_faturamento": [],
-    })
-    invalidacoes = _instalar(monkeypatch, banco)
-    cab_fin = ["ID", "Data da Venda"] + [""] * 44
-    linha = [8, 46037, "Fernando Seguim", "11 942556237", "", "", "Jacob", "", 9893.8, "", 9893.8, "PIX", "", 0.1, 0, 8904.42] + [""] * 6 + [9893.8, 8904.42]
-    w = workers.WorkerFinanceiro("ID_FIN", 2026, lambda _id: [("BASE_VENDAS", [cab_fin, linha])])
-    w.ciclo()
-    banco.upserts.clear()
-    banco.apagados.clear()
-    invalidacoes.clear()
-
-    w.ciclo()
-
-    assert banco.upserts == []
-    assert banco.apagados == []
-    assert invalidacoes == []
-
-
-def test_financeiro_cria_cliente_novo_e_reaproveita_cliente_sem_telefone_pelo_nome(monkeypatch):
-    class _BancoClientes(_Banco):
-        def upsert(self, tabela, linhas, on_conflict, schema=None):
-            if not linhas:
-                return
-            super().upsert(tabela, linhas, on_conflict, schema)
-            if tabela == "cliente_faturamento":
-                for l in linhas:
-                    self.tabelas[tabela].append({"telefone": None, **l, "id": 900 + len(self.tabelas[tabela])})
-
-    banco = _BancoClientes({
-        "cliente_faturamento": [{"id": 90, "nome": "Renata Perri", "telefone": 0}],
-        "metricas_faturamento": [],
-        "recebimentos_faturamento": [],
-    }, persistir=False)  # o upsert acima já guarda os clientes
-    _instalar(monkeypatch, banco)
-    cab_fin = ["ID", "Data da Venda"] + [""] * 44
-    def linha(id_, nome, telefone):
-        return [id_, 46037, nome, telefone, "", "", "Jacob", "", 9893.8, "", 9893.8, "PIX", "", 0.1, 0, 8904.42] + [""] * 6 + [9893.8, 8904.42]
-    abas = [("BASE_VENDAS", [cab_fin, linha(1, "Ana Nova", "11 91111-1111"), linha(2, "renata perri", ""), linha(3, "Sem Fone", "")])]
-    w = workers.WorkerFinanceiro("ID_FIN", 2026, lambda _id: abas)
-
-    w.ciclo()
-
-    clientes = [(t, _sem_carimbo(l), c) for t, l, c in banco.upserts if t == "cliente_faturamento"]
-    assert clientes == [
-        ("cliente_faturamento", [{"nome": "Ana Nova", "telefone": 11911111111}], "telefone"),
-        ("cliente_faturamento", [{"nome": "Sem Fone"}], "id"),
-    ]
-    venda = next(l for t, l, _ in banco.upserts if t == "metricas_faturamento")
-    assert {l["id_planilha"]: l["id_cliente"] for l in _sem_carimbo(venda)} == {1: 901, 2: 90, 3: 902}
-
-
-def test_financeiro_estado_inicial_vem_do_banco_e_so_regrava_venda_alterada(monkeypatch):
-    cab_fin = ["ID", "Data da Venda"] + [""] * 44
-
-    def linha(id_, valor_bruto):
-        return [id_, 46037, "Fernando Seguim", "11 942556237", "", "", "Jacob", "", valor_bruto, "", 9893.8, "PIX", "", 0.1, 0, 8904.42] + [""] * 6 + [9893.8, 8904.42]
-
-    gravadas = ler_base_vendas([cab_fin, linha(8, 9893.8), linha(9, 5000)], 2026)
-    banco = _Banco({
-        "cliente_faturamento": [{"id": 84, "nome": "Fernando Seguim", "telefone": 11942556237}],
-        "metricas_faturamento": [{**v.venda, "id_cliente": 84, "id": 100 + v.venda["id_planilha"]} for v in gravadas],
-        "recebimentos_faturamento": [r for v in gravadas for r in v.recebimentos],
-    })
-    _instalar(monkeypatch, banco)
-    w = workers.WorkerFinanceiro("ID_FIN", 2026, lambda _id: [("BASE_VENDAS", [cab_fin, linha(8, 9893.8), linha(9, 6000)])])
-
-    w.ciclo()
-
-    assert [t for t, _, _ in banco.upserts] == ["metricas_faturamento"]
-    _, linhas, _ = banco.upserts[0]
-    assert [l["id_planilha"] for l in _sem_carimbo(linhas)] == [9]
-    assert _sem_carimbo(linhas)[0]["valor_bruto_contrato"] == 6000
-
-
-def test_financeiro_venda_removida_da_planilha_e_apagada(monkeypatch):
-    cab_fin = ["ID", "Data da Venda"] + [""] * 44
-
-    def linha(id_, valor_bruto):
-        return [id_, 46037, "Fernando Seguim", "11 942556237", "", "", "Jacob", "", valor_bruto, "", 9893.8, "PIX", "", 0.1, 0, 8904.42] + [""] * 6 + [9893.8, 8904.42]
-
-    gravadas = ler_base_vendas([cab_fin, linha(8, 9893.8), linha(9, 5000), linha(10, 4000)], 2026)
-    banco = _Banco({
-        "cliente_faturamento": [{"id": 84, "nome": "Fernando Seguim", "telefone": 11942556237}],
-        "metricas_faturamento": [{**v.venda, "id_cliente": 84, "id": 100 + v.venda["id_planilha"]} for v in gravadas],
-        "recebimentos_faturamento": [r for v in gravadas for r in v.recebimentos],
-    })
-    invalidacoes = _instalar(monkeypatch, banco)
-    w = workers.WorkerFinanceiro("ID_FIN", 2026, lambda _id: [("BASE_VENDAS", [cab_fin, linha(8, 9893.8)])])
-
-    w.ciclo()
-
-    assert banco.apagados == [
-        ("metricas_faturamento", {"id_planilha": "is.null"}),
-        ("metricas_faturamento", {"id_planilha": "in.(9,10)"}),
-    ]
-    assert not any(k[0] in (9, 10) for k in w.recebimentos)
     assert len(invalidacoes) == 1
-
-
-def test_financeiro_mes_esvaziado_e_apagado_do_calendario(monkeypatch):
-    cab_fin = ["ID", "Data da Venda"] + [""] * 44
-    abril = [25, 46037, "Fernando Seguim", "11 942556237", "", "", "Jacob", "", 5000, "", 5000, "PIX", "", 0.1, 0, 4000] + [""] * 12 + [5000, 4000]
-
-    gravadas = ler_base_vendas([cab_fin, abril], 2026)
-    banco = _Banco({
-        "cliente_faturamento": [{"id": 84, "nome": "Fernando Seguim", "telefone": 11942556237}],
-        "metricas_faturamento": [{**v.venda, "id_cliente": 84, "id": 100 + v.venda["id_planilha"]} for v in gravadas],
-        "recebimentos_faturamento": [
-            *[r for v in gravadas for r in v.recebimentos],
-            {"id_planilha_venda": 25, "mes": "2026-05-01", "pago": 6000, "liquido": 5000},
-        ],
-    })
-    _instalar(monkeypatch, banco)
-    w = workers.WorkerFinanceiro("ID_FIN", 2026, lambda _id: [("BASE_VENDAS", [cab_fin, abril])])
-
-    w.ciclo()
-
-    assert banco.apagados == [
-        ("metricas_faturamento", {"id_planilha": "is.null"}),
-        ("recebimentos_faturamento", {"id_planilha_venda": "eq.25", "mes": "eq.2026-05-01"}),
-    ]
-    assert (25, "2026-05-01") not in w.recebimentos
-
-
-def test_financeiro_sem_aba_base_vendas_registra_erro_no_status(monkeypatch):
-    banco = _Banco({
-        "cliente_faturamento": [],
-        "metricas_faturamento": [],
-        "recebimentos_faturamento": [],
-    })
-    _instalar(monkeypatch, banco)
-    w = workers.WorkerFinanceiro("ID_FIN", 2026, lambda _id: [("DASHBOARD", [["x"]])])
-
-    w.executar_ciclo()
-
-    assert "BASE_VENDAS" in w.status["ultimo_erro"]["mensagem"]
-    assert w.status["ultimo_erro"]["mensagem"] == "RuntimeError: aba BASE_VENDAS não encontrada na planilha do financeiro"
-    assert w.status["ultima_leitura_ok"] is None
-    assert banco.upserts == []
-
-
-def test_financeiro_apelido_desconhecido_loga_uma_vez(monkeypatch, caplog):
-    banco = _Banco({
-        "cliente_faturamento": [{"id": 84, "nome": "Fernando Seguim", "telefone": 11942556237}],
-        "metricas_faturamento": [],
-        "recebimentos_faturamento": [],
-    })
-    _instalar(monkeypatch, banco)
-    cab_fin = ["ID", "Data da Venda"] + [""] * 44
-    linha = [8, 46037, "Fernando Seguim", "11 942556237", "", "", "Fulano", "", 9893.8, "", 9893.8, "PIX", "", 0.1, 0, 8904.42] + [""] * 6 + [9893.8, 8904.42]
-    w = workers.WorkerFinanceiro("ID_FIN", 2026, lambda _id: [("BASE_VENDAS", [cab_fin, linha])])
-
-    with caplog.at_level(logging.WARNING):
-        w.ciclo()
-        w.ciclo()
-
-    mensagens = [r.getMessage() for r in caplog.records if "Fulano" in r.getMessage()]
-    assert len(mensagens) == 1
-    venda = _sem_carimbo(banco.upserts[0][1])[0]
-    assert venda["user_closer"] is None
 
 
 CABECALHO_LOGS = ["Data", "Hora", "Usuario da ação", "Atividade feita", "Ação evento", "Nome do Cliente", "Telefone do Cliente"]
