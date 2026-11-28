@@ -20,6 +20,7 @@ from app.dominios.geral.banco import (
     listar_proximos_eventos,
 )
 from app.dominios.pessoas.banco import listar_ativas
+from app.fontes import supabase
 from app.fontes.banco import em_paralelo, iniciar_registro_de_falhas, tabelas_com_falha
 from app.metas import buscar_metas
 from app.periodo import TZ_SP, hoje_sp, resolver_periodo
@@ -290,6 +291,7 @@ def get_pagina_sdr(
 
     # Janela de inscrição do evento: da primeira inscrição até a véspera, sem domingos.
     dias: list[date] = []
+    primeira: date | None = None
     if dados_evento is not None and dados_evento.data:
         primeira = obter_ou_calcular(
             f"evento:{dados_evento.id}:primeira-inscricao", ttl, lambda: sdr.data_primeira_inscricao(dados_evento.id)
@@ -316,40 +318,35 @@ def get_pagina_sdr(
         if dados_evento is None
         else {"id": dados_evento.id, "titulo": dados_evento.titulo, "data": dados_evento.data, "capacidade": dados_evento.capacidade}
     )
-    # Card "Ranking SDR" (mês do fim do filtro): inscrições da planilha (metricas_funil_sdr); negócios do Pipedrive;
-    # badge = inscritos do evento no SED. Donos nas envs PIPE_ID_USUARIO_SDR_*.
-    id_dash_por_dono = {
-        dono: s["id"] for dono, nome in donos_sdr().items() for s in sdrs if normalizar(s["nome"]) == nome
-    }
+    # Card "Ranking SDR" (mês do fim do filtro): inscrições da planilha (metricas_funil_sdr)
+    # e badge = inscritos do evento no SED, na janela da meta (início do evento → véspera).
     inicio_mes, fim_mes = sdr.mes_do_ranking(p)
     hoje = hoje_sp()
-    chave_donos = sorted(id_dash_por_dono.items())
-    negocios, linhas_mes, inscritos_sed_mes = em_paralelo(
+    data_evento = funil_evento.data_do_evento_sp(dados_evento.data) if dados_evento is not None and dados_evento.data else None
+    criado_em = funil_evento.data_do_evento_sp(dados_evento.criado_em) if dados_evento is not None and dados_evento.criado_em else None
+    janela_meta = sdr.janela_da_meta((inicio_mes, fim_mes), data_evento, primeira or criado_em)
+    linhas_meta, inscritos_sed_mes = em_paralelo(
         lambda: obter_ou_calcular(
-            f"pagina-sdr:negocios:{inicio_mes}:{chave_donos}",
+            f"pagina-sdr:linhas:{janela_meta[0]}:{janela_meta[1]}",
             ttl,
-            lambda: sdr.buscar_negocios_sdr(inicio_mes, fim_mes, id_dash_por_dono),
-        ),
-        lambda: obter_ou_calcular(
-            f"pagina-sdr:linhas:{inicio_mes}:{fim_mes}", ttl, lambda: sdr.buscar_metricas_funil_sdr(inicio_mes, fim_mes)
-        ),
+            lambda: sdr.buscar_metricas_funil_sdr(janela_meta[0], janela_meta[1]),
+        )
+        if janela_meta
+        else [],
         lambda: None
-        if dados_evento is None
+        if dados_evento is None or janela_meta is None
         else obter_ou_calcular(
-            f"pagina-sdr:inscritos-sed:{dados_evento.id}:{inicio_mes}",
+            f"pagina-sdr:inscritos-sed:{dados_evento.id}:{janela_meta[0]}:{janela_meta[1]}",
             ttl,
-            lambda: contar_inscritos_no_periodo(dados_evento.id, inicio_mes, fim_mes),
+            lambda: contar_inscritos_no_periodo(dados_evento.id, janela_meta[0], janela_meta[1]),
         ),
     )
-    inscricoes_mes = sdr.inscricoes_do_mes(linhas_mes, [s["id"] for s in sdrs], hoje)
-    data_evento = funil_evento.data_do_evento_sp(dados_evento.data) if dados_evento is not None and dados_evento.data else None
-    janela_meta = sdr.janela_da_meta((inicio_mes, fim_mes), data_evento)
+    inscricoes_mes = sdr.inscricoes_do_mes(linhas_meta, [s["id"] for s in sdrs], hoje)
     return {
         **sdr.montar_resposta_pagina_sdr(
             p, sdrs, linhas, linhas_janela, ligacoes, metas, evento_dict, dias, hoje=hoje,
             mes_ranking=(inicio_mes, fim_mes),
             janela_meta=janela_meta,
-            negocios=negocios,
             inscricoes_mes=inscricoes_mes,
             inscritos_sed_mes=inscritos_sed_mes,
         ),
@@ -365,8 +362,7 @@ def get_pagina_seller(
 ) -> dict:
     iniciar_registro_de_falhas()
     p = _resolver_periodo_ou_400(granularidade, periodo)
-    (linkedin, instagram), pessoas, metas = em_paralelo(
-        lambda: em_paralelo(lambda: _contas_do_canal("linkedin", p), lambda: _contas_do_canal("instagram", p)),
+    pessoas, metas = em_paralelo(
         lambda: obter_ou_calcular("pessoas:ativas", settings.cache_ttl_pessoas_segundos, listar_ativas),
         lambda: obter_ou_calcular("metas", settings.cache_ttl_metricas_segundos, buscar_metas),
     )
@@ -374,8 +370,11 @@ def get_pagina_seller(
         ({"id": int(x.id), "nome": x.nome, "imagem_url": x.imagem_url} for x in pessoas if x.cargo == "seller"),
         key=lambda s: s["id"],
     )
+    # Números captados vêm do banco (metricas_sellers, preenchida da aba do seller na planilha), não do Pipedrive.
+    ids = [s["id"] for s in sellers]
+    linhas = supabase.ler_metricas_do_cargo("seller", ids, p.inicio, p.fim) if ids else []
     return {
-        **seller.montar_resposta_pagina_seller(p, sellers, {"linkedin": linkedin, "instagram": instagram}, metas, hoje_sp()),
+        **seller.montar_resposta_pagina_seller(p, sellers, linhas, metas, hoje_sp()),
         "avisos": [f"fonte_indisponivel:{t}" for t in tabelas_com_falha()],
     }
 
@@ -403,6 +402,7 @@ def get_funil_evento(
     else:
         dados = obter_ou_calcular(f"evento:{evento}", ttl, lambda: buscar_evento(evento))
     funil = dict(FUNIL_EVENTO_ZERADO)
+    almocos_pagos = 0
     if dados is not None:
         pipe = dict(funil_evento.ZERADO)
         if dados.data:
@@ -411,6 +411,9 @@ def get_funil_evento(
                 f"pipedrive:evento:{dados.id}",
                 ttl,
                 lambda: funil_evento.buscar_pipedrive_evento(data_evento),
+            )
+            almocos_pagos = obter_ou_calcular(
+                f"pipedrive:almocos:{dados.id}", ttl, lambda: funil_evento.buscar_almocos_pagos(data_evento)
             )
         comparecimento = obter_ou_calcular(
             f"evento:{dados.id}:comparecimento", ttl, lambda: contar_comparecimento(dados.id)
@@ -429,6 +432,8 @@ def get_funil_evento(
             "aprovados": dados.aprovados,
             "pendentes": dados.pendentes,
             "rejeitados": dados.rejeitados,
+            # Card Almoços pagos: coluna Onboarding realizado do Pipedrive agora (ver `funil_evento.buscar_almocos_pagos`).
+            "almocos_pagos": almocos_pagos,
         },
         "funil": funil,
     }

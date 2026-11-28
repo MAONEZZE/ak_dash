@@ -47,7 +47,7 @@ def ler_eventos_a_partir_de(
     agora: datetime,
     limite: int,
     titulo_contem: str | None = None,
-    colunas: str = "id,title,event_date,capacity",
+    colunas: str = "id,title,event_date,capacity,created_at",
 ) -> list[dict]:
     filtros = {"and": f'(event_date.gte."{_instante_utc(agora)}")', "order": "event_date.asc", "limit": str(limite)}
     if titulo_contem is not None:
@@ -59,7 +59,7 @@ def ler_evento_por_id(id_evento: str) -> list[dict]:
     return _query(
         "events",
         {"and": f'(id.eq."{id_evento}")', "order": "event_date.asc", "limit": "1"},
-        "id,title,event_date,capacity",
+        "id,title,event_date,capacity,created_at",
     )
 
 

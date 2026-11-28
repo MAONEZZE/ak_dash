@@ -329,7 +329,7 @@ def test_funil_sem_seller_ligado_nao_tem_meta(monkeypatch):
     assert corpo["meta_numeros_captados"] is None
 
 
-def test_seller_200_com_numeros_captados_do_mes_de_hoje_e_meta_por_seller(monkeypatch):
+def test_seller_200_com_numeros_captados_do_banco_e_meta_por_seller(monkeypatch):
     from app.dominios.funil import rotas as funil_rotas_mod
 
     monkeypatch.setattr(
@@ -344,32 +344,40 @@ def test_seller_200_com_numeros_captados_do_mes_de_hoje_e_meta_por_seller(monkey
         f"{__name__}._USER_CARGOS",
         [*_USER_CARGOS, {"id_user": 4, "cargo": "seller"}, {"id_user": 13, "cargo": "seller"}],
     )
-    monkeypatch.setattr(f"{__name__}._CONTAS", [{"id": 1, "nome": "Jacob", "id_seller": 4}])
     cliente = _client(monkeypatch)
     monkeypatch.setattr(
         fontes_supabase_mod,
         "ler_metas",
         lambda: [{"id_user": 13, "cargo": "seller", "metrica": "numeros_captados", "valor_diario": 3}],
     )
+    chamadas = []
+
+    def ler_metricas(cargo, ids, inicio, fim):
+        chamadas.append((cargo, sorted(ids), inicio, fim))
+        return [
+            {"data": "2026-11-02", "id_user": 13, "metrica": "numeros_captados", "valor": 6},
+            {"data": "2026-11-01", "id_user": 13, "metrica": "numeros_captados", "valor": 4},
+            {"data": "2026-11-02", "id_user": 4, "metrica": "fups", "valor": 50},
+        ]
+
+    monkeypatch.setattr(fontes_supabase_mod, "ler_metricas_do_cargo", ler_metricas)
     monkeypatch.setattr(funil_rotas_mod, "hoje_sp", lambda: date(2026, 11, 2))
+    # O Pipedrive não entra mais na página Seller: mesmo com fato de números captados, nada muda.
     monkeypatch.setattr(
         funil_pipedrive_mod,
         "buscar_pipedrive",
-        lambda inicio, fim: DadosPipedrive(
-            [Fato("numeros_captados", "linkedin", 1, 501, "2026-11-02"), Fato("numeros_captados", "instagram", 1, 502, "2026-11-03")],
-            {501: (55,)},
-        ),
+        lambda inicio, fim: DadosPipedrive([Fato("numeros_captados", "instagram", 1, 502, "2026-11-02")], {}),
     )
-    monkeypatch.setenv("PIPE_ID_ETIQUETA_PESSOA_LINKEDIN_JACOB", "55")
 
     resposta = cliente.get("/seller", params={"granularidade": "mes", "periodo": "2026-11"})
     assert resposta.status_code == 200
     corpo = resposta.json()
+    assert chamadas == [("seller", [4, 13], date(2026, 11, 1), date(2026, 11, 30))]
     assert corpo["periodo"] == {"granularidade": "mes", "inicio": "2026-11-01", "fim": "2026-11-30"}
     assert corpo["avisos"] == []
     assert corpo["sellers"] == [
-        {"id_user": "4", "nome": "Duda", "imagem_url": None, "numeros_captados": 2, "numeros_captados_hoje": 1, "meta": None},
-        {"id_user": "13", "nome": "Lucas", "imagem_url": "l.png", "numeros_captados": 0, "numeros_captados_hoje": 0, "meta": 66},
+        {"id_user": "4", "nome": "Duda", "imagem_url": None, "numeros_captados": 0, "numeros_captados_hoje": 0, "meta": None},
+        {"id_user": "13", "nome": "Lucas", "imagem_url": "l.png", "numeros_captados": 10, "numeros_captados_hoje": 6, "meta": 66},
     ]
 
 
@@ -611,13 +619,6 @@ def test_sdr_200_com_ranking_previsao_e_serie_do_evento(monkeypatch):
         return _fake_query(tabela, filtros, *a, **kw)
 
     monkeypatch.setattr(fontes_banco_mod, "query", query_pagina_sdr)
-    pedidos = []
-
-    def negocios_falso(inicio, fim, id_dash_por_dono):
-        pedidos.append((inicio, fim))
-        return {9: 40}
-
-    monkeypatch.setattr(rotas_funil_mod.sdr, "buscar_negocios_sdr", negocios_falso)
     monkeypatch.setattr(
         fontes_supabase_mod, "ler_metas_do_cargo", lambda cargo: [{"id_user": 9, "metrica": "inscricoes_realizadas", "valor_diario": 4}]
     )
@@ -633,12 +634,121 @@ def test_sdr_200_com_ranking_previsao_e_serie_do_evento(monkeypatch):
     assert sdr["pontuacao"] == 62
     assert sdr["posicao"] == 1
     assert len(sdr["serie_evento"]) == 10  # 20/11 a 01/12 sem os domingos 22 e 29
-    # 3 da planilha (metricas_funil_sdr); meta = 4 × 21 dias seg–sex de novembro (evento em 02/12).
-    assert sdr["ranking_mes"] == {"negocios": 40, "inscricoes": 3, "inscricoes_hoje": 0, "meta": 84}
+    # 3 da planilha (metricas_funil_sdr); meta = 4 × 8 dias seg–sex de 20/11 (1ª inscrição) a 01/12 (véspera do evento).
+    assert sdr["ranking_mes"] == {"inscricoes": 3, "inscricoes_hoje": 0, "meta": 32}
     assert corpo["mes_ranking"] == {"inicio": "2026-11-01", "fim": "2026-11-30"}
-    assert corpo["janela_meta"] == {"inicio": "2026-11-01", "fim": "2026-11-30"}
+    assert corpo["janela_meta"] == {"inicio": "2026-11-20", "fim": "2026-12-01"}
     assert corpo["inscritos_sed_mes"] == 0  # o fake do SED não devolve inscrição no período
-    assert pedidos == [(date(2026, 11, 1), date(2026, 11, 30))]
+
+
+def test_sdr_nao_consulta_o_pipedrive_e_ranking_nao_tem_negocios(monkeypatch):
+    from app.dominios.funil import rotas as rotas_funil_mod
+
+    client = _client(monkeypatch)
+    monkeypatch.setattr(rotas_funil_mod, "hoje_sp", lambda: date(2026, 11, 23))
+
+    def query_pagina_sdr(tabela, filtros=None, *a, **kw):
+        if tabela == "events":
+            return [{"id": "e1", "title": "Imersão", "event_date": "2026-12-02T16:00:00+00:00", "capacity": 60}]
+        if tabela == "registrations" and "order" in (filtros or {}):
+            return [{"created_at": "2026-11-20T15:00:00+00:00"}]
+        if tabela == "registrations":
+            return []
+        if tabela == "metricas_sdrs":
+            return [{"id_user": 9, "data": "2026-11-03", "key_data_ref_user": "x", "ligacoes_realizadas": 4}]
+        return _fake_query(tabela, filtros, *a, **kw)
+
+    monkeypatch.setattr(fontes_banco_mod, "query", query_pagina_sdr)
+
+    def pipedrive_nao_deveria_ser_chamado(*args, **kwargs):
+        raise AssertionError("Pipedrive não deveria ser chamado")
+
+    monkeypatch.setattr(fonte_pipedrive_mod, "negocios_criados_desde", pipedrive_nao_deveria_ser_chamado)
+    monkeypatch.setattr(
+        fontes_supabase_mod, "ler_metas_do_cargo", lambda cargo: [{"id_user": 9, "metrica": "inscricoes_realizadas", "valor_diario": 4}]
+    )
+    resposta = client.get("/sdr", params={"granularidade": "mes", "periodo": "2026-11"})
+    assert resposta.status_code == 200
+    corpo = resposta.json()
+    assert "negocios" not in corpo["sdrs"][0]["ranking_mes"]
+    assert "fonte_indisponivel:pipedrive" not in corpo["avisos"]
+
+
+def test_sdr_inscricoes_e_badge_do_ranking_somam_a_janela_da_meta(monkeypatch):
+    from app.dominios.funil import rotas as rotas_funil_mod
+
+    client = _client(monkeypatch)
+    monkeypatch.setattr(rotas_funil_mod, "hoje_sp", lambda: date(2026, 11, 23))
+
+    def query_pagina_sdr(tabela, filtros=None, *a, **kw):
+        if tabela == "events":
+            return [{"id": "e1", "title": "Imersão", "event_date": "2026-12-02T16:00:00+00:00", "capacity": 60}]
+        if tabela == "registrations" and "order" in (filtros or {}):
+            return [{"created_at": "2026-11-20T15:00:00+00:00"}]
+        if tabela == "registrations":
+            return []
+        return _fake_query(tabela, filtros, *a, **kw)
+
+    monkeypatch.setattr(fontes_banco_mod, "query", query_pagina_sdr)
+    monkeypatch.setattr(
+        fontes_supabase_mod, "ler_metas_do_cargo", lambda cargo: [{"id_user": 9, "metrica": "inscricoes_realizadas", "valor_diario": 4}]
+    )
+    zeros = {m: 0 for m in rotas_funil_mod.sdr.METRICAS}
+    intervalos = []
+
+    def metricas_falsas(inicio, fim):
+        intervalos.append((inicio, fim))
+        return [
+            {**zeros, "id_user": 9, "data": "2026-11-28", "inscricoes_realizadas": 5},
+            {**zeros, "id_user": 9, "data": "2026-12-01", "inscricoes_realizadas": 2},
+        ]
+
+    monkeypatch.setattr(rotas_funil_mod.sdr, "buscar_metricas_funil_sdr", metricas_falsas)
+    chamadas_sed = []
+
+    def inscritos_falsos(id_evento, inicio, fim):
+        chamadas_sed.append((id_evento, inicio, fim))
+        return 12
+
+    monkeypatch.setattr(rotas_funil_mod, "contar_inscritos_no_periodo", inscritos_falsos)
+    resposta = client.get("/sdr", params={"granularidade": "mes", "periodo": "2026-11"})
+    assert resposta.status_code == 200
+    corpo = resposta.json()
+    assert corpo["sdrs"][0]["ranking_mes"]["inscricoes"] == 7
+    assert corpo["inscritos_sed_mes"] == 12
+    assert chamadas_sed == [("e1", date(2026, 11, 20), date(2026, 12, 1))]
+    assert (date(2026, 11, 20), date(2026, 12, 1)) in intervalos
+
+
+def test_sdr_evento_sem_inscricao_meta_comeca_na_criacao_do_evento(monkeypatch):
+    from app.dominios.funil import rotas as rotas_funil_mod
+
+    client = _client(monkeypatch)
+    monkeypatch.setattr(rotas_funil_mod, "hoje_sp", lambda: date(2026, 11, 23))
+
+    def query_sem_inscricao(tabela, filtros=None, *a, **kw):
+        if tabela == "events":
+            return [
+                {
+                    "id": "e1",
+                    "title": "Imersão",
+                    "event_date": "2026-12-02T16:00:00+00:00",
+                    "capacity": 60,
+                    "created_at": "2026-11-10T14:00:00+00:00",
+                }
+            ]
+        if tabela == "registrations":
+            return []
+        return _fake_query(tabela, filtros, *a, **kw)
+
+    monkeypatch.setattr(fontes_banco_mod, "query", query_sem_inscricao)
+    monkeypatch.setattr(
+        fontes_supabase_mod, "ler_metas_do_cargo", lambda cargo: [{"id_user": 9, "metrica": "inscricoes_realizadas", "valor_diario": 4}]
+    )
+    resposta = client.get("/sdr", params={"granularidade": "mes", "periodo": "2026-11"})
+    assert resposta.status_code == 200
+    corpo = resposta.json()
+    assert corpo["janela_meta"] == {"inicio": "2026-11-10", "fim": "2026-12-01"}
 
 
 def test_sdr_evento_com_caractere_invalido_400(monkeypatch):
@@ -700,6 +810,7 @@ def test_funil_evento_sem_escolha_traz_a_proxima_imersao_com_o_retrato_de_agora(
         return _fake_query(tabela, filtros, *a, **kw)
 
     monkeypatch.setattr(funil_evento_mod, "buscar_pipedrive_evento", fake_pipedrive)
+    monkeypatch.setattr(funil_evento_mod, "buscar_almocos_pagos", lambda d: 0)
     monkeypatch.setattr(fontes_banco_mod, "query", query_imersao)
     resposta = client.get("/funil-evento", params={"granularidade": "mes", "periodo": "2026-11"})
     assert resposta.status_code == 200
@@ -708,13 +819,36 @@ def test_funil_evento_sem_escolha_traz_a_proxima_imersao_com_o_retrato_de_agora(
     assert corpo["avisos"] == []
     assert corpo["evento"] == {
         "id": "i2", "titulo": "Imersão Alta Cadência", "data": "2026-12-02T16:00:00+00:00",
-        "total": 6, "aprovados": 3, "pendentes": 2, "rejeitados": 1,
+        "total": 6, "aprovados": 3, "pendentes": 2, "rejeitados": 1, "almocos_pagos": 0,
     }
     assert corpo["funil"] == {
         "inscritos": 5, "onboarding_agendado": 4, "onboarding_realizado": 3, "comparecimento": 2, "vendas": 1,
     }
     assert chamadas_pipedrive == [date(2026, 12, 2)]
     assert filtros_eventos[0]["title"] == "ilike.*imers*"
+
+
+def test_funil_evento_mostra_os_almocos_pagos_da_imersao(monkeypatch):
+    client = _client(monkeypatch)
+    datas: list[date] = []
+
+    def query_imersao(tabela, filtros=None, *a, **kw):
+        if tabela == "events":
+            return [{"id": "i2", "title": "Imersão Alta Cadência", "event_date": "2026-12-02T16:00:00+00:00", "capacity": 60}]
+        if tabela == "registrations":
+            return []
+        return _fake_query(tabela, filtros, *a, **kw)
+
+    def almocos_falso(data_evento):
+        datas.append(data_evento)
+        return 7
+
+    monkeypatch.setattr(funil_evento_mod, "buscar_pipedrive_evento", lambda _d: dict(funil_evento_mod.ZERADO))
+    monkeypatch.setattr(funil_evento_mod, "buscar_almocos_pagos", almocos_falso)
+    monkeypatch.setattr(fontes_banco_mod, "query", query_imersao)
+    corpo = client.get("/funil-evento", params={"granularidade": "mes", "periodo": "2026-11"}).json()
+    assert corpo["evento"]["almocos_pagos"] == 7
+    assert datas == [date(2026, 12, 2)]
 
 
 def test_funil_evento_inscritos_vem_da_coluna_3_do_pipedrive_e_nao_do_sed(monkeypatch):
