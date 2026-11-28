@@ -329,7 +329,7 @@ def test_funil_sem_seller_ligado_nao_tem_meta(monkeypatch):
     assert corpo["meta_numeros_captados"] is None
 
 
-def test_seller_200_com_numeros_captados_do_mes_de_hoje_e_meta_por_seller(monkeypatch):
+def test_seller_200_com_numeros_captados_do_banco_e_meta_por_seller(monkeypatch):
     from app.dominios.funil import rotas as funil_rotas_mod
 
     monkeypatch.setattr(
@@ -344,32 +344,40 @@ def test_seller_200_com_numeros_captados_do_mes_de_hoje_e_meta_por_seller(monkey
         f"{__name__}._USER_CARGOS",
         [*_USER_CARGOS, {"id_user": 4, "cargo": "seller"}, {"id_user": 13, "cargo": "seller"}],
     )
-    monkeypatch.setattr(f"{__name__}._CONTAS", [{"id": 1, "nome": "Jacob", "id_seller": 4}])
     cliente = _client(monkeypatch)
     monkeypatch.setattr(
         fontes_supabase_mod,
         "ler_metas",
         lambda: [{"id_user": 13, "cargo": "seller", "metrica": "numeros_captados", "valor_diario": 3}],
     )
+    chamadas = []
+
+    def ler_metricas(cargo, ids, inicio, fim):
+        chamadas.append((cargo, sorted(ids), inicio, fim))
+        return [
+            {"data": "2026-11-02", "id_user": 13, "metrica": "numeros_captados", "valor": 6},
+            {"data": "2026-11-01", "id_user": 13, "metrica": "numeros_captados", "valor": 4},
+            {"data": "2026-11-02", "id_user": 4, "metrica": "fups", "valor": 50},
+        ]
+
+    monkeypatch.setattr(fontes_supabase_mod, "ler_metricas_do_cargo", ler_metricas)
     monkeypatch.setattr(funil_rotas_mod, "hoje_sp", lambda: date(2026, 11, 2))
+    # O Pipedrive não entra mais na página Seller: mesmo com fato de números captados, nada muda.
     monkeypatch.setattr(
         funil_pipedrive_mod,
         "buscar_pipedrive",
-        lambda inicio, fim: DadosPipedrive(
-            [Fato("numeros_captados", "linkedin", 1, 501, "2026-11-02"), Fato("numeros_captados", "instagram", 1, 502, "2026-11-03")],
-            {501: (55,)},
-        ),
+        lambda inicio, fim: DadosPipedrive([Fato("numeros_captados", "instagram", 1, 502, "2026-11-02")], {}),
     )
-    monkeypatch.setenv("PIPE_ID_ETIQUETA_PESSOA_LINKEDIN_JACOB", "55")
 
     resposta = cliente.get("/seller", params={"granularidade": "mes", "periodo": "2026-11"})
     assert resposta.status_code == 200
     corpo = resposta.json()
+    assert chamadas == [("seller", [4, 13], date(2026, 11, 1), date(2026, 11, 30))]
     assert corpo["periodo"] == {"granularidade": "mes", "inicio": "2026-11-01", "fim": "2026-11-30"}
     assert corpo["avisos"] == []
     assert corpo["sellers"] == [
-        {"id_user": "4", "nome": "Duda", "imagem_url": None, "numeros_captados": 2, "numeros_captados_hoje": 1, "meta": None},
-        {"id_user": "13", "nome": "Lucas", "imagem_url": "l.png", "numeros_captados": 0, "numeros_captados_hoje": 0, "meta": 66},
+        {"id_user": "4", "nome": "Duda", "imagem_url": None, "numeros_captados": 0, "numeros_captados_hoje": 0, "meta": None},
+        {"id_user": "13", "nome": "Lucas", "imagem_url": "l.png", "numeros_captados": 10, "numeros_captados_hoje": 6, "meta": 66},
     ]
 
 

@@ -20,6 +20,7 @@ from app.dominios.geral.banco import (
     listar_proximos_eventos,
 )
 from app.dominios.pessoas.banco import listar_ativas
+from app.fontes import supabase
 from app.fontes.banco import em_paralelo, iniciar_registro_de_falhas, tabelas_com_falha
 from app.metas import buscar_metas
 from app.periodo import TZ_SP, hoje_sp, resolver_periodo
@@ -361,8 +362,7 @@ def get_pagina_seller(
 ) -> dict:
     iniciar_registro_de_falhas()
     p = _resolver_periodo_ou_400(granularidade, periodo)
-    (linkedin, instagram), pessoas, metas = em_paralelo(
-        lambda: em_paralelo(lambda: _contas_do_canal("linkedin", p), lambda: _contas_do_canal("instagram", p)),
+    pessoas, metas = em_paralelo(
         lambda: obter_ou_calcular("pessoas:ativas", settings.cache_ttl_pessoas_segundos, listar_ativas),
         lambda: obter_ou_calcular("metas", settings.cache_ttl_metricas_segundos, buscar_metas),
     )
@@ -370,8 +370,11 @@ def get_pagina_seller(
         ({"id": int(x.id), "nome": x.nome, "imagem_url": x.imagem_url} for x in pessoas if x.cargo == "seller"),
         key=lambda s: s["id"],
     )
+    # Números captados vêm do banco (metricas_sellers, preenchida da aba do seller na planilha), não do Pipedrive.
+    ids = [s["id"] for s in sellers]
+    linhas = supabase.ler_metricas_do_cargo("seller", ids, p.inicio, p.fim) if ids else []
     return {
-        **seller.montar_resposta_pagina_seller(p, sellers, {"linkedin": linkedin, "instagram": instagram}, metas, hoje_sp()),
+        **seller.montar_resposta_pagina_seller(p, sellers, linhas, metas, hoje_sp()),
         "avisos": [f"fonte_indisponivel:{t}" for t in tabelas_com_falha()],
     }
 
